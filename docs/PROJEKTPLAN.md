@@ -1,0 +1,75 @@
+# Föreningsbokföring – projektplan
+
+Ett enkelt bokföringsverktyg för en liten ideell förening (capoeira, ca 15 medlemmar).
+Först för vår egen förening; i andra hand ska andra små föreningar kunna använda det.
+
+## Mål
+
+1. Läsa in digitala fakturor och kvitton (PDF/bild) och få ett förslag på kontering som jag godkänner.
+2. Stämma av bokföringen mot bankens kontoutdrag (CSV/Excel-export).
+3. Ta fram resultaträkning, balansräkning, huvudbok och verifikationslista när som helst.
+4. Göra årsbokslut, föra över resultatet till eget kapital och öppna nytt år med rätt ingående balanser.
+5. Ta fram underlag till årsmötet: ekonomisk berättelse, RR/BR med jämförelse mot förra året, och budget mot utfall.
+6. Ha all historik sedan 2012 i samma system, år för år.
+
+## Hur det ska fungera
+
+- **Webbapp i en enda HTML-fil**, samma upplägg som Ledger. Fungerar i webbläsare och mobil utan server.
+- **Data i föreningens OneDrive** via Microsoft Graph. Bokföring, kontoplan och regler sparas som JSON och verifikationsfilerna (PDF:erna) i en mappstruktur per år. Inget av detta hamnar på GitHub.
+- **Claude läser underlagen.** Datum, motpart, belopp, moms och förslag på konto plockas ut. Jag godkänner eller rättar alltid. Varje godkännande sparas som en regel ("Stockholms stad, lokalhyra → 5010"). Återkommande underlag konteras då utan AI, så Claude behövs mest första gången.
+- **Dubbel bokföring med BAS-kontoplanen**, i en förenklad version för ideella föreningar och utgående från de konton vi faktiskt har använt sedan 2012.
+- **SIE4-export och -import.** Revisorn eller en framtida kassör kan då öppna bokföringen i vilket svenskt bokföringsprogram som helst, och vi blir inte inlåsta.
+
+### Mappar i OneDrive (förslag)
+
+```
+Föreningsbokföring/
+  installningar.json        kontoplan, regler, föreningsuppgifter
+  2025/
+    bokforing.json          verifikationer, ingående balanser, låst/öppet
+    underlag/V001.pdf …     ett underlag per verifikation
+    bank/2025-kontoutdrag.csv
+    rapporter/              PDF:er till årsmötet
+  2024/ …
+```
+
+### Regler att bygga in
+
+Lagen kräver troligen inte formellt att vi bokför, eftersom en ideell förening blir bokföringsskyldig först vid tillgångar över 1,5 miljoner kr eller vid näringsverksamhet. Stadgar, revisorer och bidragsgivare kräver ändå ordnad redovisning, så verktyget följer bokföringslagens grunder:
+
+- numrerade verifikationer med underlag
+- grundbok (i datumordning) och huvudbok (per konto)
+- inga raderingar efter att en period är låst; fel rättas med en rättelseverifikation
+- arkivering i 7 år
+- förenklat årsbokslut i stil med K1 för ideella föreningar
+
+## Faser
+
+| Fas | Innehåll | Klart när |
+|---|---|---|
+| **0. Uppstart** | Repo, åtkomst till OneDrive-mappen, den här planen | Jag kan läsa Excel-filerna och några fakturor |
+| **1. Analys av historiken** | Gå igenom Excel 2012–idag och fakturorna: använda konton, typer av händelser, volym per år, egna lösningar och avvikelser | En behovsrapport och en kontoplan som vi enats om |
+| **2. Kärnan** | Datamodell, verifikationer, kontoplan, IB/UB, låsning av perioder, rapportberäkningar, automatiska tester | Testerna går igenom och RR/BR stämmer på testdata |
+| **3. Historikimport** | Föra över varje år från Excel till verifikationer och koppla underlagen | UB per år stämmer exakt mot Excel för alla år |
+| **4. Inläsning av underlag** | Släpp in PDF/bild, Claude föreslår, jag godkänner, regler lärs in | Ett nytt kvitto bokförs med två klick |
+| **5. Bankavstämning** | Import av bankens CSV, matchning mot verifikationer, lista över omatchade rader | Bankkontot stämmer mot banken månad för månad |
+| **6. Bokslut och årsmöte** | Årsbokslut, resultatdisposition, nytt år, PDF-rapporter, budget | Årsmöteshandlingarna för 2026 kommer ur verktyget |
+| **7. Delning** | Installationsguide och första-gången-flöde för andra föreningar, inga hårdkodade uppgifter | En annan förening kan komma igång själv |
+
+Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faserna 0–6 till början av 2027.
+
+## Integritet
+
+- Koden kan vara publik. Bokföringsdata, medlemsnamn och underlag ligger bara i OneDrive.
+- Analysen i fas 1 görs direkt på din dator. Filerna kopieras inte till GitHub.
+- Claude-anropen går från din webbläsare med föreningens egen API-nyckel. Underlagen skickas bara när du själv läser in dem.
+
+## Öppna frågor
+
+- Är räkenskapsåret samma som kalenderåret?
+- Hur kommer intäkterna in: medlemsavgifter, träningsavgifter, Swish, bidrag (t.ex. aktivitetsstöd från Stockholms stad)?
+- Är föreningen momsregistrerad? Troligen inte.
+- Vilken bank använder ni, och hur ser exportfilen ut?
+- Ska revisorerna och styrelsen kunna läsa rapporterna direkt, till exempel via en delad OneDrive-mapp?
+- Azure-appregistreringen: ska vi återanvända den från Ledger eller skapa en ny för föreningen?
+- Har föreningen en budget som ska följas upp i verktyget?

@@ -1,0 +1,14 @@
+# Skydd mot att riktig föreningsdata hamnar i det publika repot
+data/
+privat/
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.pdf
+*.se
+*.si
+*.sie
+!testdata/**
+.DS_Store
+node_modules/
