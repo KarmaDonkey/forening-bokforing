@@ -91,6 +91,12 @@
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
   @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
   .detalj td { background: var(--surface-2); }
+  .dropzon { border: 2px dashed var(--ink-faint); text-align: center; }
+  .dropzon .row { justify-content: center; }
+  .bankrad .belopp { font-family: "IBM Plex Mono", monospace; font-weight: 500; white-space: nowrap; }
+  .knapp-tag { background: none; cursor: pointer; font: inherit; font-size: 11px; }
+  .tag.ok { color: var(--good); border-color: var(--good); }
+  .logg { margin: 8px 0; padding-left: 18px; font-size: 14px; }
   @media print {
     header .row, nav, .ej-utskrift { display: none !important; }
     body { background: #fff; color: #000; }
@@ -310,7 +316,10 @@
     var ib = rensaNollor(Object.assign({}, opt.ingaendeBalans || {}));
     var fel = kontrolleraIngaendeBalans(kontoplan, ib);
     if (fel.length) throw BokforingsFel(fel);
-    return { format: FORMAT, start: start, slut: slut, kontoplan: kontoplan, ingaendeBalans: ib, verifikationer: [], lastTom: null };
+    return {
+      format: FORMAT, start: start, slut: slut, kontoplan: kontoplan, ingaendeBalans: ib, verifikationer: [], lastTom: null,
+      bankrader: [], underlag: (opt.underlag || []).map(function (u) { return Object.assign({}, u); })
+    };
   }
 
   // ---------- Verifikationer ----------
@@ -388,7 +397,12 @@
     if (!v) throw BokforingsFel('Verifikation ' + nr + ' finns inte.');
     if (v.rattar != null) throw BokforingsFel('Verifikation ' + nr + ' är själv en rättelse. Bokför en ny verifikation i stället.');
     if (rattadAv(ar, nr)) throw BokforingsFel('Verifikation ' + nr + ' är redan rättad.');
-    return bokfor(ar, {
+    // Bankrader och underlag släpps så att de kan bokföras på nytt.
+    var slappt = Object.assign({}, ar, {
+      bankrader: (ar.bankrader || []).map(function (r) { return r.verifikation === nr ? Object.assign({}, r, { verifikation: null }) : r; }),
+      underlag: (ar.underlag || []).map(function (u) { return u.verifikation === nr ? Object.assign({}, u, { verifikation: null, arkivnamn: undefined }) : u; })
+    });
+    return bokfor(slappt, {
       datum: opt.datum,
       text: opt.text || ('Rättelse av verifikation ' + nr + ': ' + v.text),
       rader: v.rader.map(function (r) { return { konto: r.konto, belopp: -r.belopp }; }),
@@ -396,6 +410,22 @@
       registrerad: opt.registrerad,
       rattar: nr
     });
+  }
+
+  // Ändrar ett kontos ingående balans; skillnaden förs mot eget kapital (2067) så att balansen går ihop.
+  function sattIngaendeSaldo(ar, konto, belopp, motkonto) {
+    motkonto = motkonto || '2067';
+    if (ar.lastTom) throw BokforingsFel('Året är låst. Ingående balans kan inte ändras.');
+    if (!giltigtKontonummer(konto) || !arBalanskonto(konto) || !arHeltal(belopp)) throw BokforingsFel('Ogiltigt konto eller belopp.');
+    if (!ar.kontoplan.some(function (k) { return k.nr === motkonto; })) throw BokforingsFel('Konto ' + motkonto + ' finns inte i kontoplanen.');
+    var ib = Object.assign({}, ar.ingaendeBalans);
+    var diff = belopp - (ib[konto] || 0);
+    ib[konto] = belopp;
+    ib[motkonto] = (ib[motkonto] || 0) - diff;
+    ib = rensaNollor(ib);
+    var fel = kontrolleraIngaendeBalans(ar.kontoplan, ib);
+    if (fel.length) throw BokforingsFel(fel);
+    return Object.assign({}, ar, { ingaendeBalans: ib });
   }
 
   function lasPeriod(ar, tom) {
@@ -569,7 +599,9 @@
       start: start,
       slut: laggTillDagar(laggTillAr(start, 1), -1),
       kontoplan: ar.kontoplan,
-      ingaendeBalans: ib
+      ingaendeBalans: ib,
+      // Obetalda fakturor och outlösta kvitton följer med till nästa år.
+      underlag: oppnaUnderlag(ar)
     });
   }
 
@@ -628,6 +660,12 @@
         }
       }
     }
+    var obokforda = oppnaBankrader(ar).length;
+    if (obokforda) varningar.push({ typ: 'obokfordaBankrader', meddelande: obokforda + ' banktransaktioner är inte bokförda.' });
+    var avst = bankavstamning(ar);
+    if (avst && !avst.obokforda && avst.skillnad !== 0) {
+      varningar.push({ typ: 'bankdifferens', meddelande: 'Bokfört saldo på ' + avst.konto + ' den ' + avst.datum + ' är ' + formatBelopp(avst.bokfortSaldo) + ' kr men banken säger ' + formatBelopp(avst.bankSaldo) + ' kr.' });
+    }
     return varningar;
   }
 
@@ -679,6 +717,483 @@
     return ut;
   }
 
+  // ---------- Bankfiler (CSV, tabbseparerat, inklistrat från Excel) ----------
+
+  function tolkaDatum(s) {
+    s = String(s == null ? '' : s).trim();
+    var m;
+    if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})/))) s = m[1] + '-' + m[2] + '-' + m[3];
+    else if ((m = s.match(/^(\d{4})(\d{2})(\d{2})$/))) s = m[1] + '-' + m[2] + '-' + m[3];
+    else if ((m = s.match(/^(\d{2})-(\d{2})-(\d{2})$/))) s = '20' + m[1] + '-' + m[2] + '-' + m[3];
+    else if ((m = s.match(/^(\d{4})\/(\d{2})\/(\d{2})$/))) s = m[1] + '-' + m[2] + '-' + m[3];
+    else return null;
+    return arGiltigtDatum(s) ? s : null;
+  }
+
+  // Tål både "1 200,50", "-1200.50", "1.200,50" och "1,200.50".
+  function tolkaBankbelopp(s) {
+    var t = String(s == null ? '' : s).trim().replace(/[\s  ]/g, '').replace(/(kr|sek)$/i, '');
+    if (!t) return null;
+    var punkt = t.lastIndexOf('.'), komma = t.lastIndexOf(',');
+    if (punkt >= 0 && komma >= 0) t = komma > punkt ? t.replace(/\./g, '') : t.replace(/,/g, '');
+    try { return parseBelopp(t); } catch (e) { return null; }
+  }
+
+  function delaCsv(text, sep) {
+    var rader = [], rad = [], cell = '', iCitat = false;
+    text = String(text).replace(/^﻿/, '');
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      if (iCitat) {
+        if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else iCitat = false; }
+        else cell += c;
+      } else if (c === '"' && cell.trim() === '') { iCitat = true; cell = ''; }
+      else if (c === sep) { rad.push(cell); cell = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i + 1] === '\n') i++;
+        rad.push(cell); rader.push(rad); rad = []; cell = '';
+      } else cell += c;
+    }
+    if (cell !== '' || rad.length) { rad.push(cell); rader.push(rad); }
+    return rader.filter(function (r) { return r.some(function (c) { return c.trim() !== ''; }); });
+  }
+
+  function gissaSeparator(text) {
+    var antal = { '\t': 0, ';': 0, ',': 0 };
+    String(text).split(/\r?\n/).slice(0, 15).forEach(function (l) {
+      Object.keys(antal).forEach(function (k) { antal[k] = Math.max(antal[k], l.split(k).length - 1); });
+    });
+    if (antal['\t'] > 0) return '\t';
+    return antal[';'] >= antal[','] && antal[';'] > 0 ? ';' : ',';
+  }
+
+  function rubrikNyckel(s) {
+    return String(s).toLowerCase().replace(/[åä]/g, 'a').replace(/ö/g, 'o').replace(/é/g, 'e').replace(/[^a-z]/g, '');
+  }
+
+  var BANKKOLUMNER = {
+    datum: ['bokforingsdag', 'bokforingsdatum', 'bokfdag', 'bokfdatum', 'bokfort', 'datum', 'transaktionsdag', 'transaktionsdatum', 'valutadag', 'date'],
+    text: ['beskrivning', 'text', 'transaktion', 'transaktionstext', 'rubrik', 'specifikation', 'mottagare', 'description'],
+    referens: ['referens', 'meddelande', 'ref', 'reference'],
+    belopp: ['belopp', 'beloppsek', 'beloppkr', 'summa', 'amount'],
+    insattning: ['insattning', 'insattningar'],
+    uttag: ['uttag'],
+    saldo: ['bokfortsaldo', 'saldo', 'saldosek', 'behallning', 'balans', 'balance']
+  };
+
+  function hittaKolumner(rad) {
+    var nycklar = rad.map(rubrikNyckel);
+    var k = {};
+    Object.keys(BANKKOLUMNER).forEach(function (falt) {
+      for (var i = 0; i < BANKKOLUMNER[falt].length; i++) {
+        var idx = nycklar.indexOf(BANKKOLUMNER[falt][i]);
+        if (idx >= 0 && !Object.keys(k).some(function (f) { return k[f] === idx; })) { k[falt] = idx; return; }
+      }
+    });
+    if (k.datum == null || (k.belopp == null && k.insattning == null && k.uttag == null)) return null;
+    return k;
+  }
+
+  // Rad utan rubriker: datum först, de två sista talen är belopp och saldo.
+  function tolkaRadUtanRubrik(celler) {
+    var datum = null, tal = [], text = [];
+    celler.forEach(function (c) {
+      var d = datum ? null : tolkaDatum(c);
+      if (d) { datum = d; return; }
+      if (tolkaDatum(c)) return;
+      var b = /\d/.test(c) && !/[a-zåäö]/i.test(c.replace(/(kr|sek)$/i, '')) ? tolkaBankbelopp(c) : null;
+      if (b != null) tal.push(b);
+      else if (c.trim()) text.push(c.trim());
+    });
+    if (!datum || !tal.length) return null;
+    return {
+      datum: datum, text: text.join(' '), referens: '',
+      belopp: tal.length >= 2 ? tal[tal.length - 2] : tal[0],
+      saldo: tal.length >= 2 ? tal[tal.length - 1] : null
+    };
+  }
+
+  function parseBankfil(text) {
+    var celler = delaCsv(text, gissaSeparator(text));
+    var varningar = [];
+    var rader = [];
+    var k = null, start = 0;
+    for (var i = 0; i < Math.min(celler.length, 15); i++) {
+      k = hittaKolumner(celler[i]);
+      if (k) { start = i + 1; break; }
+    }
+    celler.slice(k ? start : 0).forEach(function (c, j) {
+      var radnr = (k ? start : 0) + j + 1;
+      var r;
+      if (k) {
+        var datum = tolkaDatum(c[k.datum]);
+        var belopp = k.belopp != null ? tolkaBankbelopp(c[k.belopp]) : (tolkaBankbelopp(c[k.insattning]) || 0) - Math.abs(tolkaBankbelopp(c[k.uttag]) || 0);
+        if (!datum || belopp == null) { varningar.push('Rad ' + radnr + ' kunde inte tolkas och hoppades över.'); return; }
+        var t = k.text != null ? String(c[k.text] || '').trim() : '';
+        var ref = k.referens != null ? String(c[k.referens] || '').trim() : '';
+        r = { datum: datum, text: t || ref, referens: t ? ref : '', belopp: belopp, saldo: k.saldo != null ? tolkaBankbelopp(c[k.saldo]) : null };
+      } else {
+        r = tolkaRadUtanRubrik(c);
+        if (!r) { varningar.push('Rad ' + radnr + ' kunde inte tolkas och hoppades över.'); return; }
+      }
+      if (r.belopp === 0) return;
+      rader.push(r);
+    });
+    // Banker listar ofta nyast först; vänd så att listan går framåt i tiden.
+    if (rader.length > 1 && rader[0].datum > rader[rader.length - 1].datum) rader.reverse();
+    return { rader: rader, varningar: varningar.concat(kontrolleraSaldon(rader)) };
+  }
+
+  function kontrolleraSaldon(rader) {
+    var v = [];
+    for (var i = 1; i < rader.length; i++) {
+      var a = rader[i - 1], b = rader[i];
+      if (a.saldo == null || b.saldo == null) continue;
+      if (a.saldo + b.belopp !== b.saldo) {
+        v.push('Saldot stämmer inte ' + b.datum + ' (' + b.text + '): ' + formatBelopp(a.saldo) + ' + ' + formatBelopp(b.belopp) + ' ≠ ' + formatBelopp(b.saldo) + '.');
+      }
+    }
+    return v;
+  }
+
+  function normaliseraText(t) {
+    return String(t || '').toLowerCase().replace(/[0-9]+/g, ' ').replace(/[^a-zåäöéü]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function bankradId(r, n) {
+    return [r.datum, r.belopp, r.saldo == null ? '' : r.saldo, normaliseraText(r.text), r.referens || ''].join('|') + (n ? '#' + n : '');
+  }
+
+  // Lägger till bankrader i året. Rader som redan finns (samma fil inläst igen) hoppas över.
+  function importeraBankrader(ar, rader, opt) {
+    var konto = (opt && opt.konto) || '1930';
+    if (!ar.kontoplan.some(function (k) { return k.nr === konto; })) throw BokforingsFel('Bankkontot ' + konto + ' finns inte i kontoplanen.');
+    var befintliga = {};
+    (ar.bankrader || []).forEach(function (r) { befintliga[r.id] = true; });
+    var sedda = {};
+    var nya = [], dubbletter = 0, utanfor = 0;
+    rader.forEach(function (r) {
+      if (r.datum < ar.start || r.datum > ar.slut) { utanfor++; return; }
+      var bas = bankradId(r);
+      sedda[bas] = (sedda[bas] || 0) + 1;
+      var id = bankradId(r, sedda[bas] - 1);
+      if (befintliga[id]) { dubbletter++; return; }
+      nya.push({ id: id, datum: r.datum, text: r.text || '', referens: r.referens || '', belopp: r.belopp, saldo: r.saldo == null ? null : r.saldo, konto: konto, verifikation: null });
+    });
+    var alla = (ar.bankrader || []).concat(nya).map(function (r, i) { return { r: r, i: i }; });
+    alla.sort(function (a, b) { return a.r.datum < b.r.datum ? -1 : a.r.datum > b.r.datum ? 1 : a.i - b.i; });
+    return { ar: Object.assign({}, ar, { bankrader: alla.map(function (x) { return x.r; }) }), nya: nya.length, dubbletter: dubbletter, utanfor: utanfor };
+  }
+
+  function oppnaBankrader(ar) {
+    return (ar.bankrader || []).filter(function (r) { return r.verifikation == null; });
+  }
+
+  // Jämför bankens senaste saldo med bokfört saldo samma dag.
+  function bankavstamning(ar, konto) {
+    konto = konto || '1930';
+    var rader = (ar.bankrader || []).filter(function (r) { return r.konto === konto && r.saldo != null; });
+    if (!rader.length) return null;
+    var sista = rader[rader.length - 1];
+    var forsta = rader[0];
+    var bokfort = saldon(ar, { tom: sista.datum })[konto] || 0;
+    return {
+      konto: konto, datum: sista.datum, bankSaldo: sista.saldo, bokfortSaldo: bokfort, skillnad: bokfort - sista.saldo,
+      // Saldot före årets första banktransaktion, om den första raden i året har saldo.
+      ingaendeEnligtBank: forsta === (ar.bankrader || []).filter(function (r) { return r.konto === konto; })[0] ? forsta.saldo - forsta.belopp : null,
+      ingaendeBokfort: ar.ingaendeBalans[konto] || 0,
+      obokforda: oppnaBankrader(ar).filter(function (r) { return r.konto === konto && r.datum <= sista.datum; }).length
+    };
+  }
+
+  // ---------- Regler: banktext -> konto ----------
+
+  function riktningFor(belopp) { return belopp < 0 ? 'ut' : 'in'; }
+
+  function hittaRegel(regler, text, belopp) {
+    var n = ' ' + normaliseraText(text) + ' ';
+    var riktning = riktningFor(belopp);
+    var basta = null;
+    (regler || []).forEach(function (r) {
+      if (r.riktning && r.riktning !== riktning) return;
+      if (n.indexOf(' ' + r.monster + ' ') >= 0 && (!basta || r.monster.length > basta.monster.length)) basta = r;
+    });
+    return basta;
+  }
+
+  function larRegel(regler, text, belopp, konto) {
+    var monster = normaliseraText(text);
+    regler = (regler || []).slice();
+    if (!monster || !giltigtKontonummer(konto)) return regler;
+    var riktning = riktningFor(belopp);
+    var i = regler.findIndex(function (r) { return r.monster === monster && r.riktning === riktning; });
+    if (i >= 0) regler[i] = { monster: monster, riktning: riktning, konto: konto };
+    else regler.push({ monster: monster, riktning: riktning, konto: konto });
+    return regler;
+  }
+
+  // ---------- Underlag (tolkade fakturor och kvitton) ----------
+
+  // Underlag: { id, filnamn, dokumenttyp, motpart, datum, forfallodatum, belopp (ören, positivt),
+  //   riktning ('utgift' | 'intakt'), beskrivning, fakturanummer, ocr, foreslagetKonto, verifikation, arkivnamn }
+  function laggTillUnderlag(ar, u) {
+    if (!u || !u.id) throw BokforingsFel('Underlaget saknar id.');
+    if ((ar.underlag || []).some(function (x) { return x.id === u.id; })) throw BokforingsFel('Underlaget finns redan.');
+    var nytt = Object.assign({ verifikation: null }, u);
+    return Object.assign({}, ar, { underlag: (ar.underlag || []).concat([nytt]) });
+  }
+
+  function andraUnderlag(ar, id, andring) {
+    return Object.assign({}, ar, {
+      underlag: (ar.underlag || []).map(function (u) { return u.id === id ? Object.assign({}, u, andring) : u; })
+    });
+  }
+
+  function taBortUnderlag(ar, id) {
+    var u = (ar.underlag || []).find(function (x) { return x.id === id; });
+    if (!u) throw BokforingsFel('Underlaget finns inte.');
+    if (u.verifikation != null) throw BokforingsFel('Underlaget hör till verifikation ' + u.verifikation + ' och kan inte tas bort.');
+    return Object.assign({}, ar, { underlag: ar.underlag.filter(function (x) { return x.id !== id; }) });
+  }
+
+  function arBetalbartUnderlag(u) { return u.dokumenttyp !== 'kontoutdrag' && u.belopp > 0; }
+
+  function oppnaUnderlag(ar) {
+    return (ar.underlag || []).filter(function (u) { return u.verifikation == null && arBetalbartUnderlag(u); });
+  }
+
+  function bankbelopp(u) { return u.riktning === 'intakt' ? u.belopp : -u.belopp; }
+
+  function dagarMellan(a, b) { return Math.round((new Date(b) - new Date(a)) / 86400000); }
+
+  function inomFonster(u, bankrad) {
+    var fran = u.datum || u.forfallodatum;
+    if (!fran) return true;
+    var till = u.forfallodatum && u.forfallodatum > fran ? u.forfallodatum : fran;
+    return bankrad.datum >= laggTillDagar(fran, -7) && bankrad.datum <= laggTillDagar(till, 60);
+  }
+
+  function matchpoang(u, bankrad) {
+    var p = 0;
+    var bt = (bankrad.text + ' ' + bankrad.referens).replace(/\s/g, '');
+    if (u.ocr && bt.indexOf(String(u.ocr).replace(/\s/g, '')) >= 0) p += 1000;
+    if (u.fakturanummer && String(u.fakturanummer).length >= 4 && bt.indexOf(String(u.fakturanummer).replace(/\s/g, '')) >= 0) p += 500;
+    var mal = u.forfallodatum || u.datum;
+    if (mal) p -= Math.abs(dagarMellan(mal, bankrad.datum));
+    return p;
+  }
+
+  // Returnerar id:n för de underlag som bäst förklarar en bankrad: ett med exakt belopp,
+  // annars upp till fyra som tillsammans blir exakt beloppet (t.ex. en utläggsredovisning).
+  function matchaUnderlag(ar, bankrad) {
+    var kandidater = oppnaUnderlag(ar).filter(function (u) {
+      return inomFonster(u, bankrad) && (bankbelopp(u) < 0) === (bankrad.belopp < 0);
+    });
+    var exakta = kandidater.filter(function (u) { return bankbelopp(u) === bankrad.belopp; })
+      .sort(function (a, b) { return matchpoang(b, bankrad) - matchpoang(a, bankrad); });
+    if (exakta.length) return [exakta[0].id];
+    var narmast = kandidater.filter(function (u) { return Math.abs(u.belopp) < Math.abs(bankrad.belopp); })
+      .sort(function (a, b) { return matchpoang(b, bankrad) - matchpoang(a, bankrad); }).slice(0, 12);
+    for (var storlek = 2; storlek <= 4; storlek++) {
+      var hit = sokKombination(narmast, storlek, bankrad.belopp);
+      if (hit) return hit.map(function (u) { return u.id; });
+    }
+    return [];
+  }
+
+  function sokKombination(lista, storlek, mal) {
+    var val = [];
+    function steg(fran, summa) {
+      if (val.length === storlek) return summa === mal ? val.slice() : null;
+      for (var i = fran; i < lista.length; i++) {
+        val.push(lista[i]);
+        var r = steg(i + 1, summa + bankbelopp(lista[i]));
+        if (r) return r;
+        val.pop();
+      }
+      return null;
+    }
+    return steg(0, 0);
+  }
+
+  function slaIhopRader(rader) {
+    var ut = [];
+    rader.forEach(function (r) {
+      var f = ut.find(function (x) { return x.konto === r.konto && r.konto; });
+      if (f) f.belopp += r.belopp; else ut.push({ konto: r.konto, belopp: r.belopp });
+    });
+    return ut.filter(function (r) { return r.belopp !== 0; });
+  }
+
+  // Ett förslag på verifikation för en bankrad, från underlag eller inlärda regler.
+  function forslagForBankrad(ar, bankrad, regler, opt) {
+    var ids = opt && opt.underlagIds ? opt.underlagIds : matchaUnderlag(ar, bankrad);
+    var us = ids.map(function (id) { return (ar.underlag || []).find(function (u) { return u.id === id; }); }).filter(Boolean);
+    var regel = hittaRegel(regler, bankrad.text + ' ' + bankrad.referens, bankrad.belopp);
+    var regelKonto = regel ? regel.konto : '';
+    var giltigt = function (nr) { return nr && ar.kontoplan.some(function (k) { return k.nr === nr; }) ? nr : ''; };
+    var rader = [{ konto: bankrad.konto, belopp: bankrad.belopp }];
+    var text, kalla, kommentar = '';
+    var summaUnderlag = us.reduce(function (s, u) { return s + bankbelopp(u); }, 0);
+    if (us.length && summaUnderlag === bankrad.belopp) {
+      us.forEach(function (u) { rader.push({ konto: giltigt(u.foreslagetKonto) || giltigt(regelKonto), belopp: -bankbelopp(u) }); });
+      text = us.length === 1
+        ? [us[0].motpart, us[0].beskrivning].filter(Boolean).join(': ')
+        : bankrad.text + ' (' + us.length + ' underlag)';
+      kalla = 'underlag';
+    } else {
+      us = [];
+      rader.push({ konto: giltigt(regelKonto), belopp: -bankrad.belopp });
+      text = bankrad.text || bankrad.referens;
+      kalla = regel ? 'regel' : null;
+      if (bankrad.belopp > 0 || regelKonto === '6570') kommentar = 'Bankutdrag';
+    }
+    var forsta = rader[0];
+    rader = [forsta].concat(slaIhopRader(rader.slice(1)));
+    return {
+      bankradId: bankrad.id,
+      datum: bankrad.datum,
+      text: text || 'Banktransaktion',
+      rader: rader,
+      underlagIds: us.map(function (u) { return u.id; }),
+      underlagKommentar: kommentar,
+      kalla: kalla,
+      komplett: rader.every(function (r) { return !!giltigt(r.konto); })
+    };
+  }
+
+  function arkivnamn(nr, filnamn) { return 'V' + String(nr).padStart(3, '0') + '_' + filnamn; }
+
+  // Bokför en verifikation och kopplar den till en bankrad och/eller underlag.
+  function bokforKopplat(ar, utkast, koppling) {
+    koppling = koppling || {};
+    var nr = nastaVerifikationsnummer(ar);
+    var bankrad = null;
+    if (koppling.bankradId) {
+      bankrad = (ar.bankrader || []).find(function (r) { return r.id === koppling.bankradId; });
+      if (!bankrad) throw BokforingsFel('Banktransaktionen finns inte.');
+      if (bankrad.verifikation != null) throw BokforingsFel('Banktransaktionen är redan bokförd i verifikation ' + bankrad.verifikation + '.');
+      var paBank = (utkast.rader || []).reduce(function (s, r) { return r.konto === bankrad.konto ? s + r.belopp : s; }, 0);
+      if (paBank !== bankrad.belopp) {
+        throw BokforingsFel('Verifikationen måste ha ' + formatBelopp(bankrad.belopp) + ' kr på konto ' + bankrad.konto + ' för att stämma med banken.');
+      }
+    }
+    var us = (koppling.underlagIds || []).map(function (id) {
+      var u = (ar.underlag || []).find(function (x) { return x.id === id; });
+      if (!u) throw BokforingsFel('Underlaget finns inte.');
+      if (u.verifikation != null) throw BokforingsFel('Underlaget ' + u.filnamn + ' hör redan till verifikation ' + u.verifikation + '.');
+      return u;
+    });
+    var namn = us.map(function (u) { return arkivnamn(nr, u.filnamn); });
+    var res = bokfor(ar, Object.assign({}, utkast, { underlag: (utkast.underlag || []).concat(namn) }));
+    var nyttAr = res.ar;
+    if (bankrad) {
+      nyttAr = Object.assign({}, nyttAr, {
+        bankrader: nyttAr.bankrader.map(function (r) { return r.id === bankrad.id ? Object.assign({}, r, { verifikation: nr }) : r; })
+      });
+    }
+    us.forEach(function (u, i) { nyttAr = andraUnderlag(nyttAr, u.id, { verifikation: nr, arkivnamn: namn[i] }); });
+    return { ar: nyttAr, verifikation: res.verifikation };
+  }
+
+  // ---------- Tolkning av underlag med Claude ----------
+
+  var TOLKNING_SCHEMA = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['dokumenttyp', 'motpart', 'datum', 'forfallodatum', 'belopp', 'valuta', 'belopp_sek', 'moms', 'fakturanummer', 'ocr', 'beskrivning', 'riktning', 'foreslaget_konto', 'stalld_till_foreningen', 'osakerhet', 'transaktioner'],
+    properties: {
+      dokumenttyp: { type: 'string', enum: ['faktura', 'kvitto', 'kreditnota', 'kontoutdrag', 'insattningsuppgift', 'annat'] },
+      motpart: { type: 'string', description: 'Säljare, avsändare eller bidragsgivare.' },
+      datum: { type: 'string', description: 'Fakturadatum, köpdatum eller dokumentets datum som ÅÅÅÅ-MM-DD. Tom sträng om det saknas.' },
+      forfallodatum: { type: 'string', description: 'Förfallodatum som ÅÅÅÅ-MM-DD, annars tom sträng.' },
+      belopp: { type: 'string', description: 'Totalbelopp att betala eller som betalats, inklusive moms, i dokumentets valuta, med punkt som decimaltecken, t.ex. "1617.79". Alltid positivt.' },
+      valuta: { type: 'string', description: 'Valutakod, t.ex. SEK eller EUR.' },
+      belopp_sek: { type: 'string', description: 'Beloppet i SEK om dokumentet anger det och valutan inte är SEK, annars tom sträng.' },
+      moms: { type: 'string', description: 'Momsbelopp om det anges, annars tom sträng.' },
+      fakturanummer: { type: 'string' },
+      ocr: { type: 'string', description: 'OCR-nummer eller betalningsreferens, annars tom sträng.' },
+      beskrivning: { type: 'string', description: 'Kort svensk text för verifikationen, t.ex. "Lokalhyra november".' },
+      riktning: { type: 'string', enum: ['utgift', 'intakt'], description: 'utgift om föreningen betalar, intakt om föreningen får pengar (bidrag, kreditnota, insättning).' },
+      foreslaget_konto: { type: 'string', description: 'Fyrsiffrigt konto ur kontoplanen för kostnaden eller intäkten.' },
+      stalld_till_foreningen: { type: 'string', enum: ['ja', 'nej', 'oklart'] },
+      osakerhet: { type: 'string', description: 'Vad som är oklart eller svårläst, annars tom sträng.' },
+      transaktioner: {
+        type: 'array',
+        description: 'Endast för kontoutdrag: varje transaktion. Annars tom lista.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['datum', 'text', 'belopp', 'saldo'],
+          properties: {
+            datum: { type: 'string' },
+            text: { type: 'string' },
+            belopp: { type: 'string', description: 'Negativt för uttag, med punkt som decimaltecken.' },
+            saldo: { type: 'string', description: 'Saldo efter transaktionen, eller tom sträng.' }
+          }
+        }
+      }
+    }
+  };
+
+  function tolkningsInstruktion(ar, forening) {
+    return [
+      'Du hjälper kassören i ' + (forening && forening.namn ? 'den ideella föreningen ' + forening.namn : 'en liten svensk ideell förening') + ' att bokföra.',
+      'Läs underlaget och fyll i fälten. Hitta inte på uppgifter: lämna tom sträng när något saknas och skriv det i "osakerhet".',
+      'Föreningen är inte momsregistrerad, så kostnader bokförs med hela beloppet inklusive moms.',
+      'Välj foreslaget_konto ur kontoplanen nedan efter vad underlaget gäller, inte efter vem som skickat det. Bidrag (t.ex. LOK-stöd, aktivitetsstöd, RF-bidrag) bokförs på 3980.',
+      'Kontoplan:',
+      ar.kontoplan.filter(function (k) { return Number(k.nr) >= 3000 && Number(k.nr) < 8900; }).map(function (k) { return k.nr + ' ' + k.namn; }).join('\n')
+    ].join('\n');
+  }
+
+  function normaliseraTolkning(t, opt) {
+    opt = opt || {};
+    var varningar = [];
+    var str = function (v) { return v == null ? '' : String(v).trim(); };
+    if (t.osakerhet) varningar.push(str(t.osakerhet));
+    if (t.stalld_till_foreningen === 'nej') varningar.push('Underlaget verkar inte vara ställt till föreningen.');
+    if (t.dokumenttyp === 'kontoutdrag') {
+      var rader = (t.transaktioner || []).map(function (x) {
+        return { datum: tolkaDatum(x.datum), text: str(x.text), referens: '', belopp: tolkaBankbelopp(x.belopp), saldo: tolkaBankbelopp(x.saldo) };
+      }).filter(function (r) { return r.datum && r.belopp != null && r.belopp !== 0; });
+      if (rader.length > 1 && rader[0].datum > rader[rader.length - 1].datum) rader.reverse();
+      return {
+        underlag: { id: opt.id, filnamn: opt.filnamn, dokumenttyp: 'kontoutdrag', motpart: str(t.motpart), datum: tolkaDatum(t.datum) || '', belopp: 0, riktning: 'utgift', beskrivning: str(t.beskrivning) || 'Kontoutdrag' },
+        bankrader: rader,
+        varningar: varningar.concat(kontrolleraSaldon(rader))
+      };
+    }
+    var valuta = str(t.valuta).toUpperCase() || 'SEK';
+    var belopp = tolkaBankbelopp(t.belopp);
+    var underlag = {
+      id: opt.id,
+      filnamn: opt.filnamn,
+      dokumenttyp: t.dokumenttyp || 'annat',
+      motpart: str(t.motpart),
+      datum: tolkaDatum(t.datum) || '',
+      forfallodatum: tolkaDatum(t.forfallodatum) || '',
+      belopp: 0,
+      riktning: t.riktning === 'intakt' ? 'intakt' : 'utgift',
+      beskrivning: str(t.beskrivning),
+      fakturanummer: str(t.fakturanummer),
+      ocr: str(t.ocr).replace(/\s/g, ''),
+      foreslagetKonto: giltigtKontonummer(str(t.foreslaget_konto)) ? str(t.foreslaget_konto) : ''
+    };
+    if (valuta !== 'SEK') {
+      underlag.valuta = valuta;
+      underlag.originalbelopp = belopp == null ? null : Math.abs(belopp);
+      var sek = tolkaBankbelopp(t.belopp_sek);
+      if (sek != null) underlag.belopp = Math.abs(sek);
+      else varningar.push('Beloppet är i ' + valuta + '. Ange beloppet i SEK eller koppla underlaget till banktransaktionen för hand.');
+    } else if (belopp != null) {
+      underlag.belopp = Math.abs(belopp);
+    } else {
+      varningar.push('Hittade inget belopp.');
+    }
+    return { underlag: underlag, bankrader: null, varningar: varningar };
+  }
+
   root.Karna = {
     FORMAT: FORMAT,
     parseBelopp: parseBelopp,
@@ -702,6 +1217,7 @@
     rattadAv: rattadAv,
     rattelse: rattelse,
     lasPeriod: lasPeriod,
+    sattIngaendeSaldo: sattIngaendeSaldo,
     rorelser: rorelser,
     saldon: saldon,
     saldobalans: saldobalans,
@@ -714,7 +1230,27 @@
     valideraAr: valideraAr,
     kontroller: kontroller,
     sieExport: sieExport,
-    tillCp437: tillCp437
+    tillCp437: tillCp437,
+    tolkaDatum: tolkaDatum,
+    tolkaBankbelopp: tolkaBankbelopp,
+    parseBankfil: parseBankfil,
+    kontrolleraSaldon: kontrolleraSaldon,
+    normaliseraText: normaliseraText,
+    importeraBankrader: importeraBankrader,
+    oppnaBankrader: oppnaBankrader,
+    bankavstamning: bankavstamning,
+    hittaRegel: hittaRegel,
+    larRegel: larRegel,
+    laggTillUnderlag: laggTillUnderlag,
+    andraUnderlag: andraUnderlag,
+    taBortUnderlag: taBortUnderlag,
+    oppnaUnderlag: oppnaUnderlag,
+    matchaUnderlag: matchaUnderlag,
+    forslagForBankrad: forslagForBankrad,
+    bokforKopplat: bokforKopplat,
+    TOLKNING_SCHEMA: TOLKNING_SCHEMA,
+    tolkningsInstruktion: tolkningsInstruktion,
+    normaliseraTolkning: normaliseraTolkning
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
@@ -726,8 +1262,15 @@
   var K = window.Karna;
   var LAGRING = 'forening-bokforing:v1';
 
-  var store = { format: 1, forening: { namn: '', orgnr: '' }, ar: {}, aktivt: null };
-  var vy = 'verifikationer';
+  var NYCKEL = 'forening-bokforing:claude-nyckel';
+  var SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.4.0/+esm';
+  var MODELL = 'claude-opus-5-5';
+
+  var store = { format: 1, forening: { namn: '', orgnr: '' }, ar: {}, aktivt: null, regler: [] };
+  var vy = 'inlasning';
+  var inkorgVal = {};
+  var logg = [];
+  var arbetar = null;
   var rapportVy = 'rr';
   var oppenVer = null;
   var valtKonto = '1930';
@@ -742,6 +1285,7 @@
       if (rad) {
         var d = JSON.parse(rad);
         if (d && d.format === 1 && d.ar) store = d;
+        if (!store.regler) store.regler = [];
       }
     } catch (e) { /* tom lagring är okej */ }
   }
@@ -772,6 +1316,7 @@
     });
   }
   function kr(ore) { return K.formatBelopp(ore); }
+  function antal(n, en, flera) { return n + ' ' + (n === 1 ? en : flera); }
   function idag() {
     var d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -799,9 +1344,217 @@
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   }
 
+  // ---------- Filer (sparas i webbläsarens IndexedDB tills OneDrive är på plats) ----------
+
+  function oppnaDb() {
+    return new Promise(function (ok, fel) {
+      var r = indexedDB.open('forening-bokforing-filer', 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('filer'); };
+      r.onsuccess = function () { ok(r.result); };
+      r.onerror = function () { fel(r.error); };
+    });
+  }
+  function dbAnrop(lage, fn) {
+    return oppnaDb().then(function (db) {
+      return new Promise(function (ok, fel) {
+        var tx = db.transaction('filer', lage);
+        var req = fn(tx.objectStore('filer'));
+        tx.oncomplete = function () { ok(req && req.result); };
+        tx.onerror = function () { fel(tx.error); };
+      });
+    });
+  }
+  function sparaFil(id, blob, namn) { return dbAnrop('readwrite', function (s) { return s.put({ blob: blob, namn: namn }, id); }); }
+  function hamtaFil(id) { return dbAnrop('readonly', function (s) { return s.get(id); }); }
+  function taBortFil(id) { return dbAnrop('readwrite', function (s) { return s.delete(id); }); }
+
+  function visaFil(id) {
+    var fonster = window.open('', '_blank');
+    hamtaFil(id).then(function (rec) {
+      if (!rec) { if (fonster) fonster.close(); visa('Filen finns inte i den här webbläsaren.', true); return; }
+      var url = URL.createObjectURL(rec.blob);
+      if (fonster) fonster.location = url; else window.location = url;
+    });
+  }
+
+  function blobTillBase64(blob) {
+    return new Promise(function (ok, fel) {
+      var r = new FileReader();
+      r.onload = function () { ok(String(r.result).split(',')[1]); };
+      r.onerror = function () { fel(r.error); };
+      r.readAsDataURL(blob);
+    });
+  }
+
+  // Stora foton förminskas innan de skickas; originalet sparas.
+  async function bildBlock(fil) {
+    var bild;
+    try { bild = await createImageBitmap(fil); }
+    catch (e) { throw new Error(fil.name + ': bilden kunde inte öppnas. Spara den som JPEG eller PNG och försök igen.'); }
+    var skala = Math.min(1, 2000 / Math.max(bild.width, bild.height));
+    var canvas = document.createElement('canvas');
+    canvas.width = Math.round(bild.width * skala);
+    canvas.height = Math.round(bild.height * skala);
+    canvas.getContext('2d').drawImage(bild, 0, 0, canvas.width, canvas.height);
+    var blob = await new Promise(function (ok) { canvas.toBlob(ok, 'image/jpeg', 0.85); });
+    return { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await blobTillBase64(blob) } };
+  }
+
+  async function lasText(fil) {
+    var buf = await fil.arrayBuffer();
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+    catch (e) { return new TextDecoder('windows-1252').decode(buf); }
+  }
+
+  // ---------- Claude ----------
+
+  function lasNyckel() { try { return localStorage.getItem(NYCKEL) || ''; } catch (e) { return ''; } }
+  var sdkModul = null;
+
+  async function claudeKlient() {
+    var nyckel = lasNyckel();
+    if (!nyckel) throw new Error('Lägg in en API-nyckel för Claude under "År och arkiv" först.');
+    if (!sdkModul) sdkModul = await import(SDK_URL);
+    return new sdkModul.default({ apiKey: nyckel, dangerouslyAllowBrowser: true });
+  }
+
+  function claudeFel(err) {
+    if (sdkModul && err instanceof sdkModul.AuthenticationError) return 'Claude godtog inte API-nyckeln. Kontrollera den under "År och arkiv".';
+    if (sdkModul && err instanceof sdkModul.PermissionDeniedError) return 'API-nyckeln saknar behörighet eller krediter.';
+    if (sdkModul && err instanceof sdkModul.RateLimitError) return 'Claude har för många anrop just nu. Vänta en stund och försök igen.';
+    if (sdkModul && err instanceof sdkModul.APIConnectionError) return 'Kunde inte nå Claude. Kontrollera internetanslutningen.';
+    if (sdkModul && err instanceof sdkModul.APIError) return 'Claude svarade med ett fel: ' + err.message;
+    return err.message;
+  }
+
+  async function tolkaMedClaude(ar, block) {
+    var client = await claudeKlient();
+    var svar = await client.beta.messages.create({
+      model: MODELL,
+      max_tokens: 16000,
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema: K.TOLKNING_SCHEMA } },
+      system: K.tolkningsInstruktion(ar, store.forening),
+      messages: [{ role: 'user', content: [block, { type: 'text', text: 'Tolka underlaget.' }] }]
+    });
+    if (svar.stop_reason === 'refusal') throw new Error('Claude avböjde att tolka underlaget.');
+    if (svar.stop_reason === 'max_tokens') throw new Error('Svaret blev för långt. Dela upp kontoutdraget i mindre delar.');
+    var text = svar.content.filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('');
+    return JSON.parse(text);
+  }
+
+  // ---------- Inläsning ----------
+
+  function arForDatum(d) {
+    if (!d) return null;
+    return Object.keys(store.ar).find(function (id) { return store.ar[id].start <= d && d <= store.ar[id].slut; }) || null;
+  }
+
+  function logga(text, fel) { logg.unshift({ text: text, fel: !!fel }); logg = logg.slice(0, 12); }
+
+  function importeraRader(rader) {
+    var nya = 0, dubbletter = 0;
+    Object.keys(store.ar).forEach(function (id) {
+      var res = K.importeraBankrader(store.ar[id], rader);
+      store.ar[id] = res.ar;
+      nya += res.nya;
+      dubbletter += res.dubbletter;
+    });
+    var utanfor = rader.filter(function (r) { return !arForDatum(r.datum); });
+    spara();
+    var text = antal(nya, 'ny banktransaktion', 'nya banktransaktioner') + (dubbletter ? ', ' + dubbletter + ' fanns redan' : '') + '.';
+    if (utanfor.length) {
+      var ar = Array.from(new Set(utanfor.map(function (r) { return r.datum.slice(0, 4); }))).join(', ');
+      text += ' ' + antal(utanfor.length, 'rad gäller', 'rader gäller') + ' år som inte är upplagda (' + ar + ') och hoppades över.';
+    }
+    return text;
+  }
+
+  function importeraBanktext(text, namn) {
+    var res = K.parseBankfil(text);
+    if (!res.rader.length) throw new Error((namn ? namn + ': ' : '') + 'hittade inga transaktioner. ' + res.varningar.slice(0, 2).join(' '));
+    logga((namn ? namn + ': ' : '') + importeraRader(res.rader));
+    res.varningar.slice(0, 5).forEach(function (v) { logga(v, true); });
+  }
+
+  function sakertFilnamn(namn) { return String(namn).replace(/[\\/:*?"<>|]+/g, '_').slice(-120) || 'underlag'; }
+
+  async function tolkaFil(fil) {
+    var arNu = aktivt();
+    var arPdf = fil.type === 'application/pdf' || /\.pdf$/i.test(fil.name);
+    var block = arPdf
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: await blobTillBase64(fil) } }
+      : await bildBlock(fil);
+    var t = await tolkaMedClaude(arNu, block);
+    var id = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    var n = K.normaliseraTolkning(t, { id: id, filnamn: sakertFilnamn(fil.name) });
+    await sparaFil(id, fil, n.underlag.filnamn);
+    if (n.bankrader) {
+      setAktivt(K.laggTillUnderlag(aktivt(), n.underlag));
+      logga(fil.name + ' (kontoutdrag): ' + importeraRader(n.bankrader));
+    } else {
+      var u = n.underlag;
+      var arId = arForDatum(u.forfallodatum || u.datum) || store.aktivt;
+      store.ar[arId] = K.laggTillUnderlag(store.ar[arId], u);
+      spara();
+      logga(fil.name + ': ' + (u.motpart || 'okänd motpart') + ', ' + kr(u.belopp) + ' kr' + (u.foreslagetKonto ? ', konto ' + u.foreslagetKonto : '') + (arId !== store.aktivt ? ' (lagt i ' + arId + ')' : '') + '.');
+    }
+    n.varningar.forEach(function (v) { logga(fil.name + ': ' + v, true); });
+  }
+
+  async function lasInFiler(filer) {
+    for (var i = 0; i < filer.length; i++) {
+      var fil = filer[i];
+      arbetar = 'Läser ' + fil.name + (filer.length > 1 ? ' (' + (i + 1) + ' av ' + filer.length + ')' : '') + '…';
+      render();
+      try {
+        if (/\.(csv|txt|tsv|skv)$/i.test(fil.name) || /^text\//.test(fil.type)) importeraBanktext(await lasText(fil), fil.name);
+        else if (/\.xlsx?m?$/i.test(fil.name)) throw new Error('Excel-filer kan inte läsas direkt. Exportera kontoutdraget som CSV, eller markera raderna i Excel och klistra in dem här.');
+        else if (fil.type === 'application/pdf' || /\.pdf$/i.test(fil.name) || /^image\//.test(fil.type)) await tolkaFil(fil);
+        else throw new Error('okänd filtyp.');
+      } catch (err) {
+        logga(fil.name + ': ' + claudeFel(err), true);
+      }
+    }
+    arbetar = null;
+    render();
+  }
+
+  function forslagMedVal(ar, rad) {
+    var val = inkorgVal[rad.id] || {};
+    var f = K.forslagForBankrad(ar, rad, store.regler, val.underlagIds ? { underlagIds: val.underlagIds } : undefined);
+    if (val.konto != null && f.rader.length === 2) f.rader[1].konto = val.konto.trim();
+    if (val.text != null) f.text = val.text;
+    // Inbetalningar och bankavgifter syns i bankutdraget och behöver inget eget underlag.
+    if (!f.underlagIds.length && f.rader.length === 2 && (rad.belopp > 0 || f.rader[1].konto === '6570')) f.underlagKommentar = 'Bankutdrag';
+    f.komplett = f.rader.every(function (r) { return ar.kontoplan.some(function (k) { return k.nr === r.konto; }); });
+    return f;
+  }
+
+  function larAv(rad, rader) {
+    if (rader.length === 2) store.regler = K.larRegel(store.regler, rad.text, rad.belopp, rader[1].konto);
+  }
+
+  function bokforBankrad(ar, rad) {
+    var f = forslagMedVal(ar, rad);
+    if (!f.komplett) throw new Error('Välj konto för ' + rad.datum + ' ' + rad.text + ' först.');
+    var res = K.bokforKopplat(ar, {
+      datum: f.datum, text: f.text, rader: f.rader, underlagKommentar: f.underlagKommentar, registrerad: new Date().toISOString()
+    }, { bankradId: rad.id, underlagIds: f.underlagIds });
+    larAv(rad, f.rader);
+    delete inkorgVal[rad.id];
+    return res;
+  }
+
+  function radTillUtkast(r) {
+    return { konto: r.konto, debet: r.belopp > 0 ? K.formatBelopp(r.belopp) : '', kredit: r.belopp < 0 ? K.formatBelopp(-r.belopp) : '' };
+  }
+
   // ---------- Rendering ----------
 
   var VYER = [
+    ['inlasning', 'Läs in'],
     ['verifikationer', 'Verifikationer'],
     ['ny', 'Ny verifikation'],
     ['huvudbok', 'Huvudbok'],
@@ -826,6 +1579,7 @@
       return '<button type="button" data-vy="' + v[0] + '"' + (vy === v[0] ? ' aria-current="page"' : '') + '>' + v[1] + '</button>';
     }).join('');
     var html = {
+      inlasning: vyInlasning,
       verifikationer: vyVerifikationer,
       ny: vyNy,
       huvudbok: vyHuvudbok,
@@ -863,6 +1617,94 @@
       '<button class="btn btn-secondary" data-action="importera">Läs in säkerhetskopia (JSON)</button></div></div>';
   }
 
+  function underlagChip(u) {
+    return '<button class="tag knapp-tag" data-action="visa-fil" data-id="' + esc(u.id) + '" title="Visa ' + esc(u.filnamn) + '">' + esc(u.filnamn) + '</button>';
+  }
+
+  function vyInlasning(ar) {
+    var harNyckel = !!lasNyckel();
+    var html = '<div class="card dropzon" id="dropzon">' +
+      '<p style="margin-top:0"><strong>Släpp fakturor, kvitton eller kontoutdrag här</strong></p>' +
+      '<p class="faint">PDF:er och bilder tolkas av Claude. Kontoutdrag som CSV läses direkt. Du kan också klistra in rader från Excel, eller en skärmbild, med Ctrl+V.</p>' +
+      '<div class="row"><button class="btn" data-action="valj-filer">Välj filer</button></div>' +
+      (harNyckel ? '' : '<p class="fel">Claude är inte inställt ännu. Lägg in en API-nyckel under "År och arkiv" för att kunna läsa PDF:er och bilder.</p>') +
+      '</div>';
+    if (arbetar) html += '<p class="muted" id="arbetar" role="status">' + esc(arbetar) + '</p>';
+    if (logg.length) {
+      html += '<ul class="logg">' + logg.map(function (l) { return '<li class="' + (l.fel ? 'fel' : '') + '">' + esc(l.text) + '</li>'; }).join('') + '</ul>' +
+        '<button class="btn btn-secondary btn-small" data-action="rensa-logg">Dölj meddelanden</button>';
+    }
+
+    var rader = K.oppnaBankrader(ar);
+    var forslag = rader.map(function (r) { return { rad: r, f: forslagMedVal(ar, r) }; });
+    var kompletta = forslag.filter(function (x) { return x.f.komplett; }).length;
+    var oppnaU = K.oppnaUnderlag(ar);
+    html += '<datalist id="kontolista">' + ar.kontoplan.map(function (k) { return '<option value="' + k.nr + '">' + esc(k.namn) + '</option>'; }).join('') + '</datalist>';
+    html += '<div class="row" style="justify-content:space-between"><h2>Banktransaktioner att bokföra (' + rader.length + ')</h2>' +
+      (kompletta ? '<button class="btn" data-action="bokfor-alla">Bokför alla med förslag (' + kompletta + ')</button>' : '') + '</div>';
+    if (!rader.length) html += '<p class="muted">Inga obokförda banktransaktioner. Läs in ett kontoutdrag för att komma igång.</p>';
+    forslag.forEach(function (x) {
+      var r = x.rad, f = x.f;
+      var us = f.underlagIds.map(function (id) { return ar.underlag.find(function (u) { return u.id === id; }); });
+      var kalla = f.kalla === 'underlag' ? '<span class="tag ok">från underlag</span>' : f.kalla === 'regel' ? '<span class="tag">som förra gången</span>' : '<span class="tag varning">välj konto</span>';
+      html += '<div class="card bankrad">' +
+        '<div class="row" style="justify-content:space-between"><div><strong>' + esc(r.datum) + '</strong> ' + esc(r.text) +
+        (r.referens ? ' <span class="faint">' + esc(r.referens) + '</span>' : '') + '</div>' +
+        '<div class="belopp ' + (r.belopp < 0 ? 'fel' : 'ok') + '">' + kr(r.belopp) + '</div></div>' +
+        '<div class="grid2">' +
+        '<div><label>Text</label><input data-inkorg="text" data-id="' + esc(r.id) + '" value="' + esc(f.text) + '"></div>';
+      if (f.rader.length === 2) {
+        html += '<div><label>Konto ' + kalla + '</label><input list="kontolista" data-inkorg="konto" data-id="' + esc(r.id) + '" value="' + esc(f.rader[1].konto) + '" placeholder="t.ex. 5010">' +
+          '<div class="faint">' + (f.rader[1].konto ? esc(K.kontonamn(ar, f.rader[1].konto)) : '') + '</div></div>';
+      } else {
+        html += '<div><label>Konton ' + kalla + '</label>' + f.rader.slice(1).map(function (x) {
+          return '<div class="faint">' + esc(x.konto || '?') + ' ' + esc(x.konto ? K.kontonamn(ar, x.konto) : 'konto saknas') + ': ' + kr(-x.belopp) + '</div>';
+        }).join('') + '</div>';
+      }
+      html += '</div><div class="row" style="margin-top:8px">' +
+        (us.length ? 'Underlag: ' + us.map(underlagChip).join(' ') : '<span class="faint">' + (f.underlagKommentar ? 'Inget underlag behövs (syns i bankutdraget).' : 'Inget underlag hittat.') + '</span>');
+      var valbara = oppnaU.filter(function (u) { return f.underlagIds.indexOf(u.id) < 0; });
+      if (valbara.length) {
+        html += '<select data-action-change="koppla" data-id="' + esc(r.id) + '" style="width:auto;max-width:100%"><option value="">Koppla underlag…</option>' +
+          valbara.map(function (u) { return '<option value="' + esc(u.id) + '">' + esc((u.datum || '') + ' ' + (u.motpart || u.filnamn)) + ' ' + kr(u.belopp) + '</option>'; }).join('') + '</select>';
+      }
+      if (inkorgVal[r.id] && inkorgVal[r.id].underlagIds) html += '<button class="btn btn-secondary btn-small" data-action="aterstall" data-id="' + esc(r.id) + '">Återställ</button>';
+      html += '</div><div class="row" style="margin-top:8px">' +
+        '<button class="btn btn-small" data-action="bokfor-rad" data-id="' + esc(r.id) + '"' + (f.komplett ? '' : ' disabled') + '>Bokför</button>' +
+        '<button class="btn btn-secondary btn-small" data-action="redigera-rad" data-id="' + esc(r.id) + '">Dela upp eller ändra…</button></div></div>';
+    });
+
+    html += '<h2>Underlag som väntar på betalning (' + oppnaU.length + ')</h2>';
+    if (!oppnaU.length) html += '<p class="muted">Inga. Fakturor och kvitton kopplas automatiskt när betalningen syns på banken.</p>';
+    else {
+      html += '<div class="scroll"><table><thead><tr><th>Datum</th><th>Underlag</th><th class="num">Belopp</th><th>Konto</th><th></th></tr></thead><tbody>';
+      oppnaU.forEach(function (u) {
+        html += '<tr><td>' + esc(u.datum || '') + (u.forfallodatum ? '<div class="faint">förfaller ' + esc(u.forfallodatum) + '</div>' : '') + '</td>' +
+          '<td>' + esc(u.motpart) + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') + underlagChip(u) +
+          (u.valuta ? '<div class="faint">' + esc(u.valuta) + ' ' + (u.originalbelopp != null ? kr(u.originalbelopp) : '') + '</div>' : '') + '</td>' +
+          '<td class="num"><input class="num" style="width:110px" data-underlag="belopp" data-id="' + esc(u.id) + '" value="' + (u.belopp ? kr(u.belopp) : '') + '" aria-label="Belopp i kronor">' +
+          '<div class="faint">' + (u.riktning === 'intakt' ? 'intäkt' : 'utgift') + '</div></td>' +
+          '<td><input list="kontolista" style="width:90px" data-underlag="foreslagetKonto" data-id="' + esc(u.id) + '" value="' + esc(u.foreslagetKonto || '') + '" aria-label="Konto"></td>' +
+          '<td style="white-space:nowrap"><button class="btn btn-secondary btn-small" data-action="bokfor-underlag" data-id="' + esc(u.id) + '">Bokför utan bank…</button> ' +
+          '<button class="btn btn-secondary btn-small" data-action="ta-bort-underlag" data-id="' + esc(u.id) + '" aria-label="Ta bort underlag">×</button></td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+
+    var avst = K.bankavstamning(ar);
+    if (avst) {
+      html += '<h2>Avstämning mot banken</h2><div class="card">Banken ' + esc(avst.datum) + ': <strong>' + kr(avst.bankSaldo) + '</strong> · Bokfört: <strong>' + kr(avst.bokfortSaldo) + '</strong> · ' +
+        (avst.skillnad === 0 ? '<span class="ok">stämmer</span>' : '<span class="fel">skillnad ' + kr(avst.skillnad) + '</span>' + (avst.obokforda ? ' <span class="faint">(' + antal(avst.obokforda, 'transaktion är', 'transaktioner är') + ' inte bokförda ännu)</span>' : ''));
+      if (avst.ingaendeEnligtBank != null && avst.ingaendeEnligtBank !== avst.ingaendeBokfort && !ar.lastTom) {
+        html += '<p class="fel">Ingående balans på ' + avst.konto + ' är ' + kr(avst.ingaendeBokfort) + ' kr, men enligt banken fanns ' + kr(avst.ingaendeEnligtBank) + ' kr före årets första transaktion.</p>' +
+          (foregaende(ar) ? '<p class="faint">Ingående balans kommer från föregående år. Kontrollera bokföringen där.</p>'
+            : '<button class="btn btn-secondary btn-small" data-action="ib-fran-bank" data-belopp="' + avst.ingaendeEnligtBank + '">Sätt ingående balans till ' + kr(avst.ingaendeEnligtBank) + ' kr (mot 2067 Balanserad vinst eller förlust)</button>');
+      }
+      html += '</div>';
+    }
+    return html;
+  }
+
   function verSumma(v) {
     return v.rader.reduce(function (s, r) { return r.belopp > 0 ? s + r.belopp : s; }, 0);
   }
@@ -896,7 +1738,12 @@
         '<td class="num">' + (r.belopp > 0 ? kr(r.belopp) : '') + '</td><td class="num">' + (r.belopp < 0 ? kr(-r.belopp) : '') + '</td></tr>';
     });
     html += '</tbody></table>';
-    if (v.underlag && v.underlag.length) html += '<p class="faint">Underlag: ' + v.underlag.map(esc).join(', ') + '</p>';
+    if (v.underlag && v.underlag.length) {
+      html += '<p class="faint">Underlag: ' + v.underlag.map(function (namn) {
+        var u = (ar.underlag || []).find(function (x) { return x.arkivnamn === namn; });
+        return u ? '<button class="tag knapp-tag" data-action="visa-fil" data-id="' + esc(u.id) + '">' + esc(namn) + '</button>' : esc(namn);
+      }).join(' ') + '</p>';
+    }
     if (v.underlagKommentar) html += '<p class="faint">' + esc(v.underlagKommentar) + '</p>';
     if (v.registrerad) html += '<p class="faint">Registrerad ' + esc(v.registrerad.slice(0, 16).replace('T', ' ')) + '</p>';
     var kanRattas = v.rattar == null && !rattning && !(ar.lastTom && ar.lastTom >= ar.slut);
@@ -906,7 +1753,7 @@
 
   function vyNy(ar) {
     if (!utkast.datum) utkast.datum = standardDatum(ar);
-    var html = '<h2>Ny verifikation</h2><div class="card">' +
+    var html = '<h2>Ny verifikation</h2><div class="card">' + kopplingsInfo(ar) +
       '<div class="grid2"><div><label for="uDatum">Datum</label><input id="uDatum" type="date" data-u="datum" value="' + esc(utkast.datum) + '" min="' + ar.start + '" max="' + ar.slut + '"></div>' +
       '<div><label for="uText">Text</label><input id="uText" data-u="text" value="' + esc(utkast.text) + '" placeholder="t.ex. Lokalhyra oktober"></div>' +
       '<div><label for="uUnderlag">Underlag (filnamn, separera med komma)</label><input id="uUnderlag" data-u="underlag" value="' + esc(utkast.underlag) + '"></div>' +
@@ -926,6 +1773,22 @@
       '<div class="row"><button class="btn" id="bokforKnapp" data-action="bokfor">Bokför</button>' +
       '<button class="btn btn-secondary" data-action="rensa-utkast">Rensa</button></div></div>';
     return html;
+  }
+
+  function kopplingsInfo(ar) {
+    var k = utkast.koppling;
+    if (!k) return '';
+    var delar = [];
+    if (k.bankradId) {
+      var r = (ar.bankrader || []).find(function (x) { return x.id === k.bankradId; });
+      if (r) delar.push('banktransaktionen ' + esc(r.datum) + ' ' + esc(r.text) + ' (' + kr(r.belopp) + ' på ' + r.konto + ')');
+    }
+    (k.underlagIds || []).forEach(function (id) {
+      var u = (ar.underlag || []).find(function (x) { return x.id === id; });
+      if (u) delar.push(underlagChip(u));
+    });
+    return '<p class="muted" style="margin-top:0">Kopplas till ' + delar.join(', ') + '.' +
+      (k.bankradId ? '' : ' Välj motkonto, t.ex. 1910 Kassa eller 2890 Övriga kortfristiga skulder om någon lagt ut och ska få pengarna tillbaka.') + '</p>';
   }
 
   function utkastTillVerifikation() {
@@ -1089,11 +1952,18 @@
       (arLast ? '' : '<div class="row"><input type="date" id="lasDatum" style="width:auto" min="' + ar.start + '" max="' + ar.slut + '" value="' + esc(ar.slut) + '"><button class="btn btn-secondary" data-action="las">Lås till och med datumet</button></div>') +
       '<p class="faint" style="margin-top:12px">Nästa år skapas med utgående balanser som ingående balanser. Årets resultat läggs på konto 2069 om det inte redan bokförts där.</p>' +
       '<button class="btn btn-secondary" data-action="nasta-ar">Skapa nästa räkenskapsår</button></div>';
+    html += '<h2>Claude</h2><div class="card"><p>Claude läser fakturor, kvitton och kontoutdrag. Det kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. ' +
+      'Ett vanligt kvitto kostar några tiotals öre att tolka.</p>' +
+      '<p class="faint">Nyckeln sparas bara i den här webbläsaren och skickas bara till Anthropic. Den följer inte med i säkerhetskopian. Underlagen skickas till Claude när du läser in dem.</p>' +
+      (lasNyckel() ? '<p class="ok">En nyckel är sparad.</p><button class="btn btn-secondary btn-small" data-action="ta-bort-nyckel">Ta bort nyckeln</button>'
+        : '<div class="row"><input type="password" id="claudeNyckel" autocomplete="off" placeholder="sk-ant-…" style="max-width:360px"><button class="btn btn-small" data-action="spara-nyckel">Spara</button></div>') +
+      '</div>';
     html += '<h2>Föreningen</h2><div class="card"><div class="grid2">' +
       '<div><label for="forNamn">Namn</label><input id="forNamn" value="' + esc(store.forening.namn) + '"></div>' +
       '<div><label for="forOrgnr">Organisationsnummer</label><input id="forOrgnr" value="' + esc(store.forening.orgnr) + '"></div></div>' +
       '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="spara-forening">Spara</button></div></div>';
-    html += '<h2>Säkerhetskopia och export</h2><div class="card"><p>Data sparas just nu bara i den här webbläsaren. Exportera en säkerhetskopia regelbundet.</p><div class="row">' +
+    html += '<h2>Säkerhetskopia och export</h2><div class="card"><p>Data sparas just nu bara i den här webbläsaren. Exportera en säkerhetskopia regelbundet. ' +
+      'Inlästa filer (PDF:er och bilder) ingår inte i säkerhetskopian ännu; behåll originalen tills de sparas i OneDrive.</p><div class="row">' +
       '<button class="btn btn-secondary" data-action="exportera">Exportera allt (JSON)</button>' +
       '<button class="btn btn-secondary" data-action="importera">Läs in säkerhetskopia</button>' +
       '<button class="btn btn-secondary" data-action="sie">Exportera ' + esc(K.arNamn(ar)) + ' som SIE 4</button></div></div>';
@@ -1119,11 +1989,58 @@
     var t = e.target;
     if (t.dataset.u) { utkast[t.dataset.u] = t.value; uppdateraUtkastStatus(); }
     if (t.dataset.rad != null && t.dataset.f) { utkast.rader[Number(t.dataset.rad)][t.dataset.f] = t.value; uppdateraUtkastStatus(); }
+    if (t.dataset.inkorg) {
+      inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { [t.dataset.inkorg]: t.value });
+    }
   });
 
   document.addEventListener('change', function (e) {
     if (e.target.id === 'valjAr') { store.aktivt = e.target.value; spara(); meddelande = null; utkast = nyttUtkast(); render(); }
     if (e.target.id === 'hbKonto') { valtKonto = e.target.value; render(); }
+    var t = e.target;
+    if (t.dataset.inkorg === 'konto') render();
+    if (t.dataset.actionChange === 'koppla' && t.value) {
+      var ar = aktivt();
+      var rad = ar.bankrader.find(function (r) { return r.id === t.dataset.id; });
+      var nu = forslagMedVal(ar, rad).underlagIds;
+      inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { underlagIds: nu.concat([t.value]) });
+      render();
+    }
+    if (t.dataset.underlag) {
+      try {
+        var andring = {};
+        if (t.dataset.underlag === 'belopp') andring.belopp = Math.abs(K.parseBelopp(t.value));
+        else andring.foreslagetKonto = t.value.trim();
+        setAktivt(K.andraUnderlag(aktivt(), t.dataset.id, andring));
+        render();
+      } catch (err) { visa(err.message, true); }
+    }
+  });
+
+  // Dra och släpp samt klistra in fungerar var som helst på sidan.
+  document.addEventListener('dragover', function (e) { if (aktivt()) e.preventDefault(); });
+  document.addEventListener('drop', function (e) {
+    if (!aktivt() || !e.dataTransfer || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    vy = 'inlasning';
+    lasInFiler(Array.from(e.dataTransfer.files));
+  });
+  document.addEventListener('paste', function (e) {
+    if (!aktivt() || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    var cd = e.clipboardData;
+    if (cd.files && cd.files.length) {
+      e.preventDefault();
+      vy = 'inlasning';
+      lasInFiler(Array.from(cd.files));
+      return;
+    }
+    var text = cd.getData('text/plain');
+    if (text && /\n/.test(text.trim()) || /\t/.test(text || '')) {
+      e.preventDefault();
+      vy = 'inlasning';
+      try { importeraBanktext(text, 'Inklistrat'); } catch (err) { logga(err.message, true); }
+      render();
+    }
   });
 
   function varde(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
@@ -1150,8 +2067,16 @@
     'bokfor': function () {
       var res = utkastTillVerifikation();
       if (res.fel.length) throw new Error(res.fel.join(' '));
-      var ut = K.bokfor(aktivt(), res.verifikation);
+      var ut;
+      if (utkast.koppling) {
+        ut = K.bokforKopplat(aktivt(), res.verifikation, utkast.koppling);
+        var bank = utkast.koppling.bankradId && aktivt().bankrader.find(function (x) { return x.id === utkast.koppling.bankradId; });
+        if (bank) larAv(bank, res.verifikation.rader);
+      } else {
+        ut = K.bokfor(aktivt(), res.verifikation);
+      }
       setAktivt(ut.ar);
+      if (utkast.koppling) vy = 'inlasning';
       var datum = utkast.datum;
       utkast = nyttUtkast();
       utkast.datum = datum;
@@ -1168,6 +2093,86 @@
       visa('Verifikation ' + nr + ' är rättad med verifikation ' + ut.verifikation.nr + '.');
     },
     'skriv-ut': function () { window.print(); },
+    'valj-filer': function () {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = 'application/pdf,image/*,.csv,.txt,.tsv,.skv,.xlsx,.xls';
+      input.onchange = function () { lasInFiler(Array.from(input.files)); };
+      input.click();
+    },
+    'rensa-logg': function () { logg = []; render(); },
+    'visa-fil': function (t) { visaFil(t.dataset.id); },
+    'bokfor-rad': function (t) {
+      var ar = aktivt();
+      var rad = ar.bankrader.find(function (r) { return r.id === t.dataset.id; });
+      var res = bokforBankrad(ar, rad);
+      setAktivt(res.ar);
+      visa('Verifikation ' + res.verifikation.nr + ' är bokförd.');
+    },
+    'bokfor-alla': function () {
+      var ar = aktivt();
+      var klara = K.oppnaBankrader(ar).filter(function (r) { return forslagMedVal(ar, r).komplett; });
+      if (!window.confirm('Bokföra ' + klara.length + ' transaktioner enligt förslagen?')) return;
+      var forsta = null, sista = null;
+      klara.forEach(function (r) {
+        var res = bokforBankrad(ar, r);
+        ar = res.ar;
+        if (forsta == null) forsta = res.verifikation.nr;
+        sista = res.verifikation.nr;
+      });
+      setAktivt(ar);
+      visa('Verifikation ' + forsta + (sista !== forsta ? '–' + sista : '') + ' är bokförda.');
+    },
+    'redigera-rad': function (t) {
+      var ar = aktivt();
+      var rad = ar.bankrader.find(function (r) { return r.id === t.dataset.id; });
+      var f = forslagMedVal(ar, rad);
+      utkast = {
+        datum: f.datum, text: f.text, underlag: '', underlagKommentar: f.underlagKommentar,
+        rader: f.rader.map(radTillUtkast).concat([tomRad()]),
+        koppling: { bankradId: rad.id, underlagIds: f.underlagIds }
+      };
+      vy = 'ny';
+      meddelande = null;
+      render();
+    },
+    'ib-fran-bank': function (t) {
+      setAktivt(K.sattIngaendeSaldo(aktivt(), '1930', Number(t.dataset.belopp)));
+      visa('Ingående balans på 1930 är satt till ' + kr(Number(t.dataset.belopp)) + ' kr.');
+    },
+    'aterstall': function (t) { delete inkorgVal[t.dataset.id]; render(); },
+    'bokfor-underlag': function (t) {
+      var ar = aktivt();
+      var u = ar.underlag.find(function (x) { return x.id === t.dataset.id; });
+      if (!u.belopp) throw new Error('Ange beloppet i kronor först.');
+      var b = u.riktning === 'intakt' ? -u.belopp : u.belopp;
+      var datum = u.datum && u.datum >= ar.start && u.datum <= ar.slut ? u.datum : standardDatum(ar);
+      utkast = {
+        datum: datum, text: [u.motpart, u.beskrivning].filter(Boolean).join(': '), underlag: '', underlagKommentar: '',
+        rader: [radTillUtkast({ konto: u.foreslagetKonto || '', belopp: b }), radTillUtkast({ konto: '', belopp: -b })],
+        koppling: { underlagIds: [u.id] }
+      };
+      vy = 'ny';
+      meddelande = null;
+      render();
+    },
+    'ta-bort-underlag': function (t) {
+      if (!window.confirm('Ta bort underlaget? Filen raderas från den här webbläsaren.')) return;
+      setAktivt(K.taBortUnderlag(aktivt(), t.dataset.id));
+      taBortFil(t.dataset.id);
+      render();
+    },
+    'spara-nyckel': function () {
+      var v = varde('claudeNyckel');
+      if (!v) throw new Error('Klistra in nyckeln först.');
+      localStorage.setItem(NYCKEL, v);
+      visa('API-nyckeln är sparad i den här webbläsaren.');
+    },
+    'ta-bort-nyckel': function () {
+      localStorage.removeItem(NYCKEL);
+      visa('API-nyckeln är borttagen från den här webbläsaren.');
+    },
     'nytt-konto': function () {
       setAktivt(K.laggTillKonto(aktivt(), varde('nyttNr'), varde('nyttNamn')));
       visa('Kontot är tillagt.');
