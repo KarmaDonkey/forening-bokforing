@@ -49,7 +49,7 @@ Lagen kräver troligen inte formellt att vi bokför, eftersom en ideell förenin
 |---|---|---|
 | **0. Uppstart** | Repo, åtkomst till OneDrive-mappen, den här planen | Jag kan läsa Excel-filerna och några fakturor |
 | **1. Analys av historiken** (2025 klart, se [krav-fran-2025.md](krav-fran-2025.md)) | Gå igenom Excel 2012–idag och fakturorna: använda konton, typer av händelser, volym per år, egna lösningar och avvikelser | En behovsrapport och en kontoplan som vi enats om |
-| **2. Kärnan** | Datamodell, verifikationer, kontoplan, IB/UB, låsning av perioder, rapportberäkningar, automatiska tester | Testerna går igenom och RR/BR stämmer på testdata |
+| **2. Kärnan** (klar) | Datamodell, verifikationer, kontoplan, IB/UB, låsning av perioder, rapportberäkningar, automatiska tester | Testerna går igenom och RR/BR stämmer på testdata |
 | **3. Historikimport** | Föra över varje år från Excel till verifikationer och koppla underlagen | UB per år stämmer exakt mot Excel för alla år |
 | **4. Inläsning av underlag** | Släpp in PDF/bild, Claude föreslår, jag godkänner, regler lärs in | Ett nytt kvitto bokförs med två klick |
 | **5. Bankavstämning** | Import av bankens CSV, matchning mot verifikationer, lista över omatchade rader | Bankkontot stämmer mot banken månad för månad |

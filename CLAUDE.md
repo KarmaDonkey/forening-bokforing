@@ -7,3 +7,4 @@
 - Belopp lagras som heltal i ören, aldrig som flyttal.
 - Text i gränssnittet och dokumentation skrivs på svenska.
 - Projektplanen finns i docs/PROJEKTPLAN.md och hålls uppdaterad när faser blir klara.
+- Kör `npm test` före varje commit. All logik i `<script id="karna">` ska ha tester i `test/`.
