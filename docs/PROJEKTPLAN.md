@@ -48,7 +48,7 @@ Lagen kräver troligen inte formellt att vi bokför, eftersom en ideell förenin
 | Fas | Innehåll | Klart när |
 |---|---|---|
 | **0. Uppstart** | Repo, åtkomst till OneDrive-mappen, den här planen | Jag kan läsa Excel-filerna och några fakturor |
-| **1. Analys av historiken** | Gå igenom Excel 2012–idag och fakturorna: använda konton, typer av händelser, volym per år, egna lösningar och avvikelser | En behovsrapport och en kontoplan som vi enats om |
+| **1. Analys av historiken** (2025 klart, se [krav-fran-2025.md](krav-fran-2025.md)) | Gå igenom Excel 2012–idag och fakturorna: använda konton, typer av händelser, volym per år, egna lösningar och avvikelser | En behovsrapport och en kontoplan som vi enats om |
 | **2. Kärnan** | Datamodell, verifikationer, kontoplan, IB/UB, låsning av perioder, rapportberäkningar, automatiska tester | Testerna går igenom och RR/BR stämmer på testdata |
 | **3. Historikimport** | Föra över varje år från Excel till verifikationer och koppla underlagen | UB per år stämmer exakt mot Excel för alla år |
 | **4. Inläsning av underlag** | Släpp in PDF/bild, Claude föreslår, jag godkänner, regler lärs in | Ett nytt kvitto bokförs med två klick |
@@ -67,9 +67,8 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 ## Öppna frågor
 
 - Är räkenskapsåret samma som kalenderåret?
-- Hur kommer intäkterna in: medlemsavgifter, träningsavgifter, Swish, bidrag (t.ex. aktivitetsstöd från Stockholms stad)?
 - Är föreningen momsregistrerad? Troligen inte.
-- Vilken bank använder ni, och hur ser exportfilen ut?
+- Hur ser Swedbanks exportfil ut (kolumner, format)?
 - Ska revisorerna och styrelsen kunna läsa rapporterna direkt, till exempel via en delad OneDrive-mapp?
 - Azure-appregistreringen: ska vi återanvända den från Ledger eller skapa en ny för föreningen?
 - Har föreningen en budget som ska följas upp i verktyget?
