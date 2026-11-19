@@ -97,6 +97,7 @@
   .knapp-tag { background: none; cursor: pointer; font: inherit; font-size: 11px; }
   .tag.ok { color: var(--good); border-color: var(--good); }
   .logg { margin: 8px 0; padding-left: 18px; font-size: 14px; }
+  a { color: var(--accent); }
   @media print {
     header .row, nav, .ej-utskrift { display: none !important; }
     body { background: #fff; color: #000; }
@@ -1263,6 +1264,9 @@
   var LAGRING = 'forening-bokforing:v1';
 
   var NYCKEL = 'forening-bokforing:claude-nyckel';
+  var NYCKEL_UTGAR = 'forening-bokforing:claude-nyckel-utgar';
+  var nyckelAvvisad = false;
+  var visaNyckelForm = false;
   var SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.4.0/+esm';
   var MODELL = 'claude-opus-5-5';
 
@@ -1409,7 +1413,31 @@
   // ---------- Claude ----------
 
   function lasNyckel() { try { return localStorage.getItem(NYCKEL) || ''; } catch (e) { return ''; } }
+  function nyckelUtgar() { try { return localStorage.getItem(NYCKEL_UTGAR) || ''; } catch (e) { return ''; } }
+  function dagarKvar(datum) { return Math.round((new Date(datum + 'T00:00:00') - new Date(idag() + 'T00:00:00')) / 86400000); }
   var sdkModul = null;
+
+  var NY_NYCKEL_STEG = '<ol>' +
+    '<li>Gå till <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com</a> och logga in.</li>' +
+    '<li>Välj <strong>API keys</strong> och sedan <strong>Create key</strong>. Skriv namnet Föreningsbokföring och välj en lång giltighetstid, t.ex. 1 år.</li>' +
+    '<li>Kopiera nyckeln (den visas bara en gång).</li>' +
+    '<li>Klistra in den här under <strong>År och arkiv → Claude</strong>, skriv in när den går ut och tryck Spara.</li>' +
+    '<li>Läs in de filer som inte gick igenom en gång till.</li></ol>';
+
+  // Varning som syns överallt när nyckeln snart går ut, har gått ut eller avvisats.
+  function nyckelBanner() {
+    if (!lasNyckel()) return '';
+    var utgar = nyckelUtgar();
+    var kvar = utgar ? dagarKvar(utgar) : null;
+    var rubrik = null, fel = true;
+    if (nyckelAvvisad) rubrik = 'Claude godtar inte längre API-nyckeln. Den har troligen gått ut eller tagits bort.';
+    else if (kvar != null && kvar < 0) rubrik = 'API-nyckeln för Claude gick ut ' + utgar + '. Fakturor och kvitton kan inte läsas in förrän du lagt in en ny.';
+    else if (kvar != null && kvar <= 14) { rubrik = 'API-nyckeln för Claude går ut ' + utgar + (kvar === 0 ? ' (i dag)' : ' (om ' + kvar + (kvar === 1 ? ' dag)' : ' dagar)')) + '. Skaffa en ny i god tid.'; fel = kvar <= 3; }
+    if (!rubrik) return '';
+    return '<div class="card ' + (fel ? 'fel' : '') + '" role="alert"><strong>' + esc(rubrik) + '</strong>' +
+      '<p style="margin-bottom:0">Så här gör du:</p>' + NY_NYCKEL_STEG +
+      '<button class="btn btn-small" data-action="till-claude-installning">Gå till inställningen</button></div>';
+  }
 
   async function claudeKlient() {
     var nyckel = lasNyckel();
@@ -1419,8 +1447,14 @@
   }
 
   function claudeFel(err) {
-    if (sdkModul && err instanceof sdkModul.AuthenticationError) return 'Claude godtog inte API-nyckeln. Kontrollera den under "År och arkiv".';
-    if (sdkModul && err instanceof sdkModul.PermissionDeniedError) return 'API-nyckeln saknar behörighet eller krediter.';
+    if (sdkModul && err instanceof sdkModul.AuthenticationError) {
+      nyckelAvvisad = true;
+      return 'API-nyckeln fungerar inte längre (troligen har den gått ut). Se rutan högst upp för hur du skaffar en ny.';
+    }
+    if (sdkModul && err instanceof sdkModul.PermissionDeniedError) return 'API-nyckeln saknar behörighet. Skapa en ny nyckel i Default workspace på platform.claude.com.';
+    if (sdkModul && err instanceof sdkModul.BadRequestError && /credit/i.test(err.message)) {
+      return 'Kontot hos Anthropic har slut på krediter. Fyll på under Billing på platform.claude.com och läs in filen igen.';
+    }
     if (sdkModul && err instanceof sdkModul.RateLimitError) return 'Claude har för många anrop just nu. Vänta en stund och försök igen.';
     if (sdkModul && err instanceof sdkModul.APIConnectionError) return 'Kunde inte nå Claude. Kontrollera internetanslutningen.';
     if (sdkModul && err instanceof sdkModul.APIError) return 'Claude svarade med ett fel: ' + err.message;
@@ -1569,7 +1603,7 @@
     renderArvaljare();
     var nav = document.getElementById('nav');
     var main = document.getElementById('main');
-    var msg = meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '';
+    var msg = nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
     if (!ar) {
       nav.innerHTML = '';
       main.innerHTML = msg + vyStart();
@@ -1952,11 +1986,19 @@
       (arLast ? '' : '<div class="row"><input type="date" id="lasDatum" style="width:auto" min="' + ar.start + '" max="' + ar.slut + '" value="' + esc(ar.slut) + '"><button class="btn btn-secondary" data-action="las">Lås till och med datumet</button></div>') +
       '<p class="faint" style="margin-top:12px">Nästa år skapas med utgående balanser som ingående balanser. Årets resultat läggs på konto 2069 om det inte redan bokförts där.</p>' +
       '<button class="btn btn-secondary" data-action="nasta-ar">Skapa nästa räkenskapsår</button></div>';
-    html += '<h2>Claude</h2><div class="card"><p>Claude läser fakturor, kvitton och kontoutdrag. Det kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. ' +
+    html += '<h2 id="claude-installning">Claude</h2><div class="card"><p>Claude läser fakturor, kvitton och kontoutdrag. Det kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. ' +
       'Ett vanligt kvitto kostar några tiotals öre att tolka.</p>' +
       '<p class="faint">Nyckeln sparas bara i den här webbläsaren och skickas bara till Anthropic. Den följer inte med i säkerhetskopian. Underlagen skickas till Claude när du läser in dem.</p>' +
-      (lasNyckel() ? '<p class="ok">En nyckel är sparad.</p><button class="btn btn-secondary btn-small" data-action="ta-bort-nyckel">Ta bort nyckeln</button>'
-        : '<div class="row"><input type="password" id="claudeNyckel" autocomplete="off" placeholder="sk-ant-…" style="max-width:360px"><button class="btn btn-small" data-action="spara-nyckel">Spara</button></div>') +
+      (lasNyckel() && !visaNyckelForm
+        ? '<p class="ok">En nyckel är sparad' + (nyckelUtgar() ? ' och går ut ' + esc(nyckelUtgar()) : '') + '.</p>' +
+          '<div class="row"><button class="btn btn-small" data-action="testa-nyckel">Testa nyckeln</button>' +
+          '<button class="btn btn-secondary btn-small" data-action="byt-nyckel">Byt nyckel</button>' +
+          '<button class="btn btn-secondary btn-small" data-action="ta-bort-nyckel">Ta bort nyckeln</button></div>'
+        : '<div class="grid2"><div><label for="claudeNyckel">API-nyckel</label><input type="password" id="claudeNyckel" autocomplete="off" placeholder="sk-ant-…"></div>' +
+          '<div><label for="claudeUtgar">Går ut (står i konsolen när du skapar nyckeln)</label><input type="date" id="claudeUtgar"></div></div>' +
+          '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="spara-nyckel">Spara</button>' +
+          (lasNyckel() ? '<button class="btn btn-secondary btn-small" data-action="avbryt-byt-nyckel">Avbryt</button>' : '') + '</div>' +
+          '<details style="margin-top:8px"><summary class="faint">Hur skaffar jag en nyckel?</summary>' + NY_NYCKEL_STEG + '</details>') +
       '</div>';
     html += '<h2>Föreningen</h2><div class="card"><div class="grid2">' +
       '<div><label for="forNamn">Namn</label><input id="forNamn" value="' + esc(store.forening.namn) + '"></div>' +
@@ -2165,13 +2207,37 @@
     },
     'spara-nyckel': function () {
       var v = varde('claudeNyckel');
+      var utgar = varde('claudeUtgar');
       if (!v) throw new Error('Klistra in nyckeln först.');
+      if (!/^sk-ant-/.test(v)) throw new Error('Det ser inte ut som en API-nyckel från Anthropic. Den börjar med sk-ant-.');
       localStorage.setItem(NYCKEL, v);
-      visa('API-nyckeln är sparad i den här webbläsaren.');
+      if (utgar) localStorage.setItem(NYCKEL_UTGAR, utgar); else localStorage.removeItem(NYCKEL_UTGAR);
+      nyckelAvvisad = false;
+      visaNyckelForm = false;
+      visa('API-nyckeln är sparad i den här webbläsaren.' + (utgar ? ' Appen påminner dig två veckor innan den går ut.' : ' Tips: ange när den går ut så påminner appen dig i tid.'));
+      HANDLINGAR['testa-nyckel']();
     },
     'ta-bort-nyckel': function () {
       localStorage.removeItem(NYCKEL);
+      localStorage.removeItem(NYCKEL_UTGAR);
+      nyckelAvvisad = false;
       visa('API-nyckeln är borttagen från den här webbläsaren.');
+    },
+    'byt-nyckel': function () { visaNyckelForm = true; render(); },
+    'avbryt-byt-nyckel': function () { visaNyckelForm = false; render(); },
+    'testa-nyckel': function () {
+      claudeKlient()
+        .then(function (client) { return client.models.list({ limit: 1 }); })
+        .then(function () { nyckelAvvisad = false; visa('Nyckeln fungerar.'); })
+        .catch(function (err) { visa(claudeFel(err), true); });
+    },
+    'till-claude-installning': function () {
+      vy = 'arkiv';
+      visaNyckelForm = true;
+      meddelande = null;
+      render();
+      var el = document.getElementById('claude-installning');
+      if (el) el.scrollIntoView();
     },
     'nytt-konto': function () {
       setAktivt(K.laggTillKonto(aktivt(), varde('nyttNr'), varde('nyttNamn')));
