@@ -98,6 +98,8 @@
   .tag.ok { color: var(--good); border-color: var(--good); }
   .logg { margin: 8px 0; padding-left: 18px; font-size: 14px; }
   a { color: var(--accent); }
+  footer { margin: 32px 0 8px; text-align: center; }
+  .lank-knapp { background: none; border: 0; color: var(--ink-faint); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
   @media print {
     header .row, nav, .ej-utskrift { display: none !important; }
     body { background: #fff; color: #000; }
@@ -113,6 +115,7 @@
   </header>
   <nav id="nav" aria-label="Huvudmeny"></nav>
   <main id="main"></main>
+  <footer class="ej-utskrift"><button class="lank-knapp" data-vy="om" id="versionLank"></button></footer>
 </div>
 
 <!--
@@ -120,6 +123,55 @@
   automatiskt (test/karna.test.mjs läser in just det här skriptet).
   Alla belopp är heltal i ören. Positivt belopp = debet, negativt = kredit.
 -->
+<!--
+  Versioner. Den översta är den aktuella. Lägg till en ny post överst vid varje ändring
+  (test/versioner.test.mjs kontrollerar ordningen).
+-->
+<script id="versioner">
+var VERSIONER = [
+  {
+    version: '0.5', datum: '2026-11-19',
+    nyheter: [
+      'Versionsnumret syns längst ner på varje sida.',
+      'Ny flik "Om appen" med en kort beskrivning och vad som ändrats i varje version.'
+    ]
+  },
+  {
+    version: '0.4', datum: '2026-11-19',
+    nyheter: [
+      'En låst period kan låsas upp. Orsaken sparas i en logg över låsningar.',
+      'Förslaget vid låsning är slutet av förra månaden i stället för årets sista dag.'
+    ]
+  },
+  {
+    version: '0.3', datum: '2026-11-19',
+    nyheter: [
+      'Appen påminner två veckor innan API-nyckeln för Claude går ut.',
+      'Tydlig förklaring med steg för steg om nyckeln har gått ut eller krediterna är slut.',
+      'Knapp för att testa att nyckeln fungerar.'
+    ]
+  },
+  {
+    version: '0.2', datum: '2026-11-18',
+    nyheter: [
+      'Läs in fakturor, kvitton och kontoutdrag. Claude tolkar PDF:er och bilder.',
+      'Kontoutdrag som CSV eller inklistrade rader från Excel.',
+      'Banktransaktioner kopplas automatiskt till rätt underlag på belopp, datum och OCR-nummer.',
+      'Appen lär sig vilket konto som brukar användas och föreslår det nästa gång.',
+      'Avstämning av bokfört saldo mot banken.'
+    ]
+  },
+  {
+    version: '0.1', datum: '2026-11-18',
+    nyheter: [
+      'Grunden: räkenskapsår, verifikationer med dubbel bokföring, rättelser och låsning.',
+      'BAS-baserad kontoplan, huvudbok, grundbok, saldobalans, resultaträkning och balansräkning.',
+      'Årsskifte med ingående balanser, kontroller och export till SIE 4.'
+    ]
+  }
+];
+</script>
+
 <script id="karna">
 (function (root) {
   'use strict';
@@ -1610,11 +1662,13 @@
     ['huvudbok', 'Huvudbok'],
     ['rapporter', 'Rapporter'],
     ['kontoplan', 'Kontoplan'],
-    ['arkiv', 'År och arkiv']
+    ['arkiv', 'År och arkiv'],
+    ['om', 'Om appen']
   ];
 
   function render() {
     var ar = aktivt();
+    document.getElementById('versionLank').textContent = 'Föreningsbokföring version ' + VERSIONER[0].version;
     document.getElementById('rubrik').textContent = store.forening.namn || 'Föreningsbokföring';
     renderArvaljare();
     var nav = document.getElementById('nav');
@@ -1622,7 +1676,7 @@
     var msg = nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
     if (!ar) {
       nav.innerHTML = '';
-      main.innerHTML = msg + vyStart();
+      main.innerHTML = msg + (vy === 'om' ? '<p><button class="btn btn-secondary btn-small" data-vy="inlasning">Tillbaka</button></p>' + vyOm() : vyStart());
       return;
     }
     nav.innerHTML = VYER.map(function (v) {
@@ -1635,7 +1689,8 @@
       huvudbok: vyHuvudbok,
       rapporter: vyRapporter,
       kontoplan: vyKontoplan,
-      arkiv: vyArkiv
+      arkiv: vyArkiv,
+      om: vyOm
     }[vy](ar);
     main.innerHTML = msg + html;
     if (vy === 'ny') uppdateraUtkastStatus();
@@ -1990,6 +2045,21 @@
         (anvands ? '' : '<button class="btn btn-secondary btn-small" data-action="ta-bort-konto" data-nr="' + k.nr + '">Ta bort</button>') + '</td></tr>';
     });
     return html + '</tbody></table></div>';
+  }
+
+  function vyOm() {
+    var html = '<h2>Om appen</h2><div class="card">' +
+      '<p><strong>Föreningsbokföring ' + esc(VERSIONER[0].version) + '</strong> · ' + esc(VERSIONER[0].datum) + '</p>' +
+      '<p>Ett enkelt bokföringsverktyg för små ideella föreningar. Läs in fakturor, kvitton och kontoutdrag, låt appen föreslå verifikationerna och ta fram resultaträkning, balansräkning och underlag till årsmötet.</p>' +
+      '<p class="faint">Bokföringen sparas i den här webbläsaren och filerna i webbläsarens lagring. Exportera en säkerhetskopia under År och arkiv. ' +
+      'Versioner före 1.0 är under uppbyggnad; 1.0 blir den första som sparar i föreningens OneDrive.</p>' +
+      '<p class="faint">Källkoden finns på <a href="https://github.com/KarmaDonkey/forening-bokforing" target="_blank" rel="noopener">GitHub</a>.</p></div>';
+    html += '<h2>Vad som är nytt</h2>';
+    VERSIONER.forEach(function (v) {
+      html += '<div class="card"><h3 style="margin-top:0">Version ' + esc(v.version) + ' <span class="faint">· ' + esc(v.datum) + '</span></h3><ul>' +
+        v.nyheter.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul></div>';
+    });
+    return html;
   }
 
   function vyArkiv(ar) {
