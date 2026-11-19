@@ -253,7 +253,7 @@ describe('tolkning med Claude', () => {
     const n = K.normaliseraTolkning(bas, { id: 'u1', filnamn: 'f.pdf' });
     eq(n.varningar, []);
     assert.equal(n.bankrader, null);
-    eq(n.underlag, { id: 'u1', filnamn: 'f.pdf', dokumenttyp: 'faktura', motpart: 'Stockholms stad', datum: '2030-02-01', forfallodatum: '2030-03-01', belopp: kr(1200), riktning: 'utgift', beskrivning: 'Lokalhyra februari', fakturanummer: '8900300655', ocr: '1321890030065563', foreslagetKonto: '5010' });
+    eq(n.underlag, { id: 'u1', filnamn: 'f.pdf', dokumenttyp: 'faktura', motpart: 'Stockholms stad', datum: '2030-02-01', forfallodatum: '2030-03-01', belopp: kr(1200), riktning: 'utgift', beskrivning: 'Lokalhyra februari', fakturanummer: '8900300655', ocr: '1321890030065563', foreslagetKonto: '5010', kontoKalla: 'claude' });
   });
   test('utländsk valuta använder SEK-beloppet eller varnar', () => {
     const eur = K.normaliseraTolkning({ ...bas, valuta: 'EUR', belopp: '135.50', belopp_sek: '' }, { id: 'u2', filnamn: 'flyg.pdf' });
@@ -313,5 +313,85 @@ describe('ingående balans från banken', () => {
     const ar = K.skapaAr({ start: '2030-01-01' });
     assert.throws(() => K.sattIngaendeSaldo(K.lasPeriod(ar, '2030-01-31'), '1930', 100), /låst/);
     assert.throws(() => K.sattIngaendeSaldo(ar, '3100', 100), /Ogiltigt/);
+  });
+});
+
+describe('inlärning av konton per motpart', () => {
+  test('lär sig och hittar motpart, exakt träff går före delvis', () => {
+    let r = K.larMotpart([], 'Stockholms stad, Idrottsförvaltningen', '5010');
+    r = K.larMotpart(r, 'Stockholms stad', '6990');
+    assert.equal(K.hittaMotpartsregel(r, 'STOCKHOLMS STAD IDROTTSFÖRVALTNINGEN').konto, '5010');
+    assert.equal(K.hittaMotpartsregel(r, 'Stockholms stad').konto, '6990');
+    assert.equal(K.hittaMotpartsregel(r, 'Stockholms stad, Utbildningsförvaltningen').konto, '6990');
+    assert.equal(K.hittaMotpartsregel(r, 'Tågbolaget'), null);
+    assert.equal(K.hittaMotpartsregel(r, ''), null);
+    r = K.larMotpart(r, 'Stockholms stad', '5010');
+    assert.equal(r.length, 2);
+    assert.equal(K.hittaMotpartsregel(r, 'Stockholms stad').konto, '5010');
+    eq(K.larMotpart(r, 'X', 'abc'), r);
+  });
+  test('kontot att lära är det enda som inte är ett betalkonto', () => {
+    assert.equal(K.kontoAttLara([{ konto: '5010', belopp: 100 }, { konto: '1930', belopp: -100 }]), '5010');
+    assert.equal(K.kontoAttLara([{ konto: '5800', belopp: 100 }, { konto: '2890', belopp: -100 }]), '5800');
+    assert.equal(K.kontoAttLara([{ konto: '5800', belopp: 50 }, { konto: '5400', belopp: 50 }, { konto: '1930', belopp: -100 }]), null);
+  });
+  test('väntande underlag får inlärt konto, men inte där användaren valt själv', () => {
+    let ar = ar2030();
+    ar = K.laggTillUnderlag(ar, { id: 'a', filnamn: 'a.pdf', dokumenttyp: 'faktura', motpart: 'Stockholms stad', belopp: 100, riktning: 'utgift', foreslagetKonto: '6990', kontoKalla: 'claude' });
+    ar = K.laggTillUnderlag(ar, { id: 'b', filnamn: 'b.pdf', dokumenttyp: 'faktura', motpart: 'Stockholms stad', belopp: 200, riktning: 'utgift', foreslagetKonto: '5000', kontoKalla: 'manuell' });
+    ar = K.laggTillUnderlag(ar, { id: 'c', filnamn: 'c.pdf', dokumenttyp: 'faktura', motpart: 'Annan', belopp: 300, riktning: 'utgift', foreslagetKonto: '', });
+    const ny = K.tillampaMotpartsregler(ar, K.larMotpart([], 'Stockholms stad', '5010'));
+    eq(ny.underlag.map((u) => [u.id, u.foreslagetKonto, u.kontoKalla || '']), [['a', '5010', 'inlart'], ['b', '5000', 'manuell'], ['c', '', '']]);
+  });
+  test('regler med konton som inte finns i kontoplanen används inte', () => {
+    let ar = K.laggTillUnderlag(ar2030(), { id: 'a', filnamn: 'a.pdf', dokumenttyp: 'faktura', motpart: 'X', belopp: 100, riktning: 'utgift', foreslagetKonto: '' });
+    ar = K.tillampaMotpartsregler(ar, K.larMotpart([], 'X', '5999'));
+    assert.equal(ar.underlag[0].foreslagetKonto, '');
+  });
+  test('kontonummer med namn efter godtas från Claude', () => {
+    const bas = { dokumenttyp: 'faktura', motpart: 'X', datum: '2030-01-01', forfallodatum: '', belopp: '10.00', valuta: 'SEK', belopp_sek: '', moms: '', fakturanummer: '', ocr: '', beskrivning: '', riktning: 'utgift', stalld_till_foreningen: 'ja', osakerhet: '', transaktioner: [] };
+    assert.equal(K.normaliseraTolkning({ ...bas, foreslaget_konto: '5010 Lokalhyra' }, { id: 'a', filnamn: 'a' }).underlag.foreslagetKonto, '5010');
+    assert.equal(K.normaliseraTolkning({ ...bas, foreslaget_konto: 'Konto 5800 (Resekostnader)' }, { id: 'a', filnamn: 'a' }).underlag.foreslagetKonto, '5800');
+    assert.equal(K.normaliseraTolkning({ ...bas, foreslaget_konto: '50100' }, { id: 'a', filnamn: 'a' }).underlag.foreslagetKonto, '');
+    assert.equal(K.normaliseraTolkning({ ...bas, foreslaget_konto: '' }, { id: 'a', filnamn: 'a' }).underlag.kontoKalla, undefined);
+  });
+  test('instruktionen till Claude innehåller tidigare bokföringar', () => {
+    const r = K.larMotpart(K.larMotpart([], 'Stockholms stad, Idrottsförvaltningen', '5010'), 'Okänd', '5999');
+    const t = K.tolkningsInstruktion(ar2030(), {}, r);
+    assert.match(t, /Stockholms stad, Idrottsförvaltningen → 5010 Lokalhyra/);
+    assert.doesNotMatch(t, /5999/);
+    assert.doesNotMatch(K.tolkningsInstruktion(ar2030(), {}, []), /tidigare/);
+  });
+});
+
+describe('koppla bankrader till redan bokförda verifikationer', () => {
+  function medFaktura() {
+    let ar = ar2030();
+    ar = K.bokfor(ar, { datum: '2030-02-01', text: 'Hyra feb', underlag: ['f.pdf'], rader: [{ konto: '5010', belopp: kr(1200) }, { konto: '1930', belopp: kr(-1200) }] }).ar;
+    ar = K.bokfor(ar, { datum: '2030-02-01', text: 'Hyra feb hall 2', underlag: ['g.pdf'], rader: [{ konto: '5010', belopp: kr(1200) }, { konto: '1930', belopp: kr(-1200) }] }).ar;
+    return ar;
+  }
+  test('bankraden kopplas till verifikationen i stället för att bokföras igen', () => {
+    let ar = K.importeraBankrader(medFaktura(), [
+      { datum: '2030-02-28', text: 'STOCKHOLMS STAD', referens: '', belopp: kr(-1200), saldo: null },
+      { datum: '2030-03-01', text: 'STOCKHOLMS STAD', referens: '', belopp: kr(-1200), saldo: null },
+      { datum: '2030-03-02', text: 'Annat', referens: '', belopp: kr(-50), saldo: null }
+    ]).ar;
+    const res = K.kopplaBokforda(ar);
+    eq(res.kopplade.map((k) => k.nr), [1, 2]);
+    eq(K.oppnaBankrader(res.ar).map((r) => r.text), ['Annat']);
+    assert.equal(res.ar.bankrader[0].kopplad, 'efterhand');
+    eq(K.kopplaBokforda(res.ar).kopplade, []);
+  });
+  test('för långt ifrån i tid, rättade verifikationer och fel belopp kopplas inte', () => {
+    let ar = K.rattelse(medFaktura(), 2, { datum: '2030-02-02' }).ar;
+    ar = K.importeraBankrader(ar, [
+      { datum: '2030-06-01', text: 'Sent', referens: '', belopp: kr(-1200), saldo: null },
+      { datum: '2030-02-20', text: 'Fel belopp', referens: '', belopp: kr(-1100), saldo: null },
+      { datum: '2030-02-21', text: 'Rätt', referens: '', belopp: kr(-1200), saldo: null }
+    ]).ar;
+    const res = K.kopplaBokforda(ar);
+    eq(res.kopplade.map((k) => k.nr), [1]);
+    eq(K.oppnaBankrader(res.ar).map((r) => r.text).sort(), ['Fel belopp', 'Sent']);
   });
 });
