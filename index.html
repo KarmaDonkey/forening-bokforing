@@ -432,7 +432,14 @@
   function lasPeriod(ar, tom) {
     if (!arGiltigtDatum(tom) || tom < ar.start || tom > ar.slut) throw BokforingsFel('Datumet för låsning måste ligga inom räkenskapsåret.');
     if (ar.lastTom && tom < ar.lastTom) throw BokforingsFel('Perioden är redan låst till och med ' + ar.lastTom + '.');
-    return Object.assign({}, ar, { lastTom: tom });
+    return Object.assign({}, ar, { lastTom: tom, laslogg: (ar.laslogg || []).concat([{ handling: 'låst', tom: tom, tid: arguments[2] || null }]) });
+  }
+
+  // Låser upp en låst period. Varje upplåsning sparas i årets logg så att den syns i efterhand.
+  function lasUpp(ar, opt) {
+    if (!ar.lastTom) throw BokforingsFel('Inget är låst.');
+    var post = { handling: 'upplåst', tom: ar.lastTom, tid: (opt && opt.tid) || null, orsak: (opt && opt.orsak) || '' };
+    return Object.assign({}, ar, { lastTom: null, laslogg: (ar.laslogg || []).concat([post]) });
   }
 
   // ---------- Saldon ----------
@@ -1218,6 +1225,7 @@
     rattadAv: rattadAv,
     rattelse: rattelse,
     lasPeriod: lasPeriod,
+    lasUpp: lasUpp,
     sattIngaendeSaldo: sattIngaendeSaldo,
     rorelser: rorelser,
     saldon: saldon,
@@ -1324,6 +1332,14 @@
   function idag() {
     var d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  // Förslag vid låsning: sista dagen i förra månaden, aldrig hela året i förväg.
+  function forslagLasDatum(ar) {
+    var d = idag().slice(0, 8) + '01';
+    d = K.laggTillDagar(d, -1);
+    if (d > ar.slut) d = ar.slut;
+    if (d < ar.start) d = ar.start;
+    return d;
   }
   function standardDatum(ar) {
     var d = idag();
@@ -1788,6 +1804,7 @@
   function vyNy(ar) {
     if (!utkast.datum) utkast.datum = standardDatum(ar);
     var html = '<h2>Ny verifikation</h2><div class="card">' + kopplingsInfo(ar) +
+      (ar.lastTom ? '<p class="faint" style="margin-top:0">Perioden till och med ' + esc(ar.lastTom) + ' är låst. Den kan låsas upp under År och arkiv.</p>' : '') +
       '<div class="grid2"><div><label for="uDatum">Datum</label><input id="uDatum" type="date" data-u="datum" value="' + esc(utkast.datum) + '" min="' + ar.start + '" max="' + ar.slut + '"></div>' +
       '<div><label for="uText">Text</label><input id="uText" data-u="text" value="' + esc(utkast.text) + '" placeholder="t.ex. Lokalhyra oktober"></div>' +
       '<div><label for="uUnderlag">Underlag (filnamn, separera med komma)</label><input id="uUnderlag" data-u="underlag" value="' + esc(utkast.underlag) + '"></div>' +
@@ -1983,7 +2000,11 @@
       : '<p class="ok">Inga anmärkningar.</p>') + '</div>';
     html += '<h2>Låsning och årsskifte</h2><div class="card">' +
       '<p>' + (ar.lastTom ? 'Låst till och med ' + esc(ar.lastTom) + '.' : 'Inget är låst ännu.') + ' Låsta perioder kan inte ändras; fel rättas med en ny verifikation.</p>' +
-      (arLast ? '' : '<div class="row"><input type="date" id="lasDatum" style="width:auto" min="' + ar.start + '" max="' + ar.slut + '" value="' + esc(ar.slut) + '"><button class="btn btn-secondary" data-action="las">Lås till och med datumet</button></div>') +
+      (arLast ? '' : '<div class="row"><input type="date" id="lasDatum" style="width:auto" min="' + ar.start + '" max="' + ar.slut + '" value="' + esc(forslagLasDatum(ar)) + '"><button class="btn btn-secondary" data-action="las">Lås till och med datumet</button></div>') +
+      (ar.lastTom ? '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="las-upp">Lås upp…</button></div>' : '') +
+      ((ar.laslogg || []).length ? '<details style="margin-top:8px"><summary class="faint">Logg över låsningar</summary><ul class="faint">' + ar.laslogg.map(function (l) {
+        return '<li>' + esc((l.tid || '').slice(0, 16).replace('T', ' ')) + ': ' + esc(l.handling) + ' till och med ' + esc(l.tom) + (l.orsak ? ' (' + esc(l.orsak) + ')' : '') + '</li>';
+      }).join('') + '</ul></details>' : '') +
       '<p class="faint" style="margin-top:12px">Nästa år skapas med utgående balanser som ingående balanser. Årets resultat läggs på konto 2069 om det inte redan bokförts där.</p>' +
       '<button class="btn btn-secondary" data-action="nasta-ar">Skapa nästa räkenskapsår</button></div>';
     html += '<h2 id="claude-installning">Claude</h2><div class="card"><p>Claude läser fakturor, kvitton och kontoutdrag. Det kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. ' +
@@ -2256,9 +2277,16 @@
     },
     'las': function () {
       var datum = varde('lasDatum');
-      if (!window.confirm('Lås allt till och med ' + datum + '? Det går inte att ångra.')) return;
-      setAktivt(K.lasPeriod(aktivt(), datum));
+      if (!window.confirm('Lås allt till och med ' + datum + '? Därefter går det inte att bokföra eller ändra något med datum till och med ' + datum + '.')) return;
+      setAktivt(K.lasPeriod(aktivt(), datum, new Date().toISOString()));
       visa('Perioden är låst till och med ' + datum + '.');
+    },
+    'las-upp': function () {
+      var ar = aktivt();
+      var orsak = window.prompt('Varför ska perioden till och med ' + ar.lastTom + ' låsas upp? Orsaken sparas i loggen.', 'Låst av misstag');
+      if (orsak == null) return;
+      setAktivt(K.lasUpp(ar, { tid: new Date().toISOString(), orsak: orsak.trim() }));
+      visa('Perioden är upplåst. Upplåsningen är sparad i loggen.');
     },
     'nasta-ar': function () {
       var nytt = K.nastaAr(aktivt());

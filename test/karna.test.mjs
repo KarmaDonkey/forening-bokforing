@@ -140,6 +140,20 @@ describe('rättelser och låsning', () => {
   });
 });
 
+describe('upplåsning', () => {
+  test('låsning och upplåsning loggas', () => {
+    let ar = K.lasPeriod(testar(), '2030-12-31', '2031-01-02T10:00:00Z');
+    ar = K.lasUpp(ar, { tid: '2031-01-03T10:00:00Z', orsak: 'Låst av misstag' });
+    assert.equal(ar.lastTom, null);
+    eq(ar.laslogg, [
+      { handling: 'låst', tom: '2030-12-31', tid: '2031-01-02T10:00:00Z' },
+      { handling: 'upplåst', tom: '2030-12-31', tid: '2031-01-03T10:00:00Z', orsak: 'Låst av misstag' }
+    ]);
+    assert.doesNotThrow(() => K.bokfor(ar, { datum: '2030-06-01', text: 'Ok', rader: [{ konto: '5010', belopp: 1 }, { konto: '1930', belopp: -1 }] }));
+    assert.throws(() => K.lasUpp(ar), /Inget är låst/);
+  });
+});
+
 describe('saldon och böcker', () => {
   test('saldon räknar in ingående balans', () => {
     const s = K.saldon(testar());
