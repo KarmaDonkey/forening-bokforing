@@ -6,74 +6,102 @@
 <title>Föreningsbokföring</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,600;8..144,700&display=swap" rel="stylesheet">
 <style>
+  /* Färger och form från föreningens hemsida: ljust, skiffergrå text, kolgrå partier, guld från logotypen. */
   :root {
-    --bg: #EDE8DC;
-    --surface: #E4DDCB;
-    --surface-2: #DCD4BF;
-    --ink: #2A2620;
-    --ink-soft: #6B6250;
-    --ink-faint: #8E846E;
-    --accent: #96721C;
-    --good: #4B6B45;
-    --over: #8C3B32;
-    --hairline: rgba(42, 38, 32, 0.14);
+    --bg: #F4F4F4;
+    --surface: #FFFFFF;
+    --surface-2: #ECEDF0;
+    --ink: #373F51;
+    --ink-soft: #4E586E;
+    --ink-faint: #7D8596;
+    --accent: #2B2A27;
+    --accent-text: #FFFFFF;
+    --guld: #E5AE1F;
+    --lank: #2F80C8;
+    --good: #2E7D4F;
+    --over: #C8372D;
+    --hairline: rgba(55, 63, 81, 0.13);
+    --kol: #2B2A27;
+    --kol-text: #E9E7E2;
+    --skugga: 0 1px 2px rgba(55, 63, 81, 0.06), 0 2px 8px rgba(55, 63, 81, 0.05);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #1B1917;
-      --surface: #242220;
-      --surface-2: #2C2A26;
-      --ink: #EDE6D8;
-      --ink-soft: #A69C89;
-      --ink-faint: #7A7263;
-      --accent: #C9A227;
-      --good: #7FA36E;
-      --over: #C06256;
-      --hairline: rgba(237, 230, 216, 0.12);
+      --bg: #1F1E1C;
+      --surface: #2B2A27;
+      --surface-2: #353330;
+      --ink: #F1EFEA;
+      --ink-soft: #CBC7BE;
+      --ink-faint: #948F85;
+      --accent: #FFFFFF;
+      --accent-text: #373F51;
+      --guld: #F0BF3C;
+      --lank: #6FB3EC;
+      --good: #6FBF8E;
+      --over: #E8705F;
+      --hairline: rgba(241, 239, 234, 0.12);
+      --kol: #161514;
+      --kol-text: #E9E7E2;
+      --skugga: none;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #1B1917;
-    --surface: #242220;
-    --surface-2: #2C2A26;
-    --ink: #EDE6D8;
-    --ink-soft: #A69C89;
-    --ink-faint: #7A7263;
-    --accent: #C9A227;
-    --good: #7FA36E;
-    --over: #C06256;
-    --hairline: rgba(237, 230, 216, 0.12);
+    --bg: #1F1E1C;
+    --surface: #2B2A27;
+    --surface-2: #353330;
+    --ink: #F1EFEA;
+    --ink-soft: #CBC7BE;
+    --ink-faint: #948F85;
+    --accent: #FFFFFF;
+    --accent-text: #373F51;
+    --guld: #F0BF3C;
+    --lank: #6FB3EC;
+    --good: #6FBF8E;
+    --over: #E8705F;
+    --hairline: rgba(241, 239, 234, 0.12);
+    --kol: #161514;
+    --kol-text: #E9E7E2;
+    --skugga: none;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--ink);
-    font: 15px/1.5 "IBM Plex Sans", system-ui, sans-serif;
+    font: 15.5px/1.55 "Roboto Flex", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
   }
   .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
-  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 0 12px; border-bottom: 1px solid var(--hairline); }
-  h1 { font: 600 22px/1.2 "Source Serif 4", Georgia, serif; margin: 0; }
-  h2 { font: 600 19px/1.3 "Source Serif 4", Georgia, serif; margin: 20px 0 8px; }
-  h3 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); margin: 18px 0 6px; }
-  nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 12px 0; }
-  nav button { background: none; border: 1px solid transparent; color: var(--ink-soft); padding: 6px 12px; border-radius: 6px; font: inherit; cursor: pointer; }
-  nav button[aria-current="page"] { background: var(--surface); color: var(--ink); border-color: var(--hairline); }
-  .btn { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font: inherit; font-weight: 500; cursor: pointer; }
-  .btn:disabled { opacity: .45; cursor: default; }
-  .btn-secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--hairline); }
-  .btn-small { padding: 4px 10px; font-size: 13px; }
+  .topp { background: var(--surface); border-bottom: 1px solid var(--hairline); }
+  header { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 16px 10px; text-align: center; }
+  .logo-bricka { background: #fff; border-radius: 50%; padding: 6px; display: inline-flex; }
+  #logo { height: 84px; width: auto; display: block; border-radius: 50%; }
+  h1 { font: 700 26px/1.2 "Roboto Flex", system-ui, sans-serif; letter-spacing: -0.01em; margin: 0; color: var(--ink); }
+  h2 { font: 500 21px/1.3 "Roboto Flex", system-ui, sans-serif; margin: 24px 0 10px; color: var(--ink); }
+  h3 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-soft); margin: 18px 0 6px; }
+  #arvaljare { font-size: 13px; color: var(--ink-soft); }
+  #arvaljare select { padding: 3px 8px; font-size: 13px; border-radius: 999px; }
+  nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 18px; padding: 6px 16px 0; max-width: 1000px; margin: 0 auto; }
+  nav button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--ink); padding: 10px 2px 8px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  nav button:hover { border-bottom-color: var(--hairline); }
+  nav button[aria-current="page"] { border-bottom-color: var(--guld); }
+  .btn { background: var(--accent); color: var(--accent-text); border: 1px solid var(--accent); border-radius: 999px; padding: 9px 20px; font: inherit; font-weight: 500; cursor: pointer; }
+  .btn:hover { filter: brightness(1.15); }
+  .btn:disabled { opacity: .4; cursor: default; filter: none; }
+  .btn-secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--hairline); box-shadow: var(--skugga); }
+  .btn-small { padding: 5px 14px; font-size: 13px; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 8px; padding: 14px 16px; margin: 12px 0; }
+  .card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; padding: 16px 18px; margin: 12px 0; box-shadow: var(--skugga); }
   label { display: block; font-size: 13px; color: var(--ink-soft); margin: 8px 0 4px; }
-  input, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--hairline); border-radius: 6px; padding: 7px 9px; width: 100%; }
-  input.num { text-align: right; font-family: "IBM Plex Mono", monospace; }
+  input, select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--guld); outline-offset: 1px; }
+  input.num { text-align: right; }
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
   th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); font-weight: 500; }
-  td.num, th.num { text-align: right; font-family: "IBM Plex Mono", monospace; white-space: nowrap; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
   tr.summa td { font-weight: 600; border-top: 1px solid var(--ink-faint); }
   tr.total td { font-weight: 600; border-top: 2px solid var(--ink); }
   tr.klickbar { cursor: pointer; }
@@ -91,27 +119,28 @@
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
   @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
   .detalj td { background: var(--surface-2); }
-  .dropzon { border: 2px dashed var(--ink-faint); text-align: center; }
+  .dropzon { text-align: center; }
   .dropzon .row { justify-content: center; }
-  .bankrad .belopp { font-family: "IBM Plex Mono", monospace; font-weight: 500; white-space: nowrap; }
+  .bankrad .belopp { font-weight: 600; white-space: nowrap; font-size: 16px; }
   .knapp-tag { background: none; cursor: pointer; font: inherit; font-size: 11px; }
   .tag.ok { color: var(--good); border-color: var(--good); }
   .logg { margin: 8px 0; padding-left: 18px; font-size: 14px; }
-  a { color: var(--accent); }
-  footer { margin: 32px 0 8px; text-align: center; }
-  .lank-knapp { background: none; border: 0; color: var(--ink-faint); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
+  a { color: var(--lank); }
+  footer { margin-top: 40px; background: var(--kol); color: var(--kol-text); text-align: center; padding: 22px 16px; font-size: 13px; }
+  .lank-knapp { background: none; border: 0; color: var(--kol-text); font: inherit; cursor: pointer; text-decoration: underline; opacity: .8; }
+  .dropzon { border: 2px dashed rgba(55, 63, 81, 0.3); border-radius: 12px; }
   .listpost { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) auto; gap: 6px; align-items: end; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
-  .listpost textarea, .dok-form textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--hairline); border-radius: 6px; padding: 7px 9px; width: 100%; min-height: 60px; }
+  .listpost textarea, .dok-form textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 7px 9px; width: 100%; min-height: 60px; }
   .forhandsvisning { overflow-x: auto; background: var(--surface-2); padding: 12px; border-radius: 8px; }
   #utskrift { display: none; }
   /* Fakturor och kvitton: alltid ljusa, oavsett tema, i A4-format. */
-  .dok { background: #fff; color: #1a1a1a; width: 180mm; min-height: 250mm; margin: 0 auto; padding: 12mm; font: 10.5pt/1.45 "IBM Plex Sans", Arial, sans-serif; display: flex; flex-direction: column; box-sizing: content-box; }
+  .dok { background: #fff; color: #1a1a1a; width: 180mm; min-height: 250mm; margin: 0 auto; padding: 12mm; font: 10.5pt/1.45 "Roboto Flex", Arial, sans-serif; font-variant-numeric: tabular-nums; display: flex; flex-direction: column; box-sizing: content-box; }
   .dok table { width: 100%; border-collapse: collapse; }
   .dok th, .dok td { border: 0; padding: 3px 6px; color: #1a1a1a; }
   .dok-huvud { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-  .dok-logo { max-height: 70px; max-width: 200px; display: block; margin-bottom: 6px; }
+  .dok-logo { max-height: 80px; max-width: 200px; display: block; margin-bottom: 6px; }
   .dok-forening { font-size: 13pt; font-weight: 600; }
-  .dok-titel { font: 600 24pt/1.1 "Source Serif 4", Georgia, serif; text-align: right; margin-bottom: 8px; }
+  .dok-titel { font: 700 24pt/1.1 "Roboto Flex", Arial, sans-serif; color: #373F51; text-align: right; margin-bottom: 8px; }
   .dok-meta td:first-child { color: #555; padding-right: 12px; }
   .dok-meta td { padding: 1px 0; white-space: nowrap; }
   .dok-parter { display: flex; gap: 24px; margin: 18px 0 14px; }
@@ -119,17 +148,17 @@
   .dok-etikett { color: #555; font-size: 9pt; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
   .dok-rader th { text-align: left; border-bottom: 1.5px solid #1a1a1a; font-size: 9pt; text-transform: uppercase; letter-spacing: .04em; color: #555; }
   .dok-rader td { border-bottom: 1px solid #ddd; vertical-align: top; }
-  .dok .num { text-align: right; white-space: nowrap; font-family: "IBM Plex Mono", monospace; }
+  .dok .num { text-align: right; white-space: nowrap; }
   .dok-summa { width: 50% !important; margin-left: auto; margin-top: 8px; }
   .dok-summa tr.total td { font-weight: 600; border-top: 1.5px solid #1a1a1a; font-size: 12pt; }
   .dok-info { margin-top: 14px; }
   .dok-fot { margin-top: auto; padding-top: 10px; border-top: 1px solid #bbb; display: flex; gap: 18px; font-size: 9pt; color: #333; }
   .dok-fot > div { flex: 1; }
   @media print {
-    header .row, nav, .ej-utskrift { display: none !important; }
+    .topp, nav, footer, .ej-utskrift { display: none !important; }
     body { background: #fff; color: #000; }
     .card { border: 0; padding: 0; }
-    body.skriver-dokument .wrap { display: none !important; }
+    body.skriver-dokument .wrap, body.skriver-dokument .topp, body.skriver-dokument footer { display: none !important; }
     body.skriver-dokument #utskrift { display: block !important; }
     body.skriver-dokument .dok { width: auto; min-height: 265mm; padding: 0; }
     @page { size: A4; margin: 15mm; }
@@ -137,15 +166,18 @@
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="topp">
   <header>
+    <span class="logo-bricka" id="logoBricka" hidden><img id="logo" alt=""></span>
     <h1 id="rubrik">Föreningsbokföring</h1>
     <div class="row" id="arvaljare"></div>
   </header>
   <nav id="nav" aria-label="Huvudmeny"></nav>
-  <main id="main"></main>
-  <footer class="ej-utskrift"><button class="lank-knapp" data-vy="om" id="versionLank"></button></footer>
 </div>
+<div class="wrap">
+  <main id="main"></main>
+</div>
+<footer class="ej-utskrift"><button class="lank-knapp" data-vy="om" id="versionLank"></button></footer>
 <div id="utskrift"></div>
 
 <!--
@@ -159,6 +191,15 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '0.8', datum: '2026-11-20',
+    nyheter: [
+      'Ny design i samma stil som föreningens hemsida: ljus bakgrund, typsnittet Roboto Flex, rundade knappar och mörk sidfot.',
+      'Föreningens logotyp visas överst i appen när den är uppladdad.',
+      'Föreningens uppgifter, adresser, kontaktpersoner, artiklar och logotyp kan läsas in från en fil.',
+      'Swishnummer kan anges och skrivs ut på fakturor.'
+    ]
+  },
   {
     version: '0.7', datum: '2026-11-20',
     nyheter: [
@@ -1386,6 +1427,38 @@ var VERSIONER = [
     };
   }
 
+  // Läser in föreningsuppgifter från en fil. Ifyllda uppgifter behålls; poster som redan finns läggs inte till igen.
+  var FORENINGSFAELT = ['namn', 'orgnr', 'bankgiro', 'webb', 'epost', 'swish'];
+
+  function slaIhopForening(befintligt, fil, nyttId) {
+    if (!fil || fil.format !== 'foreningsbokforing-forening') throw BokforingsFel('Filen innehåller inga föreningsuppgifter för appen.');
+    var nyckel = function (t) { return String(t || '').toLowerCase().replace(/\s+/g, ' ').trim(); };
+    var ut = { forening: Object.assign({}, befintligt.forening), adresser: (befintligt.adresser || []).slice(), kontakter: (befintligt.kontakter || []).slice(), artiklar: (befintligt.artiklar || []).slice() };
+    var antal = { uppgifter: 0, adresser: 0, kontakter: 0, artiklar: 0 };
+    FORENINGSFAELT.forEach(function (f) {
+      var v = fil.forening && fil.forening[f] ? String(fil.forening[f]).trim() : '';
+      if (v && !String(ut.forening[f] || '').trim()) { ut.forening[f] = v; antal.uppgifter++; }
+    });
+    (fil.adresser || []).forEach(function (a) {
+      if (!a.text || ut.adresser.some(function (x) { return nyckel(x.text) === nyckel(a.text); })) return;
+      ut.adresser.push({ id: nyttId(), etikett: String(a.etikett || ''), text: String(a.text) });
+      antal.adresser++;
+    });
+    (fil.kontakter || []).forEach(function (k) {
+      if (!k.namn || ut.kontakter.some(function (x) { return nyckel(x.namn) === nyckel(k.namn); })) return;
+      ut.kontakter.push({ id: nyttId(), namn: String(k.namn), epost: String(k.epost || ''), mobil: String(k.mobil || '') });
+      antal.kontakter++;
+    });
+    (fil.artiklar || []).forEach(function (a, i) {
+      if (!a.beskrivning || !arHeltal(a.pris) || a.pris < 0) throw BokforingsFel('Artikel ' + (i + 1) + ' i filen har ogiltig beskrivning eller pris.');
+      if (a.konto && !giltigtKontonummer(a.konto)) throw BokforingsFel('Artikel ' + (i + 1) + ' i filen har ett ogiltigt konto.');
+      if (ut.artiklar.some(function (x) { return nyckel(x.beskrivning) === nyckel(a.beskrivning); })) return;
+      ut.artiklar.push({ id: nyttId(), beskrivning: String(a.beskrivning), pris: a.pris, konto: a.konto || '' });
+      antal.artiklar++;
+    });
+    return { data: ut, antal: antal };
+  }
+
   // "Swish från 46701234567 ANNA ANDERSSON" -> "Anna Andersson"
   function namnFranBanktext(text) {
     var t = String(text || '').replace(/swish\s*(från|fran|betalning)?/i, ' ').replace(/[+\d]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1525,7 +1598,8 @@ var VERSIONER = [
     dokumentSumma: dokumentSumma,
     valideraDokument: valideraDokument,
     fakturaTillUnderlag: fakturaTillUnderlag,
-    namnFranBanktext: namnFranBanktext
+    namnFranBanktext: namnFranBanktext,
+    slaIhopForening: slaIhopForening
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
@@ -1988,7 +2062,7 @@ var VERSIONER = [
     html += '<table class="dok-summa"><tr><td>Delsumma</td><td class="num">' + kr(summa) + ' kr</td></tr><tr><td>Moms</td><td class="num">' + kr(0) + ' kr</td></tr>' +
       '<tr class="total"><td>' + (arF ? 'Att betala' : 'Totalt betalt') + '</td><td class="num">' + kr(summa) + ' kr</td></tr></table>';
     html += '<div class="dok-info">' + (arF
-      ? (f.bankgiro ? 'Betala till bankgiro ' + esc(f.bankgiro) + ' senast ' + esc(d.forfallodatum) + '. Ange fakturanummer ' + esc(d.nummer) + ' som referens.' : '')
+      ? (f.bankgiro ? 'Betala till bankgiro ' + esc(f.bankgiro) + (f.swish ? ' eller Swish ' + esc(f.swish) : '') + ' senast ' + esc(d.forfallodatum) + '. Ange fakturanummer ' + esc(d.nummer) + ' som referens.' : '')
       : 'Beloppet ovan är betalt till föreningen. Tack!') + '</div>';
     html += '<div class="dok-fot"><div><strong>Adress</strong><br>' + [f.namn].concat(rader(d.avsandare)).filter(Boolean).map(esc).join('<br>') + '</div>' +
       '<div>' + (f.webb ? '<strong>Webb</strong><br>' + esc(f.webb) + '<br>' : '') + (f.epost ? '<strong>E-post</strong><br>' + esc(f.epost) : '') + '</div>' +
@@ -2020,7 +2094,7 @@ var VERSIONER = [
     var kontakt = hitta('kontakter', dokUtkast.kontaktId);
     d.id = nyttId();
     d.nummer = K.nastaDokumentnummer(store.dokument, d.typ, d.datum);
-    d.forening = { namn: store.forening.namn, orgnr: store.forening.orgnr, bankgiro: store.forening.bankgiro, webb: store.forening.webb, epost: store.forening.epost };
+    d.forening = { namn: store.forening.namn, orgnr: store.forening.orgnr, bankgiro: store.forening.bankgiro, swish: store.forening.swish, webb: store.forening.webb, epost: store.forening.epost };
     d.avsandare = adress ? adress.text : '';
     d.referens = kontakt ? { namn: kontakt.namn, epost: kontakt.epost, mobil: kontakt.mobil } : null;
     d.logo = logoUrl;
@@ -2067,6 +2141,8 @@ var VERSIONER = [
 
   function render() {
     var ar = aktivt();
+    document.getElementById('logoBricka').hidden = !logoUrl;
+    if (logoUrl) document.getElementById('logo').src = logoUrl;
     document.getElementById('versionLank').textContent = 'Föreningsbokföring version ' + VERSIONER[0].version;
     document.getElementById('rubrik').textContent = store.forening.namn || 'Föreningsbokföring';
     renderArvaljare();
@@ -2566,9 +2642,10 @@ var VERSIONER = [
   function vyForening() {
     var f = store.forening;
     var html = '<h2 id="forening-installning">Föreningen</h2><div class="card"><p class="faint" style="margin-top:0">Uppgifterna används på fakturor och kvitton. De sparas bara i appen.</p><div class="grid2">' +
-      [['namn', 'Namn'], ['orgnr', 'Organisationsnummer'], ['bankgiro', 'Bankgiro'], ['webb', 'Webbplats'], ['epost', 'E-post']].map(function (x) {
+      [['namn', 'Namn'], ['orgnr', 'Organisationsnummer'], ['bankgiro', 'Bankgiro'], ['swish', 'Swishnummer'], ['webb', 'Webbplats'], ['epost', 'E-post']].map(function (x) {
         return '<div><label>' + x[1] + '</label><input data-forening="' + x[0] + '" value="' + esc(f[x[0]]) + '"></div>';
       }).join('') + '</div>' +
+      '<div class="row" style="margin-top:12px"><button class="btn btn-secondary btn-small" data-action="las-in-forening">Läs in föreningsuppgifter från fil</button></div>' +
       '<h3>Logotyp</h3><div class="row">' + (logoUrl ? '<img src="' + esc(logoUrl) + '" alt="Logotyp" style="max-height:60px;background:#fff;padding:4px;border-radius:4px">' : '<span class="faint">Ingen logotyp.</span>') +
       '<button class="btn btn-secondary btn-small" data-action="valj-logo">' + (logoUrl ? 'Byt logotyp' : 'Ladda upp logotyp') + '</button>' +
       (logoUrl ? '<button class="btn btn-secondary btn-small" data-action="ta-bort-logo">Ta bort</button>' : '') + '</div>';
@@ -3021,6 +3098,36 @@ var VERSIONER = [
       };
       input.click();
     },
+    'las-in-forening': function () {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json,.json';
+      input.onchange = function () {
+        var fil = input.files[0];
+        if (!fil) return;
+        fil.text().then(function (txt) {
+          var data = JSON.parse(txt);
+          var res = K.slaIhopForening(store, data, nyttId);
+          Object.assign(store, res.data);
+          var logo = Promise.resolve(false);
+          if (data.logotyp && data.logotyp.data && !store.forening.harLogotyp) {
+            var bin = atob(data.logotyp.data);
+            var bytes = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            logo = sparaFil('logotyp', new Blob([bytes], { type: data.logotyp.typ || 'image/png' }), 'logotyp').then(function () {
+              store.forening.harLogotyp = true;
+              return laddaLogo().then(function () { return true; });
+            });
+          }
+          return logo.then(function (medLogo) {
+            spara();
+            var a = res.antal;
+            visa('Inläst: ' + a.uppgifter + ' uppgifter, ' + a.adresser + ' adresser, ' + a.kontakter + ' kontaktpersoner och ' + a.artiklar + ' artiklar' + (medLogo ? ' samt logotypen' : '') + '. Uppgifter som redan var ifyllda har behållits.');
+          });
+        }).catch(function (err) { visa(err.fel ? err.fel.join(' ') : 'Filen kunde inte läsas: ' + err.message, true); });
+      };
+      input.click();
+    },
     'ta-bort-logo': function () {
       taBortFil('logotyp');
       store.forening.harLogotyp = false;
@@ -3064,7 +3171,7 @@ var VERSIONER = [
   ladda();
   LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
   render();
-  laddaLogo();
+  laddaLogo().then(render);
 })();
 </script>
 </body>
