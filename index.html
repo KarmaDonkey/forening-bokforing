@@ -847,7 +847,7 @@ var VERSIONER = [
       }
     }
     var obokforda = oppnaBankrader(ar).length;
-    if (obokforda) varningar.push({ typ: 'obokfordaBankrader', meddelande: obokforda + ' banktransaktioner är inte bokförda.' });
+    if (obokforda) varningar.push({ typ: 'obokfordaBankrader', meddelande: obokforda + (obokforda === 1 ? ' banktransaktion är inte bokförd.' : ' banktransaktioner är inte bokförda.') });
     var avst = bankavstamning(ar);
     if (avst && !avst.obokforda && avst.skillnad !== 0) {
       varningar.push({ typ: 'bankdifferens', meddelande: 'Bokfört saldo på ' + avst.konto + ' den ' + avst.datum + ' är ' + formatBelopp(avst.bokfortSaldo) + ' kr men banken säger ' + formatBelopp(avst.bankSaldo) + ' kr.' });
@@ -3236,8 +3236,9 @@ var VERSIONER = [
           '<details style="margin-top:8px"><summary class="faint">Hur skaffar jag en nyckel?</summary>' + NY_NYCKEL_STEG + '</details>') +
       '</div>';
     html += vyForening();
-    html += '<h2>Säkerhetskopia och export</h2><div class="card"><p>Data sparas just nu bara i den här webbläsaren. Exportera en säkerhetskopia regelbundet. ' +
-      'Inlästa filer (PDF:er och bilder) ingår inte i säkerhetskopian ännu; behåll originalen tills de sparas i OneDrive.</p><div class="row">' +
+    html += '<h2>Säkerhetskopia och export</h2><div class="card"><p>' + (odAnslutet()
+      ? 'Bokföringen och underlagen sparas i OneDrive. En säkerhetskopia (JSON) är ändå bra att ta ibland, till exempel inför årsbokslutet.'
+      : 'Bokföringen sparas bara i den här webbläsaren. Exportera en säkerhetskopia regelbundet, eller koppla appen till OneDrive ovan. Inlästa filer ingår inte i säkerhetskopian.') + '</p><div class="row">' +
       '<button class="btn btn-secondary" data-action="exportera">Exportera allt (JSON)</button>' +
       '<button class="btn btn-secondary" data-action="importera">Läs in säkerhetskopia</button>' +
       '<button class="btn btn-secondary" data-action="sie">Exportera ' + esc(K.arNamn(ar)) + ' som SIE 4</button></div></div>';
@@ -3786,6 +3787,7 @@ var VERSIONER = [
   // Inloggning, och därefter senaste versionen från OneDrive.
   hanteraInloggningsretur().then(function () {
     if (!od.clientId || !od.mapp) return;
+    if (!od.refreshToken) { odNu.inloggningKravs = true; sattStatus('Inte inloggad i OneDrive', true); return; }
     sattStatus('Hämtar från OneDrive…');
     return hamtaFranOneDrive();
   }).catch(function (err) {
