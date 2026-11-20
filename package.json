@@ -1,0 +1,9 @@
+{
+  "name": "forening-bokforing",
+  "private": true,
+  "description": "Bokföring för små ideella föreningar",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

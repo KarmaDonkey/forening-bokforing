@@ -12,3 +12,4 @@ privat/
 !testdata/**
 .DS_Store
 node_modules/
+*.png
