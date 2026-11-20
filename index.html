@@ -152,6 +152,15 @@
   .dok-summa { width: 50% !important; margin-left: auto; margin-top: 8px; }
   .dok-summa tr.total td { font-weight: 600; border-top: 1.5px solid #1a1a1a; font-size: 12pt; }
   .dok-info { margin-top: 14px; }
+  .dok-moms { text-align: right; color: #555; font-size: 9pt; margin-top: 4px; }
+  .dok-betalning { margin-top: 18px; border: 1.5px solid #373F51; border-radius: 6px; display: grid; grid-template-columns: repeat(auto-fit, minmax(28mm, 1fr)); }
+  .dok-betalning > div { padding: 8px 10px; border-left: 1px solid #c9ccd3; }
+  .dok-betalning > div:first-child { border-left: 0; background: #F4F4F4; }
+  .dok-betalning .etikett { font-size: 8pt; text-transform: uppercase; letter-spacing: .05em; color: #555; }
+  .dok-betalning .varde { font-size: 11.5pt; font-weight: 600; white-space: nowrap; }
+  .dok-betalning > div:first-child .varde { font-size: 14pt; }
+  .dok-stampel { display: inline-block; border: 2.5px solid #2E7D4F; color: #2E7D4F; border-radius: 6px; padding: 4px 16px; font-weight: 700; font-size: 18pt; letter-spacing: .12em; transform: rotate(-6deg); margin: 6px 0 0 6mm; }
+  .dok-kvittoinfo { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 18px; }
   .dok-fot { margin-top: auto; padding-top: 10px; border-top: 1px solid #bbb; display: flex; gap: 18px; font-size: 9pt; color: #333; }
   .dok-fot > div { flex: 1; }
   @media print {
@@ -191,6 +200,15 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '0.9', datum: '2026-11-20',
+    nyheter: [
+      'Fakturor har en tydlig betalningsruta med belopp, förfallodatum, bankgiro, Swish och referens.',
+      'I stället för "Moms 0,00 kr" står det att föreningen inte är momsregistrerad.',
+      'Kvitton har egna rader för betaldatum, betalsätt och organisationsnummer, och en stämpel med texten BETALD.',
+      '"Skriv kvitto" på en inbetalning väljer den artikel som kostar exakt det betalda beloppet.'
+    ]
+  },
   {
     version: '0.8', datum: '2026-11-20',
     nyheter: [
@@ -1388,6 +1406,11 @@ var VERSIONER = [
     if (!dok.mottagare || !String(dok.mottagare.namn || '').trim()) fel.push('Mottagaren behöver ett namn.');
     if (!arGiltigtDatum(dok.datum)) fel.push('Datum saknas eller är ogiltigt.');
     if (dok.typ === 'faktura' && (!arGiltigtDatum(dok.forfallodatum) || dok.forfallodatum < dok.datum)) fel.push('Förfallodatum saknas eller ligger före fakturadatum.');
+    if (dok.typ === 'kvitto') {
+      if (!arGiltigtDatum(dok.betaldDatum)) fel.push('Ange när beloppet betalades.');
+      else if (arGiltigtDatum(dok.datum) && dok.betaldDatum > dok.datum) fel.push('Betaldatum ligger efter utskrivningsdatum.');
+      if (!String(dok.betalsatt || '').trim()) fel.push('Ange hur beloppet betalades.');
+    }
     var rader = dok.rader || [];
     if (!rader.length) fel.push('Lägg till minst en rad.');
     rader.forEach(function (r, i) {
@@ -2007,7 +2030,7 @@ var VERSIONER = [
     return {
       typ: typ, mottagareId: '', mottagare: { namn: '', foretag: '', adress: '', epost: '', telefon: '' },
       adressId: store.adresser[0] ? store.adresser[0].id : '', kontaktId: store.kontakter[0] ? store.kontakter[0].id : '',
-      datum: d, forfallodatum: K.laggTillDagar(d, 30), betaldDatum: '',
+      datum: d, forfallodatum: K.laggTillDagar(d, 30), betaldDatum: typ === 'kvitto' ? d : '', betalsatt: typ === 'kvitto' ? 'Swish' : '',
       rader: [{ artikelId: '', antal: '1', beskrivning: '', pris: '', konto: '' }], verifikation: null
     };
   }
@@ -2024,6 +2047,7 @@ var VERSIONER = [
       forfallodatum: dokUtkast.typ === 'faktura' ? dokUtkast.forfallodatum : '',
       mottagare: Object.assign({}, dokUtkast.mottagare), rader: radlista
     };
+    if (dokUtkast.typ === 'kvitto') { dok.betaldDatum = dokUtkast.betaldDatum; dok.betalsatt = dokUtkast.betalsatt; }
     return { fel: fel.concat(K.valideraDokument(dok)), dok: dok };
   }
 
@@ -2042,8 +2066,8 @@ var VERSIONER = [
     var f = d.forening || {};
     var arF = d.typ === 'faktura';
     var meta = arF
-      ? [['Fakturadatum', d.datum], ['Fakturanr', d.nummer], ['Förfallodatum', d.forfallodatum], ['Bankgiro', f.bankgiro]]
-      : [['Utskrivningsdatum', d.datum], ['Kvittonr', d.nummer]];
+      ? [['Fakturadatum', d.datum], ['Fakturanr', d.nummer], ['Förfallodatum', d.forfallodatum]]
+      : [['Kvittonr', d.nummer], ['Utskrivningsdatum', d.datum], ['Betaldatum', d.betaldDatum], ['Betalsätt', d.betalsatt], ['Org.nummer', f.orgnr]];
     var m = d.mottagare || {}, ref = d.referens || {};
     var html = '<div class="dok"><div class="dok-huvud"><div>' +
       (d.logo ? '<img class="dok-logo" src="' + esc(d.logo) + '" alt="">' : '') +
@@ -2059,11 +2083,21 @@ var VERSIONER = [
         return '<tr><td class="num">' + esc(String(r.antal).replace('.', ',')) + '</td><td>' + esc(r.beskrivning) + '</td><td class="num">' + kr(r.pris) + ' kr</td><td class="num">' + kr(K.dokumentRadTotal(r)) + ' kr</td></tr>';
       }).join('') + '</tbody></table>';
     var summa = K.dokumentSumma(d);
-    html += '<table class="dok-summa"><tr><td>Delsumma</td><td class="num">' + kr(summa) + ' kr</td></tr><tr><td>Moms</td><td class="num">' + kr(0) + ' kr</td></tr>' +
-      '<tr class="total"><td>' + (arF ? 'Att betala' : 'Totalt betalt') + '</td><td class="num">' + kr(summa) + ' kr</td></tr></table>';
-    html += '<div class="dok-info">' + (arF
-      ? (f.bankgiro ? 'Betala till bankgiro ' + esc(f.bankgiro) + (f.swish ? ' eller Swish ' + esc(f.swish) : '') + ' senast ' + esc(d.forfallodatum) + '. Ange fakturanummer ' + esc(d.nummer) + ' som referens.' : '')
-      : 'Beloppet ovan är betalt till föreningen. Tack!') + '</div>';
+    html += '<table class="dok-summa"><tr class="total"><td>' + (arF ? 'Att betala' : 'Totalt betalt') + '</td><td class="num">' + kr(summa) + ' kr</td></tr></table>' +
+      '<div class="dok-moms">Föreningen är inte momsregistrerad.</div>';
+    if (arF) {
+      var falt = [['Att betala', kr(summa) + ' kr'], ['Förfallodatum', d.forfallodatum]];
+      if (f.bankgiro) falt.push(['Bankgiro', f.bankgiro]);
+      if (f.swish) falt.push(['Swish', f.swish]);
+      falt.push(['Referens', d.nummer]);
+      html += '<div class="dok-betalning">' + falt.map(function (x) {
+        return '<div><div class="etikett">' + x[0] + '</div><div class="varde">' + esc(x[1]) + '</div></div>';
+      }).join('') + '</div><div class="dok-info">Ange fakturanumret som referens eller meddelande när du betalar.</div>';
+    } else {
+      html += '<div class="dok-kvittoinfo"><div>Beloppet ovan är betalt till ' + esc(f.namn || 'föreningen') +
+        (d.betaldDatum ? ' den ' + esc(d.betaldDatum) : '') + (d.betalsatt ? ' via ' + esc(d.betalsatt === 'Swish' ? d.betalsatt : d.betalsatt.toLowerCase()) : '') + '. Tack!</div>' +
+        '<div class="dok-stampel">BETALD</div></div>';
+    }
     html += '<div class="dok-fot"><div><strong>Adress</strong><br>' + [f.namn].concat(rader(d.avsandare)).filter(Boolean).map(esc).join('<br>') + '</div>' +
       '<div>' + (f.webb ? '<strong>Webb</strong><br>' + esc(f.webb) + '<br>' : '') + (f.epost ? '<strong>E-post</strong><br>' + esc(f.epost) : '') + '</div>' +
       '<div>' + (f.orgnr ? '<strong>Org.nummer</strong><br>' + esc(f.orgnr) + '<br>' : '') + (f.bankgiro ? '<strong>Bankgiro</strong><br>' + esc(f.bankgiro) : '') + '</div></div>';
@@ -2576,7 +2610,11 @@ var VERSIONER = [
       '<div><label for="dokRef">Vår referens</label><select id="dokRef" data-dok="kontaktId"><option value="">(ingen)</option>' +
       opt(store.kontakter, u.kontaktId, function (x) { return x.namn; }) + '</select></div>' +
       '<div class="grid2" style="gap:0 8px"><div><label for="dokDatum">' + (arF ? 'Fakturadatum' : 'Utskrivningsdatum') + '</label><input type="date" id="dokDatum" data-dok="datum" value="' + esc(u.datum) + '"></div>' +
-      (arF ? '<div><label for="dokForfall">Förfallodatum</label><input type="date" id="dokForfall" data-dok="forfallodatum" value="' + esc(u.forfallodatum) + '"></div>' : '') + '</div></div>';
+      (arF ? '<div><label for="dokForfall">Förfallodatum</label><input type="date" id="dokForfall" data-dok="forfallodatum" value="' + esc(u.forfallodatum) + '"></div>' : '') + '</div>' +
+      (arF ? '' : '<div class="grid2" style="gap:0 8px"><div><label for="dokBetald">Betaldatum</label><input type="date" id="dokBetald" data-dok="betaldDatum" value="' + esc(u.betaldDatum) + '"></div>' +
+        '<div><label for="dokBetalsatt">Betalsätt</label><select id="dokBetalsatt" data-dok="betalsatt">' + ['Swish', 'Bankgiro', 'Banköverföring', 'Kontant', 'Kort'].map(function (b) {
+          return '<option' + (b === u.betalsatt ? ' selected' : '') + '>' + b + '</option>';
+        }).join('') + '</select></div></div>') + '</div>';
     html += '<h3>' + (arF ? 'Fakturamottagare' : 'Mottagare') + '</h3><div class="grid2">' +
       [['namn', 'Namn'], ['foretag', 'Företag eller organisation'], ['epost', 'E-post'], ['telefon', 'Telefon']].map(function (f) {
         return '<div><label>' + f[1] + '</label><input data-dokm="' + f[0] + '" value="' + esc(u.mottagare[f[0]]) + '"></div>';
@@ -2739,6 +2777,7 @@ var VERSIONER = [
     if (e.target.id === 'hbKonto') { valtKonto = e.target.value; render(); }
     var t = e.target;
     if (t.dataset.inkorg === 'konto') render();
+    if (dokUtkast && t.dataset.dok) { dokUtkast[t.dataset.dok] = t.value; uppdateraDokStatus(); }
     if (dokUtkast && t.dataset.dokval === 'mottagare') {
       var mo = hitta('mottagare', t.value);
       dokUtkast.mottagareId = t.value;
@@ -2750,7 +2789,7 @@ var VERSIONER = [
       var art = hitta('artiklar', t.value);
       rad.artikelId = t.value;
       if (art) {
-        rad.beskrivning = art.beskrivning + (dokUtkast.betaldDatum ? ', betald ' + dokUtkast.betaldDatum : '');
+        rad.beskrivning = art.beskrivning;
         if (!dokUtkast.verifikation) rad.pris = art.pris ? K.formatBelopp(art.pris) : '';
         rad.konto = art.konto || '';
       }
@@ -3057,7 +3096,10 @@ var VERSIONER = [
       dokUtkast.betaldDatum = v.datum;
       dokUtkast.mottagareId = mott ? mott.id : '';
       dokUtkast.mottagare = mott ? { namn: mott.namn, foretag: mott.foretag || '', adress: mott.adress || '', epost: mott.epost || '', telefon: mott.telefon || '' } : Object.assign(dokUtkast.mottagare, { namn: namn });
-      dokUtkast.rader = [{ artikelId: '', antal: '1', beskrivning: v.text + ', betald ' + v.datum, pris: K.formatBelopp(belopp), konto: '' }];
+      dokUtkast.betalsatt = /swish/i.test(bank ? bank.text : v.text) ? 'Swish' : 'Bankgiro';
+      // Föreslå den artikel som kostar exakt det betalda beloppet.
+      var artikel = store.artiklar.find(function (a) { return a.pris === belopp; });
+      dokUtkast.rader = [{ artikelId: artikel ? artikel.id : '', antal: '1', beskrivning: artikel ? artikel.beskrivning : '', pris: K.formatBelopp(belopp), konto: artikel ? artikel.konto || '' : '' }];
       vy = 'dokument';
       dokVisas = null;
       meddelande = null;

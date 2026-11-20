@@ -48,8 +48,14 @@ describe('summor och kontroll', () => {
     assert.match(K.valideraDokument({ ...faktura, rader: [] }).join(' '), /minst en rad/);
     assert.match(K.valideraDokument({ ...faktura, rader: [{ antal: 1, beskrivning: 'Gratis', pris: 0 }] }).join(' '), /större än noll/);
   });
-  test('kvitto behöver inget förfallodatum', () => {
-    eq(K.valideraDokument({ typ: 'kvitto', mottagare: { namn: 'A' }, datum: '2030-03-05', rader: [{ antal: 1, beskrivning: 'Träningsavgift', pris: kr(3000) }] }), []);
+  test('kvitto behöver betaldatum och betalsätt men inget förfallodatum', () => {
+    const kvitto = { typ: 'kvitto', mottagare: { namn: 'A' }, datum: '2030-03-05', betaldDatum: '2030-03-01', betalsatt: 'Swish', rader: [{ antal: 1, beskrivning: 'Träningsavgift', pris: kr(3000) }] };
+    eq(K.valideraDokument(kvitto), []);
+    const fel = K.valideraDokument({ ...kvitto, betaldDatum: '', betalsatt: '' });
+    assert.equal(fel.length, 2);
+    assert.match(fel.join(' '), /när beloppet betalades/);
+    assert.match(fel.join(' '), /hur beloppet betalades/);
+    assert.match(K.valideraDokument({ ...kvitto, betaldDatum: '2030-03-06' }).join(' '), /efter utskrivningsdatum/);
   });
 });
 
