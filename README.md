@@ -6,29 +6,24 @@ Verktyget är en webbapp i en enda HTML-fil (`index.html`) utan byggsteg. All bo
 
 ## Status
 
-Faserna 2, 4 och 5 har en första version. Se [docs/PROJEKTPLAN.md](docs/PROJEKTPLAN.md) för helheten.
+Version 1.0: bokföringen och underlagen sparas i föreningens OneDrive. Se fliken "Om appen" för vad som är nytt i varje version, och [docs/PROJEKTPLAN.md](docs/PROJEKTPLAN.md) för helheten.
 
-Det som fungerar nu:
-- **Läs in underlag:** dra in PDF-fakturor, kvitton (foton) och kontoutdrag. Claude tolkar motpart, datum, belopp, OCR och föreslår konto.
-- **Kontoutdrag:** CSV från banken, rader inklistrade från Excel, eller kontoutdrag som PDF. Samma fil kan läsas in igen utan dubbletter. Appen varnar när saldot inte går ihop.
-- **Automatisk koppling:** varje banktransaktion paras ihop med rätt underlag på belopp, datum och OCR-nummer, även när flera kvitton tillsammans blir ett utlägg.
-- **Förslag som lär sig:** när du bokför en transaktion kommer appen ihåg kontot till nästa gång, t.ex. Swish från en viss medlem eller bankens avgifter.
-- **Avstämning mot banken:** bokfört saldo jämförs med bankens saldo, och ingående balans kan hämtas från banken första året.
-- Räkenskapsår, verifikationer med dubbel bokföring, rättelse genom omvänd verifikation, låsning av perioder, BAS-baserad kontoplan.
-- Huvudbok, grundbok, saldobalans, resultaträkning med jämförelse mot föregående år, balansräkning.
-- Nästa räkenskapsår med utgående balanser som ingående; obetalda fakturor följer med.
-- Kontroller för saknade underlag, möjliga dubbelbetalningar och obokförda banktransaktioner.
-- Export till SIE 4 och säkerhetskopia som JSON.
+Det som fungerar:
+- **OneDrive:** inloggning med Microsoft-konto direkt från webbläsaren. Bokföringen sparas i `Föreningsbokföring.json` i föreningens mapp. Underlagen ligger i årsmapparna (`<år>/Bokföringsunderlag/Osorterat`, `Verifikationer`, `Kontoutdrag`) och fakturor och kvitton i `<år>/Fakturor och kvitton`. Samma bokföring kan användas på flera enheter, med krockkontroll, och en revisor kan läsa en delad mapp.
+- **Läs in underlag:** PDF-fakturor, kvitton och kontoutdrag. Claude tolkar och föreslår konto, och appen lär sig konton per motpart och banktext.
+- **Bank:** CSV eller inklistrade rader, automatisk koppling till underlag och avstämning av saldot.
+- **Fakturor och kvitton** i föreningens stil, som PDF via utskrift. Skickade fakturor kopplas till inbetalningen.
+- **Bokföringen:** verifikationer, rättelser, låsning, kontoplan, huvudbok, grundbok, saldobalans, resultat- och balansräkning, årsskifte, kontroller och export till SIE 4.
 
-Data sparas tills vidare i webbläsaren (bokföringen i localStorage, filerna i IndexedDB). Exportera en säkerhetskopia regelbundet. OneDrive kommer i nästa steg.
+## Använda
+
+Appen behöver öppnas från en webbadress (t.ex. GitHub Pages) för att kunna logga in med Microsoft. Utan OneDrive fungerar den också som en lokal fil; då sparas allt i webbläsaren.
+
+För OneDrive behövs en appregistrering i Microsoft Entra (Azure) för personliga Microsoft-konton, med plattformen *Single-page application* och appens adress som omdirigeringsadress. Klistra in dess Client ID under *År och arkiv → OneDrive*.
 
 ## Claude
 
 Tolkningen av PDF:er och bilder görs av Claude via Anthropics API, direkt från webbläsaren. Det kräver en egen API-nyckel från platform.claude.com, som läggs in under "År och arkiv". Nyckeln sparas bara i webbläsaren. Underlagen skickas till Anthropic när de läses in. Kontoutdrag som CSV och inlärda förslag fungerar utan Claude.
-
-## Använda
-
-Öppna `index.html` i en webbläsare.
 
 ## Utveckla
 

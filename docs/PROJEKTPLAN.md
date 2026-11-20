@@ -60,7 +60,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 ## Nästa steg
 
-- Spara bokföring och underlag i föreningens OneDrive i stället för i webbläsaren.
+- ~~Spara bokföring och underlag i föreningens OneDrive~~ (klart i version 1.0).
 - Prova inläsningen på riktiga kontoutdrag från Swedbank och riktiga fakturor, och justera efter det.
 - Fas 3: historikimport, när analysen av 2012–2024 finns.
 

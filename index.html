@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Föreningsbokföring</title>
+<link rel="icon" id="ikon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23373F51'/%3E%3Cpath d='M20 22h24M20 32h24M20 42h16' stroke='%23E5AE1F' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,600;8..144,700&display=swap" rel="stylesheet">
@@ -83,6 +84,8 @@
   h3 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-soft); margin: 18px 0 6px; }
   #arvaljare { font-size: 13px; color: var(--ink-soft); }
   #arvaljare select { padding: 3px 8px; font-size: 13px; border-radius: 999px; }
+  #synkstatus { font-size: 12px; color: var(--ink-faint); min-height: 1em; }
+  #synkstatus.fel { color: var(--over); }
   nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 18px; padding: 6px 16px 0; max-width: 1000px; margin: 0 auto; }
   nav button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--ink); padding: 10px 2px 8px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
   nav button:hover { border-bottom-color: var(--hairline); }
@@ -180,6 +183,7 @@
     <span class="logo-bricka" id="logoBricka" hidden><img id="logo" alt=""></span>
     <h1 id="rubrik">Föreningsbokföring</h1>
     <div class="row" id="arvaljare"></div>
+    <div id="synkstatus" role="status"></div>
   </header>
   <nav id="nav" aria-label="Huvudmeny"></nav>
 </div>
@@ -200,6 +204,17 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.0', datum: '2026-11-20',
+    nyheter: [
+      'Bokföringen och underlagen sparas i föreningens OneDrive-mapp. Logga in med Microsoft under År och arkiv → OneDrive.',
+      'Inlästa underlag sparas i årsmappen under Bokföringsunderlag/Osorterat och flyttas till Verifikationer med V-nummer när de bokförs.',
+      'Kontoutdrag hamnar i Bokföringsunderlag/Kontoutdrag, och fakturor och kvitton som appen skriver i Fakturor och kvitton.',
+      'Samma bokföring på flera enheter. Appen hämtar senaste versionen när den startar och säger till om samma sak ändrats på två ställen.',
+      'Revisorn kan öppna en mapp som delats med läsrätt och läsa rapporter, verifikationer och underlag utan att kunna ändra något.',
+      'Föreningens logotyp används som ikon i webbläsarfliken när den är uppladdad.'
+    ]
+  },
   {
     version: '0.9', datum: '2026-11-20',
     nyheter: [
@@ -1482,6 +1497,31 @@ var VERSIONER = [
     return { data: ut, antal: antal };
   }
 
+  // ---------- Sökvägar i OneDrive ----------
+
+  // Tecken som OneDrive inte tillåter i fil- och mappnamn byts mot _.
+  function sakertNamn(namn) {
+    var n = String(namn || '').replace(/["*:<>?\/\\|#%]/g, '_').replace(/[\u0000-\u001f]/g, '').trim().replace(/[. ]+$/, '');
+    return n || 'fil';
+  }
+
+  // Årsmappen heter som räkenskapsåret, t.ex. "2026" eller "2025-26".
+  function arMapp(arId) { return sakertNamn(String(arId).replace('/', '-')); }
+
+  // Var ett underlag ska ligga: obokförda i Osorterat, bokförda i Verifikationer med V-nummer först,
+  // kontoutdrag i Kontoutdrag och föreningens egna fakturor i Fakturor och kvitton tills de är betalda.
+  function underlagSokvag(arId, u) {
+    var bas = arMapp(arId) + '/Bokföringsunderlag/';
+    if (u.verifikation != null && u.arkivnamn) return bas + 'Verifikationer/' + sakertNamn(u.arkivnamn);
+    if (u.dokumenttyp === 'kontoutdrag') return bas + 'Kontoutdrag/' + sakertNamn(u.filnamn);
+    if (u.dokumenttyp === 'utgaende_faktura') return arMapp(arId) + '/Fakturor och kvitton/' + sakertNamn(u.filnamn);
+    return bas + 'Osorterat/' + sakertNamn(u.filnamn);
+  }
+
+  function kvittoSokvag(d) {
+    return arMapp(d.datum.slice(0, 4)) + '/Fakturor och kvitton/' + sakertNamn('Kvitto ' + d.nummer + '.html');
+  }
+
   // "Swish från 46701234567 ANNA ANDERSSON" -> "Anna Andersson"
   function namnFranBanktext(text) {
     var t = String(text || '').replace(/swish\s*(från|fran|betalning)?/i, ' ').replace(/[+\d]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1622,7 +1662,11 @@ var VERSIONER = [
     valideraDokument: valideraDokument,
     fakturaTillUnderlag: fakturaTillUnderlag,
     namnFranBanktext: namnFranBanktext,
-    slaIhopForening: slaIhopForening
+    slaIhopForening: slaIhopForening,
+    sakertNamn: sakertNamn,
+    arMapp: arMapp,
+    underlagSokvag: underlagSokvag,
+    kvittoSokvag: kvittoSokvag
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
@@ -1671,9 +1715,19 @@ var VERSIONER = [
     } catch (e) { /* tom lagring är okej */ }
   }
 
-  function spara() {
+  function sparaLokalt() {
     try { localStorage.setItem(LAGRING, JSON.stringify(store)); }
-    catch (e) { visa('Kunde inte spara i webbläsaren. Exportera en säkerhetskopia under Arkiv.', true); }
+    catch (e) { visa('Kunde inte spara i webbläsaren. Exportera en säkerhetskopia under År och arkiv.', true); }
+  }
+
+  // Sparar i webbläsaren och, när appen är kopplad till OneDrive, även där en kort stund senare.
+  function spara() {
+    sparaLokalt();
+    if (odAnslutet() && !lasLage()) {
+      od.smutsig = true;
+      sparaOd();
+      schemalaggSynk();
+    }
   }
 
   function aktivt() { return store.aktivt ? store.ar[store.aktivt] : null; }
@@ -1760,10 +1814,13 @@ var VERSIONER = [
   function visaFil(id) {
     var fonster = window.open('', '_blank');
     hamtaFil(id).then(function (rec) {
-      if (!rec) { if (fonster) fonster.close(); visa('Filen finns inte i den här webbläsaren.', true); return; }
+      if (rec) return rec;
+      return hamtaFilFranOneDrive(id);
+    }).then(function (rec) {
+      if (!rec) { if (fonster) fonster.close(); visa('Filen finns varken i den här webbläsaren eller i OneDrive.', true); return; }
       var url = URL.createObjectURL(rec.blob);
       if (fonster) fonster.location = url; else window.location = url;
-    });
+    }).catch(function (err) { if (fonster) fonster.close(); visa('Filen kunde inte hämtas: ' + err.message, true); });
   }
 
   function blobTillBase64(blob) {
@@ -1861,6 +1918,347 @@ var VERSIONER = [
     if (svar.stop_reason === 'max_tokens') throw new Error('Svaret blev för långt. Dela upp kontoutdraget i mindre delar.');
     var text = svar.content.filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('');
     return JSON.parse(text);
+  }
+
+  // ---------- OneDrive ----------
+  // Inloggning med Microsoft-konto (OAuth 2.0 med PKCE, ingen server behövs) och Microsoft Graph.
+  // Bokföringen sparas som en fil i föreningens mapp; underlagen som vanliga filer i årsmapparna.
+
+  var OD_NYCKEL = 'forening-bokforing:onedrive';
+  var OD_AUTH = 'https://login.microsoftonline.com/consumers';
+  var OD_OMFANG = 'Files.ReadWrite offline_access User.Read';
+  var GRAF = 'https://graph.microsoft.com/v1.0';
+  var DATAFIL = 'Föreningsbokföring.json';
+  var od = { clientId: null, refreshToken: null, konto: null, mapp: null, lage: null, eTag: null, senast: null, smutsig: false };
+  var odNu = { token: null, utgar: 0, status: '', fel: null, konflikt: false, synkar: false, igen: false, inloggningKravs: false, timer: null, senastHamtat: 0, mappar: {} };
+
+  function laddaOd() { try { Object.assign(od, JSON.parse(localStorage.getItem(OD_NYCKEL) || '{}')); } catch (e) { /* tomt */ } }
+  function sparaOd() { try { localStorage.setItem(OD_NYCKEL, JSON.stringify(od)); } catch (e) { /* tomt */ } }
+  function odAnslutet() { return !!(od.clientId && od.refreshToken && od.mapp); }
+  function lasLage() { return odAnslutet() && od.lage === 'lasare'; }
+  function omdirigering() { return location.origin + location.pathname; }
+
+  function sattStatus(text, fel) {
+    odNu.status = text;
+    odNu.fel = fel ? text : null;
+    var el = document.getElementById('synkstatus');
+    if (el) { el.textContent = text; el.className = fel ? 'fel' : ''; }
+  }
+
+  function b64url(buf) {
+    var b = new Uint8Array(buf), s = '';
+    for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function slumptext(n) { var a = new Uint8Array(n); crypto.getRandomValues(a); return b64url(a.buffer).slice(0, n); }
+
+  async function startaInloggning(tyst) {
+    var verifierare = slumptext(64);
+    var utmaning = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifierare)));
+    var tillstand = slumptext(24);
+    sessionStorage.setItem('forening-bokforing:inloggning', JSON.stringify({ verifierare: verifierare, tillstand: tillstand, tyst: !!tyst }));
+    var p = new URLSearchParams({
+      client_id: od.clientId, response_type: 'code', redirect_uri: omdirigering(), response_mode: 'query',
+      scope: OD_OMFANG, code_challenge: utmaning, code_challenge_method: 'S256', state: tillstand
+    });
+    if (tyst) { p.set('prompt', 'none'); try { localStorage.setItem('forening-bokforing:tyst-inloggning', String(Date.now())); } catch (e) { /* tomt */ } }
+    location.assign(OD_AUTH + '/oauth2/v2.0/authorize?' + p.toString());
+  }
+
+  async function tokenAnrop(param) {
+    var kropp = new URLSearchParams(Object.assign({ client_id: od.clientId, scope: OD_OMFANG }, param));
+    var res = await fetch(OD_AUTH + '/oauth2/v2.0/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: kropp.toString() });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok) { var e = new Error(data.error_description || data.error || 'Inloggningen misslyckades.'); e.kod = data.error; throw e; }
+    odNu.token = data.access_token;
+    odNu.utgar = Date.now() + (data.expires_in || 3600) * 1000;
+    if (data.refresh_token) od.refreshToken = data.refresh_token;
+    odNu.inloggningKravs = false;
+    sparaOd();
+  }
+
+  async function hamtaToken() {
+    if (odNu.token && Date.now() < odNu.utgar - 60000) return odNu.token;
+    if (!od.refreshToken) { odNu.inloggningKravs = true; throw new Error('Logga in med Microsoft för att synka med OneDrive.'); }
+    try {
+      await tokenAnrop({ grant_type: 'refresh_token', refresh_token: od.refreshToken });
+    } catch (err) {
+      if (err.kod === 'invalid_grant' || err.kod === 'interaction_required') {
+        od.refreshToken = null;
+        sparaOd();
+        odNu.inloggningKravs = true;
+        throw new Error('Inloggningen till OneDrive har gått ut. Logga in igen.');
+      }
+      throw err;
+    }
+    return odNu.token;
+  }
+
+  // Anrop till Microsoft Graph. opt.ra = returnera själva svaret, opt.tillat = statuskoder som inte är fel.
+  async function graf(sokvag, opt) {
+    opt = opt || {};
+    var token = await hamtaToken();
+    var res = await fetch(/^https:/.test(sokvag) ? sokvag : GRAF + sokvag, {
+      method: opt.method || 'GET',
+      headers: Object.assign({ Authorization: 'Bearer ' + token }, opt.headers || {}),
+      body: opt.body
+    });
+    if ((opt.tillat || []).indexOf(res.status) >= 0) return opt.ra ? res : res.status;
+    if (!res.ok) {
+      var data = await res.json().catch(function () { return {}; });
+      throw new Error((data.error && data.error.message) || ('OneDrive svarade med fel ' + res.status + '.'));
+    }
+    return opt.ra ? res : res.status === 204 ? null : res.json();
+  }
+
+  function enc(rel) { return rel.split('/').map(encodeURIComponent).join('/'); }
+  function iMappen(rel) { return '/drives/' + od.mapp.driveId + '/items/' + od.mapp.id + ':/' + enc(rel) + ':'; }
+  function katalog(rel) { return rel.slice(0, rel.lastIndexOf('/')); }
+  function filnamnAv(rel) { return rel.slice(rel.lastIndexOf('/') + 1); }
+
+  async function hanteraInloggningsretur() {
+    var q = new URLSearchParams(location.search);
+    if (!q.has('code') && !q.has('error')) return;
+    var sparad = null;
+    try { sparad = JSON.parse(sessionStorage.getItem('forening-bokforing:inloggning') || 'null'); } catch (e) { /* tomt */ }
+    sessionStorage.removeItem('forening-bokforing:inloggning');
+    history.replaceState(null, '', omdirigering() + location.hash);
+    if (q.has('error')) {
+      odNu.inloggningKravs = true;
+      if (!(sparad && sparad.tyst)) sattStatus('Inloggningen avbröts: ' + (q.get('error_description') || q.get('error')), true);
+      return;
+    }
+    if (!sparad || sparad.tillstand !== q.get('state')) { sattStatus('Inloggningen kunde inte verifieras. Försök igen.', true); return; }
+    await tokenAnrop({ grant_type: 'authorization_code', code: q.get('code'), redirect_uri: omdirigering(), code_verifier: sparad.verifierare });
+    var jag = await graf('/me');
+    od.konto = jag.userPrincipalName || jag.mail || jag.displayName || 'Microsoft-konto';
+    sparaOd();
+  }
+
+  async function valjEgenMapp(sokvag) {
+    sokvag = sokvag.replace(/^\/+|\/+$/g, '');
+    if (!sokvag) throw new Error('Skriv sökvägen till mappen, t.ex. Föreningen/Bokföring.');
+    var post = await graf('/me/drive/root:/' + enc(sokvag), { tillat: [404] });
+    if (post === 404) throw new Error('Hittar ingen mapp som heter ' + sokvag + ' i din OneDrive. Kontrollera stavningen.');
+    if (!post.folder) throw new Error(sokvag + ' är en fil, inte en mapp.');
+    od.mapp = { driveId: post.parentReference.driveId, id: post.id, namn: post.name, sokvag: sokvag };
+    od.lage = 'agare';
+    od.eTag = null; od.senast = null;
+    sparaOd();
+    await forstaSynk();
+  }
+
+  async function delaMappar() {
+    var data = await graf('/me/drive/sharedWithMe');
+    return (data.value || []).filter(function (x) { return x.remoteItem && x.remoteItem.folder; }).map(function (x) {
+      return { driveId: x.remoteItem.parentReference.driveId, id: x.remoteItem.id, namn: x.remoteItem.name || x.name, agare: x.remoteItem.shared && x.remoteItem.shared.owner && x.remoteItem.shared.owner.user ? x.remoteItem.shared.owner.user.displayName : '' };
+    });
+  }
+
+  async function valjDeladMapp(m) {
+    od.mapp = { driveId: m.driveId, id: m.id, namn: m.namn, sokvag: m.namn + (m.agare ? ' (delad av ' + m.agare + ')' : '') };
+    od.lage = 'lasare';
+    od.eTag = null; od.senast = null;
+    sparaOd();
+    await forstaSynk();
+  }
+
+  function harLokalData() { return Object.keys(store.ar).length > 0; }
+
+  // Första gången en mapp kopplas: ladda upp det som finns här, eller hämta det som finns i OneDrive.
+  async function forstaSynk() {
+    var meta = await graf(iMappen(DATAFIL), { tillat: [404] });
+    if (meta === 404) {
+      if (lasLage()) throw new Error('Den delade mappen innehåller ingen bokföring från appen ännu.');
+      od.smutsig = true;
+      sparaOd();
+      await synkaUpp();
+      return 'uppladdat';
+    }
+    if (harLokalData() && !lasLage()) {
+      odNu.konflikt = true;
+      odNu.konfliktForsta = true;
+      return 'konflikt';
+    }
+    await hamtaOchTillampa(meta);
+    return 'hamtat';
+  }
+
+  async function hamtaOchTillampa(meta) {
+    var res = await graf(iMappen(DATAFIL) + '/content', { ra: true });
+    var data = await res.json();
+    if (!data || data.format !== 1 || !data.ar) throw new Error('Filen ' + DATAFIL + ' i OneDrive har ett okänt format.');
+    var fel = [];
+    Object.keys(data.ar).forEach(function (id) { K.valideraAr(data.ar[id]).forEach(function (f) { fel.push(id + ': ' + f); }); });
+    if (fel.length) throw new Error('Bokföringen i OneDrive har fel och lästes inte in: ' + fel.slice(0, 3).join(' '));
+    var aktivtNu = store.aktivt;
+    store = data;
+    if (!store.regler) store.regler = [];
+    if (!store.motpartsregler) store.motpartsregler = [];
+    LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
+    if (aktivtNu && store.ar[aktivtNu]) store.aktivt = aktivtNu;
+    if (!store.ar[store.aktivt]) store.aktivt = Object.keys(store.ar).sort().pop() || null;
+    od.eTag = meta.eTag;
+    od.smutsig = false;
+    od.senast = new Date().toISOString();
+    sparaOd();
+    sparaLokalt();
+    odNu.konflikt = false;
+    odNu.konfliktForsta = false;
+    await laddaLogo();
+    sattStatus(lasLage() ? 'Endast läsning · hämtat från OneDrive' : 'Synkad med OneDrive');
+  }
+
+  // Hämtar senaste versionen om någon annan enhet har sparat. Ändringar här som inte hunnit sparas ger en krock.
+  async function hamtaFranOneDrive() {
+    if (!odAnslutet() || odNu.konflikt) return;
+    odNu.senastHamtat = Date.now();
+    var meta = await graf(iMappen(DATAFIL), { tillat: [404] });
+    if (meta === 404) {
+      if (!lasLage()) { od.smutsig = true; sparaOd(); await synkaUpp(); }
+      return;
+    }
+    if (meta.eTag === od.eTag) {
+      if (od.smutsig) await synkaUpp();
+      else sattStatus(lasLage() ? 'Endast läsning · aktuell' : 'Synkad med OneDrive');
+      return;
+    }
+    if (od.smutsig) { odNu.konflikt = true; sattStatus('Krock med OneDrive', true); return; }
+    await hamtaOchTillampa(meta);
+  }
+
+  function schemalaggSynk() {
+    clearTimeout(odNu.timer);
+    sattStatus('Ej sparat i OneDrive ännu…');
+    odNu.timer = setTimeout(function () { synkaUpp().then(render, function () { render(); }); }, 1500);
+  }
+
+  async function synkaUpp() {
+    if (!odAnslutet() || lasLage() || odNu.konflikt) return;
+    if (odNu.synkar) { odNu.igen = true; return; }
+    odNu.synkar = true;
+    sattStatus('Sparar i OneDrive…');
+    try {
+      await synkaFiler();
+      var rubriker = { 'Content-Type': 'application/json' };
+      if (od.eTag) rubriker['If-Match'] = od.eTag;
+      var res = await graf(iMappen(DATAFIL) + '/content', { method: 'PUT', headers: rubriker, body: JSON.stringify(store), tillat: [412], ra: true });
+      if (res.status === 412) { odNu.konflikt = true; sattStatus('Krock med OneDrive', true); return; }
+      var post = await res.json();
+      od.eTag = post.eTag;
+      od.smutsig = false;
+      od.senast = new Date().toISOString();
+      sparaOd();
+      sattStatus('Synkad med OneDrive');
+    } catch (err) {
+      sattStatus('Kunde inte spara i OneDrive: ' + err.message, true);
+      throw err;
+    } finally {
+      odNu.synkar = false;
+      if (odNu.igen) { odNu.igen = false; setTimeout(function () { synkaUpp().then(render, function () { render(); }); }, 200); }
+    }
+  }
+
+  async function laddaUpp(rel, blob) {
+    var post;
+    if (blob.size <= 4 * 1024 * 1024) {
+      post = await graf(iMappen(rel) + '/content?@microsoft.graph.conflictBehavior=rename', { method: 'PUT', body: blob });
+    } else {
+      var session = await graf(iMappen(rel) + '/createUploadSession', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } })
+      });
+      var res = await fetch(session.uploadUrl, { method: 'PUT', headers: { 'Content-Range': 'bytes 0-' + (blob.size - 1) + '/' + blob.size }, body: blob });
+      if (!res.ok) throw new Error('Uppladdningen av en stor fil misslyckades.');
+      post = await res.json();
+    }
+    return post;
+  }
+
+  async function sakerstallMapp(rel) {
+    if (!rel) return od.mapp.id;
+    if (odNu.mappar[rel]) return odNu.mappar[rel];
+    var post = await graf(iMappen(rel), { tillat: [404] });
+    if (post === 404) {
+      var foralder = await sakerstallMapp(katalog(rel));
+      post = await graf('/drives/' + od.mapp.driveId + '/items/' + foralder + '/children', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: filnamnAv(rel), folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }), tillat: [409]
+      });
+      if (post === 409) post = await graf(iMappen(rel));
+    }
+    odNu.mappar[rel] = post.id;
+    return post.id;
+  }
+
+  async function flytta(itemId, rel) {
+    var foralder = await sakerstallMapp(katalog(rel));
+    return graf('/drives/' + od.mapp.driveId + '/items/' + itemId, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: filnamnAv(rel), parentReference: { id: foralder }, '@microsoft.graph.conflictBehavior': 'rename' })
+    });
+  }
+
+  // Lägger upp nya filer och flyttar bokförda underlag till Verifikationer med V-nummer först.
+  async function synkaFiler() {
+    var andrat = false;
+    var arIds = Object.keys(store.ar);
+    for (var i = 0; i < arIds.length; i++) {
+      var arId = arIds[i];
+      var lista = (store.ar[arId].underlag || []).slice();
+      for (var j = 0; j < lista.length; j++) {
+        var u = lista[j];
+        var mal = K.underlagSokvag(arId, u);
+        if (!u.odId) {
+          var rec = await hamtaFil(u.id);
+          if (!rec) continue;
+          var post = await laddaUpp(mal, rec.blob);
+          store.ar[arId] = K.andraUnderlag(store.ar[arId], u.id, { odId: post.id, odMal: mal });
+          andrat = true;
+        } else if (u.odMal !== mal) {
+          await flytta(u.odId, mal);
+          store.ar[arId] = K.andraUnderlag(store.ar[arId], u.id, { odMal: mal });
+          andrat = true;
+        }
+      }
+    }
+    for (var k = 0; k < store.dokument.length; k++) {
+      var d = store.dokument[k];
+      if (d.typ !== 'kvitto' || d.odId || d.makulerad) continue;
+      var kvitto = await laddaUpp(K.kvittoSokvag(d), new Blob([dokumentFil(d)], { type: 'text/html' }));
+      d.odId = kvitto.id;
+      andrat = true;
+    }
+    if (store.forening.harLogotyp && !store.forening.logoOdId) {
+      var logo = await hamtaFil('logotyp');
+      if (logo) {
+        var lp = await laddaUpp('Föreningsbokföring logotyp.' + ((logo.blob.type || '').split('/')[1] || 'png'), logo.blob);
+        store.forening.logoOdId = lp.id;
+        andrat = true;
+      }
+    }
+    if (andrat) sparaLokalt();
+  }
+
+  async function hamtaFilFranOneDrive(id) {
+    if (!odAnslutet()) return null;
+    var u = null;
+    Object.keys(store.ar).some(function (arId) { u = (store.ar[arId].underlag || []).find(function (x) { return x.id === id; }) || null; return !!u; });
+    if (!u || !u.odId) return null;
+    var res = await graf('/drives/' + od.mapp.driveId + '/items/' + u.odId + '/content', { ra: true });
+    var blob = await res.blob();
+    await sparaFil(id, blob, u.filnamn).catch(function () { /* cache är frivillig */ });
+    return { blob: blob };
+  }
+
+  function kopplaFranOneDrive() {
+    clearTimeout(odNu.timer);
+    od = { clientId: od.clientId, refreshToken: null, konto: null, mapp: null, lage: null, eTag: null, senast: null, smutsig: false };
+    odNu.token = null;
+    odNu.mappar = {};
+    odNu.konflikt = false;
+    sparaOd();
+    sattStatus('');
   }
 
   // ---------- Inläsning ----------
@@ -2020,9 +2418,42 @@ var VERSIONER = [
   function laddaLogo() {
     if (!store.forening.harLogotyp) { logoUrl = null; return Promise.resolve(); }
     return hamtaFil('logotyp').then(function (rec) {
+      if (rec || !store.forening.logoOdId || !odAnslutet()) return rec;
+      return graf('/drives/' + od.mapp.driveId + '/items/' + store.forening.logoOdId + '/content', { ra: true })
+        .then(function (res) { return res.blob(); })
+        .then(function (blob) { return sparaFil('logotyp', blob, 'logotyp').then(function () { return { blob: blob }; }); })
+        .catch(function () { return null; });
+    }).then(function (rec) {
       if (!rec) { logoUrl = null; return; }
       return blobTillBase64(rec.blob).then(function (b64) { logoUrl = 'data:' + (rec.blob.type || 'image/png') + ';base64,' + b64; });
     }).catch(function () { logoUrl = null; });
+  }
+
+  // Föreningens logotyp som ikon i webbläsarfliken (och som ikon på hemskärmen), när den finns.
+  var IKON_STANDARD = null;
+  var ikonForLogo = null;
+  function sattIkon() {
+    var el = document.getElementById('ikon');
+    if (!IKON_STANDARD) IKON_STANDARD = el.href;
+    if (ikonForLogo === logoUrl) return;
+    ikonForLogo = logoUrl;
+    if (!logoUrl) { el.href = IKON_STANDARD; return; }
+    var bild = new Image();
+    bild.onload = function () {
+      // Rund ikon i 128 px med vit bakgrund, så att den syns i både ljusa och mörka flikar.
+      var c = document.createElement('canvas');
+      c.width = c.height = 128;
+      var g = c.getContext('2d');
+      g.beginPath(); g.arc(64, 64, 64, 0, Math.PI * 2); g.fillStyle = '#fff'; g.fill(); g.clip();
+      var skala = Math.min(120 / bild.width, 120 / bild.height);
+      var w = bild.width * skala, h = bild.height * skala;
+      g.drawImage(bild, (128 - w) / 2, (128 - h) / 2, w, h);
+      el.href = c.toDataURL('image/png');
+      var apple = document.getElementById('ikon-apple');
+      if (!apple) { apple = document.createElement('link'); apple.rel = 'apple-touch-icon'; apple.id = 'ikon-apple'; document.head.appendChild(apple); }
+      apple.href = el.href;
+    };
+    bild.src = logoUrl;
   }
 
   function nyttDokUtkast(typ) {
@@ -2177,18 +2608,21 @@ var VERSIONER = [
     var ar = aktivt();
     document.getElementById('logoBricka').hidden = !logoUrl;
     if (logoUrl) document.getElementById('logo').src = logoUrl;
+    sattIkon();
     document.getElementById('versionLank').textContent = 'Föreningsbokföring version ' + VERSIONER[0].version;
+    sattStatus(odNu.status, !!odNu.fel);
     document.getElementById('rubrik').textContent = store.forening.namn || 'Föreningsbokföring';
     renderArvaljare();
     var nav = document.getElementById('nav');
     var main = document.getElementById('main');
-    var msg = nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
+    var msg = konfliktBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
     if (!ar) {
       nav.innerHTML = '';
       main.innerHTML = msg + (vy === 'om' ? '<p><button class="btn btn-secondary btn-small" data-vy="inlasning">Tillbaka</button></p>' + vyOm() : vyStart());
       return;
     }
-    nav.innerHTML = VYER.map(function (v) {
+    if (lasLage() && (vy === 'inlasning' || vy === 'ny')) vy = 'verifikationer';
+    nav.innerHTML = VYER.filter(function (v) { return !lasLage() || (v[0] !== 'inlasning' && v[0] !== 'ny'); }).map(function (v) {
       return '<button type="button" data-vy="' + v[0] + '"' + (vy === v[0] ? ' aria-current="page"' : '') + '>' + v[1] + '</button>';
     }).join('');
     var html = {
@@ -2230,7 +2664,8 @@ var VERSIONER = [
       '</div>' +
       '<p class="faint">Ingående balanser kan du lägga in som en första verifikation, eller låta komma från föregående år.</p>' +
       '<div class="row"><button class="btn" data-action="skapa-forsta">Skapa räkenskapsår</button>' +
-      '<button class="btn btn-secondary" data-action="importera">Läs in säkerhetskopia (JSON)</button></div></div>';
+      '<button class="btn btn-secondary" data-action="importera">Läs in säkerhetskopia (JSON)</button></div></div>' +
+      (location.protocol === 'file:' ? '' : '<p class="muted">Finns bokföringen redan i OneDrive, eller ska du läsa en mapp som delats med dig? Koppla appen till OneDrive här:</p>' + vyOneDrive());
   }
 
   function underlagChip(u) {
@@ -2692,12 +3127,75 @@ var VERSIONER = [
     return html;
   }
 
+  function konfliktBanner() {
+    if (!odNu.konflikt) return '';
+    var forsta = odNu.konfliktForsta;
+    return '<div class="card fel" role="alert"><strong>' + (forsta
+      ? 'Det finns redan bokföring från appen i OneDrive-mappen, och det finns också bokföring i den här webbläsaren.'
+      : 'Bokföringen har ändrats i OneDrive från en annan enhet samtidigt som den ändrats här.') + '</strong>' +
+      '<p>Välj vilken version som ska gälla. Den andra försvinner, så spara gärna en kopia av den här webbläsarens version först.</p>' +
+      '<div class="row"><button class="btn btn-small" data-action="od-anvand-onedrive">Använd versionen i OneDrive</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="od-behall-har">Behåll den här webbläsarens version</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="exportera">Spara en kopia av den här versionen</button></div></div>';
+  }
+
+  function inloggningsBanner() {
+    if (!od.clientId || !od.mapp || !odNu.inloggningKravs) return '';
+    return '<div class="card" role="alert"><strong>Logga in med Microsoft igen för att synka med OneDrive.</strong> ' +
+      'Det du gör under tiden sparas i webbläsaren och skickas till OneDrive när du har loggat in.' +
+      '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="od-logga-in">Logga in med Microsoft</button></div></div>';
+  }
+
+  function vyOneDrive() {
+    var html = '<h2 id="onedrive-installning">OneDrive</h2><div class="card">';
+    if (location.protocol === 'file:') {
+      return html + '<p style="margin-top:0">Appen är öppnad som en fil på datorn. För att kunna logga in med Microsoft och spara i OneDrive ' +
+        'behöver den öppnas från sin webbadress (https://…), till exempel via GitHub Pages.</p></div>';
+    }
+    if (!od.clientId) {
+      return html + '<p style="margin-top:0">Spara bokföringen och underlagen i föreningens OneDrive-mapp. Då finns allt på ett ställe, på alla dina enheter, och kan delas med revisorn.</p>' +
+        '<label for="odKlient">Client ID från appregistreringen i Microsoft (eller en inställningslänk)</label>' +
+        '<div class="row"><input id="odKlient" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="max-width:420px"><button class="btn btn-small" data-action="od-spara-klient">Spara</button></div>' +
+        '<details style="margin-top:10px"><summary class="faint">Hur skaffar jag ett Client ID?</summary><ol>' +
+        '<li>Gå till portal.azure.com, sök efter <strong>App registrations</strong> och öppna en befintlig registrering (eller skapa en ny för personliga Microsoft-konton).</li>' +
+        '<li>Under <strong>Authentication</strong>, lägg till plattformen <strong>Single-page application</strong> med omdirigeringsadressen <code>' + esc(omdirigering()) + '</code>.</li>' +
+        '<li>Kopiera <strong>Application (client) ID</strong> från översikten och klistra in det här.</li></ol></details></div>';
+    }
+    if (!od.refreshToken) {
+      return html + '<p style="margin-top:0">Logga in med det Microsoft-konto som har föreningens OneDrive-mapp, eller som mappen är delad med.</p>' +
+        '<div class="row"><button class="btn" data-action="od-logga-in">Logga in med Microsoft</button>' +
+        '<button class="btn btn-secondary btn-small" data-action="od-glom-klient">Byt Client ID</button></div></div>';
+    }
+    if (!od.mapp) {
+      html += '<p style="margin-top:0">Inloggad som <strong>' + esc(od.konto || '') + '</strong>. Välj var bokföringen ska ligga.</p>' +
+        '<h3>Föreningens mapp i min OneDrive</h3><p class="faint" style="margin:0">Skriv sökvägen från OneDrive-roten, med snedstreck mellan mapparna.</p>' +
+        '<div class="row" style="margin-top:6px"><input id="odSokvag" placeholder="t.ex. Föreningen/Bokföring" style="max-width:420px"><button class="btn btn-small" data-action="od-valj-mapp">Använd mappen</button></div>' +
+        '<h3>En mapp som delats med mig (läsning, t.ex. för revisorn)</h3>';
+      if (odNu.delade) {
+        html += odNu.delade.length ? odNu.delade.map(function (m, i) {
+          return '<div class="row" style="margin:4px 0"><span>' + esc(m.namn) + (m.agare ? ' <span class="faint">delad av ' + esc(m.agare) + '</span>' : '') + '</span>' +
+            '<button class="btn btn-secondary btn-small" data-action="od-valj-delad" data-index="' + i + '">Öppna för läsning</button></div>';
+        }).join('') : '<p class="faint">Inga mappar är delade med dig.</p>';
+      } else {
+        html += '<button class="btn btn-secondary btn-small" data-action="od-visa-delade">Visa mappar som delats med mig</button>';
+      }
+      return html + '<div class="row" style="margin-top:12px"><button class="btn btn-secondary btn-small" data-action="od-logga-ut">Logga ut</button></div></div>';
+    }
+    html += '<p style="margin-top:0">' + (lasLage() ? '<strong>Endast läsning.</strong> ' : '') + 'Kopplad till <strong>' + esc(od.mapp.sokvag || od.mapp.namn) + '</strong> som ' + esc(od.konto || '') + '.</p>' +
+      '<p class="faint">' + (od.senast ? 'Senast synkad ' + esc(od.senast.slice(0, 16).replace('T', ' ')) + '. ' : '') +
+      (lasLage() ? 'Appen hämtar senaste versionen när den startar.' : 'Bokföringen ligger i ' + esc(DATAFIL) + ', underlagen i årsmapparna under Bokföringsunderlag. Ändringar sparas automatiskt.') + '</p>' +
+      '<div class="row"><button class="btn btn-small" data-action="od-synka">' + (lasLage() ? 'Hämta senaste' : 'Synka nu') + '</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="od-byt-mapp">Byt mapp</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="od-logga-ut">Logga ut</button></div>';
+    if (!lasLage()) html += '<p class="faint" style="margin-bottom:0">Revisorn får tillgång genom att du delar mappen med läsrätt i OneDrive och skickar appens adress. Revisorn väljer sedan mappen under "En mapp som delats med mig".</p>';
+    return html + '</div>';
+  }
+
   function vyOm() {
     var html = '<h2>Om appen</h2><div class="card">' +
       '<p><strong>Föreningsbokföring ' + esc(VERSIONER[0].version) + '</strong> · ' + esc(VERSIONER[0].datum) + '</p>' +
       '<p>Ett enkelt bokföringsverktyg för små ideella föreningar. Läs in fakturor, kvitton och kontoutdrag, låt appen föreslå verifikationerna och ta fram resultaträkning, balansräkning och underlag till årsmötet.</p>' +
-      '<p class="faint">Bokföringen sparas i den här webbläsaren och filerna i webbläsarens lagring. Exportera en säkerhetskopia under År och arkiv. ' +
-      'Versioner före 1.0 är under uppbyggnad; 1.0 blir den första som sparar i föreningens OneDrive.</p>' +
+      '<p class="faint">' + (odAnslutet() ? 'Bokföringen och underlagen sparas i föreningens OneDrive-mapp.' : 'Bokföringen sparas i den här webbläsaren tills appen kopplas till OneDrive under År och arkiv.') + '</p>' +
       '<p class="faint">Källkoden finns på <a href="https://github.com/KarmaDonkey/forening-bokforing" target="_blank" rel="noopener">GitHub</a>.</p></div>';
     html += '<h2>Vad som är nytt</h2>';
     VERSIONER.forEach(function (v) {
@@ -2708,9 +3206,10 @@ var VERSIONER = [
   }
 
   function vyArkiv(ar) {
+    if (lasLage()) return vyOneDrive();
     var varningar = K.kontroller(ar);
     var arLast = ar.lastTom === ar.slut;
-    var html = '<h2>Kontroller</h2><div class="card">' + (varningar.length
+    var html = vyOneDrive() + '<h2>Kontroller</h2><div class="card">' + (varningar.length
       ? '<ul>' + varningar.map(function (w) { return '<li>' + esc(w.meddelande) + '</li>'; }).join('') + '</ul>'
       : '<p class="ok">Inga anmärkningar.</p>') + '</div>';
     html += '<h2>Låsning och årsskifte</h2><div class="card">' +
@@ -2747,6 +3246,8 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
+  var LASBARA = ['visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning'];
+
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport]');
     if (!t) return;
@@ -2754,6 +3255,10 @@ var VERSIONER = [
     if (t.dataset.rapport) { rapportVy = t.dataset.rapport; render(); return; }
     if (t.dataset.ver && !t.dataset.action) { var nr = Number(t.dataset.ver); oppenVer = oppenVer === nr ? null : nr; render(); return; }
     var handling = HANDLINGAR[t.dataset.action];
+    if (handling && lasLage() && t.dataset.action.indexOf('od-') !== 0 && LASBARA.indexOf(t.dataset.action) < 0) {
+      visa('Endast läsning: bokföringen kan inte ändras från en mapp som delats med dig.', true);
+      return;
+    }
     if (handling) {
       try { handling(t); }
       catch (err) { visa(err.fel ? err.fel.join(' ') : err.message, true); }
@@ -2795,6 +3300,7 @@ var VERSIONER = [
       }
       render();
     }
+    if (lasLage() && (t.dataset.forening || t.dataset.lista || t.dataset.underlag)) { visa('Endast läsning.', true); return; }
     if (t.dataset.forening) {
       store.forening[t.dataset.forening] = t.value.trim();
       spara();
@@ -2841,12 +3347,13 @@ var VERSIONER = [
   document.addEventListener('dragover', function (e) { if (aktivt()) e.preventDefault(); });
   document.addEventListener('drop', function (e) {
     if (!aktivt() || !e.dataTransfer || !e.dataTransfer.files.length) return;
+    if (lasLage()) { e.preventDefault(); visa('Endast läsning: filer kan inte läsas in.', true); return; }
     e.preventDefault();
     vy = 'inlasning';
     lasInFiler(Array.from(e.dataTransfer.files));
   });
   document.addEventListener('paste', function (e) {
-    if (!aktivt() || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (!aktivt() || lasLage() || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     var cd = e.clipboardData;
     if (cd.files && cd.files.length) {
       e.preventDefault();
@@ -3140,6 +3647,65 @@ var VERSIONER = [
       };
       input.click();
     },
+    'od-spara-klient': function () {
+      var m = varde('odKlient').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+      if (!m) throw new Error('Det ser inte ut som ett Client ID. Det har formen xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.');
+      od.clientId = m[0].toLowerCase();
+      sparaOd();
+      render();
+    },
+    'od-glom-klient': function () { od.clientId = null; sparaOd(); render(); },
+    'od-logga-in': function () { startaInloggning(false); },
+    'od-visa-delade': function () {
+      sattStatus('Hämtar delade mappar…');
+      delaMappar().then(function (lista) { odNu.delade = lista; sattStatus(''); render(); }).catch(function (err) { visa(err.message, true); });
+    },
+    'od-valj-mapp': function () {
+      var sokvag = varde('odSokvag');
+      sattStatus('Kopplar till OneDrive…');
+      valjEgenMapp(sokvag).then(function () {
+        visa(odNu.konflikt ? 'Mappen är kopplad. Välj vilken version av bokföringen som ska gälla.' : 'Appen är kopplad till OneDrive-mappen ' + od.mapp.sokvag + '.');
+      }).catch(function (err) { if (!odNu.konflikt) { od.mapp = null; sparaOd(); } visa(err.message, true); });
+    },
+    'od-valj-delad': function (t) {
+      var m = odNu.delade[Number(t.dataset.index)];
+      sattStatus('Hämtar bokföringen…');
+      valjDeladMapp(m).then(function () {
+        vy = 'rapporter';
+        visa('Mappen är öppnad för läsning. Du kan se rapporter, verifikationer och underlag men inte ändra något.');
+      }).catch(function (err) { od.mapp = null; od.lage = null; sparaOd(); visa(err.message, true); });
+    },
+    'od-synka': function () {
+      var steg = lasLage() || !od.smutsig ? hamtaFranOneDrive() : synkaUpp();
+      steg.then(function () { render(); }).catch(function (err) { visa(err.message, true); });
+    },
+    'od-anvand-onedrive': function () {
+      if (!window.confirm('Ersätta bokföringen i den här webbläsaren med versionen i OneDrive?')) return;
+      graf(iMappen(DATAFIL)).then(hamtaOchTillampa).then(function () { visa('Bokföringen från OneDrive används nu.'); }).catch(function (err) { visa(err.message, true); });
+    },
+    'od-behall-har': function () {
+      if (!window.confirm('Skriva över bokföringen i OneDrive med den här webbläsarens version?')) return;
+      graf(iMappen(DATAFIL), { tillat: [404] }).then(function (meta) {
+        od.eTag = meta === 404 ? null : meta.eTag;
+        od.smutsig = true;
+        odNu.konflikt = false;
+        odNu.konfliktForsta = false;
+        sparaOd();
+        return synkaUpp();
+      }).then(function () { visa('Den här webbläsarens version är sparad i OneDrive.'); }).catch(function (err) { visa(err.message, true); });
+    },
+    'od-byt-mapp': function () {
+      if (od.smutsig && !window.confirm('Det finns ändringar som inte sparats i OneDrive. Byta mapp ändå?')) return;
+      od.mapp = null; od.lage = null; od.eTag = null; od.senast = null; od.smutsig = false; odNu.mappar = {}; odNu.konflikt = false; odNu.delade = null;
+      sparaOd();
+      sattStatus('');
+      render();
+    },
+    'od-logga-ut': function () {
+      if (od.smutsig && !window.confirm('Det finns ändringar som inte sparats i OneDrive. Logga ut ändå?')) return;
+      kopplaFranOneDrive();
+      visa('Du är utloggad från OneDrive. Bokföringen finns kvar i den här webbläsaren.');
+    },
     'las-in-forening': function () {
       var input = document.createElement('input');
       input.type = 'file';
@@ -3211,9 +3777,33 @@ var VERSIONER = [
   };
 
   ladda();
+  laddaOd();
   LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
+  if (lasLage()) vy = 'rapporter';
   render();
   laddaLogo().then(render);
+
+  // Inloggning, och därefter senaste versionen från OneDrive.
+  hanteraInloggningsretur().then(function () {
+    if (!od.clientId || !od.mapp) return;
+    sattStatus('Hämtar från OneDrive…');
+    return hamtaFranOneDrive();
+  }).catch(function (err) {
+    sattStatus(err.message, true);
+    // Försök logga in tyst i bakgrunden högst en gång i timmen; annars visas en knapp.
+    var senast = 0;
+    try { senast = Number(localStorage.getItem('forening-bokforing:tyst-inloggning')) || 0; } catch (e) { /* tomt */ }
+    if (odNu.inloggningKravs && od.clientId && od.mapp && Date.now() - senast > 3600000) startaInloggning(true);
+  }).then(render);
+
+  // Hämta igen när appen kommer tillbaka i fokus, så att ändringar från en annan enhet syns.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible' || !odAnslutet() || Date.now() - odNu.senastHamtat < 60000) return;
+    hamtaFranOneDrive().then(render, function () { render(); });
+  });
+  window.addEventListener('beforeunload', function (e) {
+    if (odAnslutet() && od.smutsig && !lasLage()) { e.preventDefault(); e.returnValue = ''; }
+  });
 })();
 </script>
 </body>
