@@ -100,10 +100,39 @@
   a { color: var(--accent); }
   footer { margin: 32px 0 8px; text-align: center; }
   .lank-knapp { background: none; border: 0; color: var(--ink-faint); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
+  .listpost { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) auto; gap: 6px; align-items: end; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
+  .listpost textarea, .dok-form textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--hairline); border-radius: 6px; padding: 7px 9px; width: 100%; min-height: 60px; }
+  .forhandsvisning { overflow-x: auto; background: var(--surface-2); padding: 12px; border-radius: 8px; }
+  #utskrift { display: none; }
+  /* Fakturor och kvitton: alltid ljusa, oavsett tema, i A4-format. */
+  .dok { background: #fff; color: #1a1a1a; width: 180mm; min-height: 250mm; margin: 0 auto; padding: 12mm; font: 10.5pt/1.45 "IBM Plex Sans", Arial, sans-serif; display: flex; flex-direction: column; box-sizing: content-box; }
+  .dok table { width: 100%; border-collapse: collapse; }
+  .dok th, .dok td { border: 0; padding: 3px 6px; color: #1a1a1a; }
+  .dok-huvud { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+  .dok-logo { max-height: 70px; max-width: 200px; display: block; margin-bottom: 6px; }
+  .dok-forening { font-size: 13pt; font-weight: 600; }
+  .dok-titel { font: 600 24pt/1.1 "Source Serif 4", Georgia, serif; text-align: right; margin-bottom: 8px; }
+  .dok-meta td:first-child { color: #555; padding-right: 12px; }
+  .dok-meta td { padding: 1px 0; white-space: nowrap; }
+  .dok-parter { display: flex; gap: 24px; margin: 18px 0 14px; }
+  .dok-parter > div { flex: 1; }
+  .dok-etikett { color: #555; font-size: 9pt; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+  .dok-rader th { text-align: left; border-bottom: 1.5px solid #1a1a1a; font-size: 9pt; text-transform: uppercase; letter-spacing: .04em; color: #555; }
+  .dok-rader td { border-bottom: 1px solid #ddd; vertical-align: top; }
+  .dok .num { text-align: right; white-space: nowrap; font-family: "IBM Plex Mono", monospace; }
+  .dok-summa { width: 50% !important; margin-left: auto; margin-top: 8px; }
+  .dok-summa tr.total td { font-weight: 600; border-top: 1.5px solid #1a1a1a; font-size: 12pt; }
+  .dok-info { margin-top: 14px; }
+  .dok-fot { margin-top: auto; padding-top: 10px; border-top: 1px solid #bbb; display: flex; gap: 18px; font-size: 9pt; color: #333; }
+  .dok-fot > div { flex: 1; }
   @media print {
     header .row, nav, .ej-utskrift { display: none !important; }
     body { background: #fff; color: #000; }
     .card { border: 0; padding: 0; }
+    body.skriver-dokument .wrap { display: none !important; }
+    body.skriver-dokument #utskrift { display: block !important; }
+    body.skriver-dokument .dok { width: auto; min-height: 265mm; padding: 0; }
+    @page { size: A4; margin: 15mm; }
   }
 </style>
 </head>
@@ -117,6 +146,7 @@
   <main id="main"></main>
   <footer class="ej-utskrift"><button class="lank-knapp" data-vy="om" id="versionLank"></button></footer>
 </div>
+<div id="utskrift"></div>
 
 <!--
   Kärnan: all bokföringslogik. Den har inga beroenden till sidan och testas
@@ -129,6 +159,17 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '0.7', datum: '2026-11-20',
+    nyheter: [
+      'Ny flik "Fakturor och kvitton": skriv fakturor och kvitton i samma utseende som föreningens Excelmall och skriv ut eller spara dem som PDF.',
+      'Rullistor för mottagare, föreningens adress, vår referens och artiklar med pris och konto.',
+      'Föreningens uppgifter, logotyp, adresser, kontaktpersoner och artiklar fylls i under År och arkiv.',
+      'Fakturanummer som 2026-11:01 och kvittonummer som K2026-001 räknas upp automatiskt.',
+      'En skickad faktura väntar på betalning bland underlagen och kopplas automatiskt när pengarna syns i kontoutdraget.',
+      'Knappen "Skriv kvitto" på en bokförd inbetalning fyller i namn, belopp och betaldatum.'
+    ]
+  },
   {
     version: '0.6', datum: '2026-11-19',
     nyheter: [
@@ -1274,6 +1315,83 @@ var VERSIONER = [
     return { ar: Object.assign({}, ar, { bankrader: bankrader }), kopplade: kopplade };
   }
 
+  // ---------- Fakturor och kvitton som föreningen skriver ----------
+
+  // Fakturor: ÅÅÅÅ-MM:NN (löpnummer per månad). Kvitton: KÅÅÅÅ-NNN (löpnummer per år).
+  function nastaDokumentnummer(dokument, typ, datum) {
+    var max = 0, prefix, m;
+    if (typ === 'faktura') {
+      prefix = datum.slice(0, 7) + ':';
+      (dokument || []).forEach(function (d) {
+        if (d.typ === 'faktura' && d.nummer.indexOf(prefix) === 0 && (m = d.nummer.slice(prefix.length).match(/^\d+$/))) max = Math.max(max, Number(m[0]));
+      });
+      return prefix + String(max + 1).padStart(2, '0');
+    }
+    prefix = 'K' + datum.slice(0, 4) + '-';
+    (dokument || []).forEach(function (d) {
+      if (d.typ === 'kvitto' && d.nummer.indexOf(prefix) === 0 && (m = d.nummer.slice(prefix.length).match(/^\d+$/))) max = Math.max(max, Number(m[0]));
+    });
+    return prefix + String(max + 1).padStart(3, '0');
+  }
+
+  // Antal får ha decimaler (t.ex. 1,5 timme); totalen avrundas till hela ören.
+  function dokumentRadTotal(rad) { return Math.round(Number(rad.antal) * rad.pris); }
+
+  function dokumentSumma(dok) {
+    return (dok.rader || []).reduce(function (s, r) { return s + dokumentRadTotal(r); }, 0);
+  }
+
+  function valideraDokument(dok) {
+    var fel = [];
+    if (dok.typ !== 'faktura' && dok.typ !== 'kvitto') fel.push('Okänd dokumenttyp.');
+    if (!dok.mottagare || !String(dok.mottagare.namn || '').trim()) fel.push('Mottagaren behöver ett namn.');
+    if (!arGiltigtDatum(dok.datum)) fel.push('Datum saknas eller är ogiltigt.');
+    if (dok.typ === 'faktura' && (!arGiltigtDatum(dok.forfallodatum) || dok.forfallodatum < dok.datum)) fel.push('Förfallodatum saknas eller ligger före fakturadatum.');
+    var rader = dok.rader || [];
+    if (!rader.length) fel.push('Lägg till minst en rad.');
+    rader.forEach(function (r, i) {
+      if (!String(r.beskrivning || '').trim()) fel.push('Rad ' + (i + 1) + ': beskrivning saknas.');
+      if (!(Number(r.antal) > 0) || !isFinite(Number(r.antal))) fel.push('Rad ' + (i + 1) + ': antalet måste vara större än noll.');
+      if (!arHeltal(r.pris) || r.pris < 0) fel.push('Rad ' + (i + 1) + ': priset är ogiltigt.');
+      if (r.konto && !giltigtKontonummer(r.konto)) fel.push('Rad ' + (i + 1) + ': kontot ' + r.konto + ' är ogiltigt.');
+    });
+    if (!fel.length && dokumentSumma(dok) <= 0) fel.push('Summan måste vara större än noll.');
+    return fel;
+  }
+
+  // Kontot som förekommer med störst belopp på fakturans rader.
+  function huvudkonto(dok) {
+    var per = {};
+    (dok.rader || []).forEach(function (r) { if (r.konto) per[r.konto] = (per[r.konto] || 0) + dokumentRadTotal(r); });
+    return Object.keys(per).sort(function (a, b) { return per[b] - per[a] || (a < b ? -1 : 1); })[0] || '';
+  }
+
+  // En skickad faktura blir ett underlag som väntar på inbetalning.
+  function fakturaTillUnderlag(dok, filnamn) {
+    return {
+      id: 'dok-' + dok.id,
+      filnamn: filnamn,
+      dokumenttyp: 'utgaende_faktura',
+      dokumentId: dok.id,
+      motpart: String(dok.mottagare.foretag || dok.mottagare.namn).trim(),
+      datum: dok.datum,
+      forfallodatum: dok.forfallodatum,
+      belopp: dokumentSumma(dok),
+      riktning: 'intakt',
+      beskrivning: 'Faktura ' + dok.nummer + ': ' + dok.rader[0].beskrivning,
+      fakturanummer: dok.nummer,
+      ocr: '',
+      foreslagetKonto: huvudkonto(dok),
+      kontoKalla: 'faktura'
+    };
+  }
+
+  // "Swish från 46701234567 ANNA ANDERSSON" -> "Anna Andersson"
+  function namnFranBanktext(text) {
+    var t = String(text || '').replace(/swish\s*(från|fran|betalning)?/i, ' ').replace(/[+\d]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return t.toLowerCase().replace(/(^|[\s-])([a-zåäöéü])/g, function (m, a, b) { return a + b.toUpperCase(); });
+  }
+
   function tolkningsInstruktion(ar, forening, motpartsregler) {
     var tidigare = (motpartsregler || []).filter(function (r) { return ar.kontoplan.some(function (k) { return k.nr === r.konto; }); }).slice(-50);
     return [
@@ -1401,7 +1519,13 @@ var VERSIONER = [
     larMotpart: larMotpart,
     kontoAttLara: kontoAttLara,
     tillampaMotpartsregler: tillampaMotpartsregler,
-    kopplaBokforda: kopplaBokforda
+    kopplaBokforda: kopplaBokforda,
+    nastaDokumentnummer: nastaDokumentnummer,
+    dokumentRadTotal: dokumentRadTotal,
+    dokumentSumma: dokumentSumma,
+    valideraDokument: valideraDokument,
+    fakturaTillUnderlag: fakturaTillUnderlag,
+    namnFranBanktext: namnFranBanktext
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
@@ -1421,6 +1545,10 @@ var VERSIONER = [
   var MODELL = 'claude-opus-5-5';
 
   var store = { format: 1, forening: { namn: '', orgnr: '' }, ar: {}, aktivt: null, regler: [], motpartsregler: [] };
+  var LISTNYCKLAR = ['adresser', 'kontakter', 'artiklar', 'mottagare', 'dokument'];
+  var dokUtkast = null;
+  var dokVisas = null;
+  var logoUrl = null;
   var vy = 'inlasning';
   var inkorgVal = {};
   var logg = [];
@@ -1441,6 +1569,7 @@ var VERSIONER = [
         if (d && d.format === 1 && d.ar) store = d;
         if (!store.regler) store.regler = [];
         if (!store.motpartsregler) store.motpartsregler = [];
+        LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
       }
     } catch (e) { /* tom lagring är okej */ }
   }
@@ -1674,6 +1803,7 @@ var VERSIONER = [
   }
 
   function kontoKallaText(u) {
+    if (u.kontoKalla === 'faktura') return 'från fakturan';
     return u.kontoKalla === 'inlart' ? 'som förra gången' : u.kontoKalla === 'manuell' ? 'ditt val' : u.kontoKalla === 'claude' ? 'Claudes förslag' : '';
   }
 
@@ -1784,12 +1914,150 @@ var VERSIONER = [
     return { konto: r.konto, debet: r.belopp > 0 ? K.formatBelopp(r.belopp) : '', kredit: r.belopp < 0 ? K.formatBelopp(-r.belopp) : '' };
   }
 
+  // ---------- Fakturor och kvitton ----------
+
+  function nyttId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  function hitta(lista, id) { return (store[lista] || []).find(function (x) { return x.id === id; }) || null; }
+  function rader(text) { return String(text || '').split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean); }
+
+  function laddaLogo() {
+    if (!store.forening.harLogotyp) { logoUrl = null; return Promise.resolve(); }
+    return hamtaFil('logotyp').then(function (rec) {
+      if (!rec) { logoUrl = null; return; }
+      return blobTillBase64(rec.blob).then(function (b64) { logoUrl = 'data:' + (rec.blob.type || 'image/png') + ';base64,' + b64; });
+    }).catch(function () { logoUrl = null; });
+  }
+
+  function nyttDokUtkast(typ) {
+    var d = idag();
+    return {
+      typ: typ, mottagareId: '', mottagare: { namn: '', foretag: '', adress: '', epost: '', telefon: '' },
+      adressId: store.adresser[0] ? store.adresser[0].id : '', kontaktId: store.kontakter[0] ? store.kontakter[0].id : '',
+      datum: d, forfallodatum: K.laggTillDagar(d, 30), betaldDatum: '',
+      rader: [{ artikelId: '', antal: '1', beskrivning: '', pris: '', konto: '' }], verifikation: null
+    };
+  }
+
+  function utkastTillDokument() {
+    var fel = [];
+    var radlista = dokUtkast.rader.filter(function (r) { return r.beskrivning || r.pris; }).map(function (r, i) {
+      var pris = 0;
+      try { pris = K.parseBelopp(r.pris || '0'); } catch (e) { fel.push('Rad ' + (i + 1) + ': ' + e.message); }
+      return { antal: Number(String(r.antal).replace(',', '.')), beskrivning: r.beskrivning.trim(), pris: pris, konto: (r.konto || '').trim() };
+    });
+    var dok = {
+      typ: dokUtkast.typ, datum: dokUtkast.datum,
+      forfallodatum: dokUtkast.typ === 'faktura' ? dokUtkast.forfallodatum : '',
+      mottagare: Object.assign({}, dokUtkast.mottagare), rader: radlista
+    };
+    return { fel: fel.concat(K.valideraDokument(dok)), dok: dok };
+  }
+
+  function dokStatus(d) {
+    if (d.makulerad) return { text: 'Makulerad', klass: 'muted' };
+    if (d.typ === 'kvitto') return { text: d.verifikation ? 'Utfärdat (ver ' + d.verifikation.nr + ')' : 'Utfärdat', klass: '' };
+    var ar = store.ar[d.arId];
+    var u = ar && (ar.underlag || []).find(function (x) { return x.id === d.underlagId; });
+    if (u && u.verifikation != null) return { text: 'Betald (ver ' + u.verifikation + ')', klass: 'ok' };
+    if (d.forfallodatum < idag()) return { text: 'Förfallen', klass: 'fel' };
+    return { text: 'Väntar på betalning', klass: '' };
+  }
+
+  // Fakturans eller kvittots innehåll, i samma upplägg som föreningens Excelmall.
+  function dokumentInnehall(d) {
+    var f = d.forening || {};
+    var arF = d.typ === 'faktura';
+    var meta = arF
+      ? [['Fakturadatum', d.datum], ['Fakturanr', d.nummer], ['Förfallodatum', d.forfallodatum], ['Bankgiro', f.bankgiro]]
+      : [['Utskrivningsdatum', d.datum], ['Kvittonr', d.nummer]];
+    var m = d.mottagare || {}, ref = d.referens || {};
+    var html = '<div class="dok"><div class="dok-huvud"><div>' +
+      (d.logo ? '<img class="dok-logo" src="' + esc(d.logo) + '" alt="">' : '') +
+      '<div class="dok-forening">' + esc(f.namn) + '</div></div><div>' +
+      '<div class="dok-titel">' + (arF ? 'Faktura' : 'Kvitto') + '</div><table class="dok-meta">' +
+      meta.filter(function (x) { return x[1]; }).map(function (x) { return '<tr><td>' + x[0] + ':</td><td>' + esc(x[1]) + '</td></tr>'; }).join('') +
+      '</table></div></div>';
+    html += '<div class="dok-parter"><div><div class="dok-etikett">' + (arF ? 'Fakturamottagare' : 'Mottagare') + '</div>' +
+      [m.namn, m.foretag].concat(rader(m.adress), [m.telefon, m.epost]).filter(Boolean).map(esc).join('<br>') + '</div>' +
+      (ref.namn ? '<div><div class="dok-etikett">Vår referens</div>' + [ref.namn, ref.epost, ref.mobil].filter(Boolean).map(esc).join('<br>') + '</div>' : '') + '</div>';
+    html += '<table class="dok-rader"><thead><tr><th class="num">Kvantitet</th><th>Beskrivning</th><th class="num">á pris</th><th class="num">Total</th></tr></thead><tbody>' +
+      d.rader.map(function (r) {
+        return '<tr><td class="num">' + esc(String(r.antal).replace('.', ',')) + '</td><td>' + esc(r.beskrivning) + '</td><td class="num">' + kr(r.pris) + ' kr</td><td class="num">' + kr(K.dokumentRadTotal(r)) + ' kr</td></tr>';
+      }).join('') + '</tbody></table>';
+    var summa = K.dokumentSumma(d);
+    html += '<table class="dok-summa"><tr><td>Delsumma</td><td class="num">' + kr(summa) + ' kr</td></tr><tr><td>Moms</td><td class="num">' + kr(0) + ' kr</td></tr>' +
+      '<tr class="total"><td>' + (arF ? 'Att betala' : 'Totalt betalt') + '</td><td class="num">' + kr(summa) + ' kr</td></tr></table>';
+    html += '<div class="dok-info">' + (arF
+      ? (f.bankgiro ? 'Betala till bankgiro ' + esc(f.bankgiro) + ' senast ' + esc(d.forfallodatum) + '. Ange fakturanummer ' + esc(d.nummer) + ' som referens.' : '')
+      : 'Beloppet ovan är betalt till föreningen. Tack!') + '</div>';
+    html += '<div class="dok-fot"><div><strong>Adress</strong><br>' + [f.namn].concat(rader(d.avsandare)).filter(Boolean).map(esc).join('<br>') + '</div>' +
+      '<div>' + (f.webb ? '<strong>Webb</strong><br>' + esc(f.webb) + '<br>' : '') + (f.epost ? '<strong>E-post</strong><br>' + esc(f.epost) : '') + '</div>' +
+      '<div>' + (f.orgnr ? '<strong>Org.nummer</strong><br>' + esc(f.orgnr) + '<br>' : '') + (f.bankgiro ? '<strong>Bankgiro</strong><br>' + esc(f.bankgiro) : '') + '</div></div>';
+    return html + '</div>';
+  }
+
+  // En fristående kopia (HTML) som sparas som underlag och kan öppnas och skrivas ut igen.
+  function dokumentFil(d) {
+    var css = Array.from(document.querySelectorAll('style')).map(function (x) { return x.textContent; }).join('\n');
+    return '<!DOCTYPE html><html lang="sv"><head><meta charset="UTF-8"><title>' + esc((d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + d.nummer) + '</title>' +
+      '<style>' + css + '\nbody{background:#eee}@media print{body{background:#fff}.dok{width:auto;padding:0}}</style></head><body>' + dokumentInnehall(d) + '</body></html>';
+  }
+
+  function skrivUt(d) {
+    document.getElementById('utskrift').innerHTML = dokumentInnehall(d);
+    document.body.classList.add('skriver-dokument');
+    var klar = function () { document.body.classList.remove('skriver-dokument'); window.removeEventListener('afterprint', klar); };
+    window.addEventListener('afterprint', klar);
+    window.print();
+    setTimeout(klar, 1000);
+  }
+
+  function sparaDokument() {
+    var res = utkastTillDokument();
+    if (res.fel.length) throw new Error(res.fel.join(' '));
+    var d = res.dok;
+    var adress = hitta('adresser', dokUtkast.adressId);
+    var kontakt = hitta('kontakter', dokUtkast.kontaktId);
+    d.id = nyttId();
+    d.nummer = K.nastaDokumentnummer(store.dokument, d.typ, d.datum);
+    d.forening = { namn: store.forening.namn, orgnr: store.forening.orgnr, bankgiro: store.forening.bankgiro, webb: store.forening.webb, epost: store.forening.epost };
+    d.avsandare = adress ? adress.text : '';
+    d.referens = kontakt ? { namn: kontakt.namn, epost: kontakt.epost, mobil: kontakt.mobil } : null;
+    d.logo = logoUrl;
+    d.skapad = new Date().toISOString();
+    if (dokUtkast.verifikation) d.verifikation = dokUtkast.verifikation;
+
+    // Mottagaren sparas för nästa gång.
+    var m = d.mottagare;
+    var befintlig = hitta('mottagare', dokUtkast.mottagareId) ||
+      store.mottagare.find(function (x) { return x.namn.trim().toLowerCase() === m.namn.trim().toLowerCase() && (x.foretag || '') === (m.foretag || ''); });
+    if (befintlig) Object.assign(befintlig, m);
+    else store.mottagare.push(Object.assign({ id: nyttId() }, m));
+
+    var sparat = Promise.resolve();
+    if (d.typ === 'faktura') {
+      var filnamn = 'Faktura ' + d.nummer.replace(':', '_') + '.html';
+      var u = K.fakturaTillUnderlag(d, filnamn);
+      var arId = arForDatum(d.forfallodatum) || arForDatum(d.datum) || store.aktivt;
+      store.ar[arId] = K.laggTillUnderlag(store.ar[arId], u);
+      d.underlagId = u.id;
+      d.arId = arId;
+      sparat = sparaFil(u.id, new Blob([dokumentFil(d)], { type: 'text/html' }), filnamn);
+    }
+    store.dokument.push(d);
+    spara();
+    dokUtkast = null;
+    dokVisas = d.id;
+    return sparat.then(function () { return d; });
+  }
+
   // ---------- Rendering ----------
 
   var VYER = [
     ['inlasning', 'Läs in'],
     ['verifikationer', 'Verifikationer'],
     ['ny', 'Ny verifikation'],
+    ['dokument', 'Fakturor och kvitton'],
     ['huvudbok', 'Huvudbok'],
     ['rapporter', 'Rapporter'],
     ['kontoplan', 'Kontoplan'],
@@ -1817,6 +2085,7 @@ var VERSIONER = [
       inlasning: vyInlasning,
       verifikationer: vyVerifikationer,
       ny: vyNy,
+      dokument: vyDokument,
       huvudbok: vyHuvudbok,
       rapporter: vyRapporter,
       kontoplan: vyKontoplan,
@@ -1825,6 +2094,7 @@ var VERSIONER = [
     }[vy](ar);
     main.innerHTML = msg + html;
     if (vy === 'ny') uppdateraUtkastStatus();
+    if (vy === 'dokument' && dokUtkast) uppdateraDokStatus();
   }
 
   function renderArvaljare() {
@@ -1985,6 +2255,10 @@ var VERSIONER = [
     if (v.underlagKommentar) html += '<p class="faint">' + esc(v.underlagKommentar) + '</p>';
     if (v.registrerad) html += '<p class="faint">Registrerad ' + esc(v.registrerad.slice(0, 16).replace('T', ' ')) + '</p>';
     var kanRattas = v.rattar == null && !rattning && !(ar.lastTom && ar.lastTom >= ar.slut);
+    var kvitton = store.dokument.filter(function (d) { return d.verifikation && d.verifikation.ar === store.aktivt && d.verifikation.nr === v.nr && !d.makulerad; });
+    if (kvitton.length) html += '<p class="faint">Kvitto: ' + kvitton.map(function (d) { return '<button class="tag knapp-tag" data-action="visa-dok" data-id="' + esc(d.id) + '">' + esc(d.nummer) + '</button>'; }).join(' ') + '</p>';
+    var inbetalning = v.rattar == null && !rattning && v.rader.some(function (r) { return Number(r.konto) >= 1900 && Number(r.konto) <= 1999 && r.belopp > 0; });
+    if (inbetalning) html += '<button class="btn btn-secondary btn-small ej-utskrift" data-action="kvitto-fran-ver" data-nr="' + v.nr + '">Skriv kvitto</button> ';
     if (kanRattas) html += '<button class="btn btn-secondary btn-small ej-utskrift" data-action="ratta" data-nr="' + v.nr + '">Rätta (bokför omvänd verifikation)</button>';
     return html + '</td></tr>';
   }
@@ -2180,6 +2454,129 @@ var VERSIONER = [
     return html + '</tbody></table></div>';
   }
 
+  function vyDokument() {
+    if (dokUtkast) return vyDokumentForm();
+    var html = '<div class="row" style="justify-content:space-between"><h2>Fakturor och kvitton</h2><div class="row">' +
+      '<button class="btn" data-action="ny-faktura">Ny faktura</button><button class="btn btn-secondary" data-action="nytt-kvitto">Nytt kvitto</button></div></div>';
+    if (!store.forening.namn || !store.forening.bankgiro || !store.adresser.length) {
+      html += '<div class="card"><p style="margin-top:0">Fyll i föreningens namn, bankgiro och adress innan du skriver fakturor. Där lägger du också till kontaktpersoner, artiklar och logotyp.</p>' +
+        '<button class="btn btn-small" data-action="till-forening">Gå till föreningens uppgifter</button></div>';
+    }
+    if (dokVisas) {
+      var d = hitta('dokument', dokVisas);
+      if (d) {
+        html += '<div class="card"><div class="row" style="justify-content:space-between"><strong>' + (d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + esc(d.nummer) + '</strong><div class="row">' +
+          '<button class="btn btn-small" data-action="skriv-ut-dok" data-id="' + esc(d.id) + '">Skriv ut / spara som PDF</button>' +
+          '<button class="btn btn-secondary btn-small" data-action="stang-dok">Stäng</button></div></div>' +
+          '<div class="forhandsvisning" style="margin-top:8px">' + dokumentInnehall(d) + '</div></div>';
+      }
+    }
+    var lista = store.dokument.slice().sort(function (a, b) { return a.skapad < b.skapad ? 1 : -1; });
+    if (!lista.length) return html + '<p class="muted">Inga fakturor eller kvitton ännu.</p>';
+    html += '<div class="scroll"><table><thead><tr><th>Nummer</th><th>Datum</th><th>Mottagare</th><th class="num">Belopp</th><th>Status</th><th></th></tr></thead><tbody>';
+    lista.forEach(function (d) {
+      var st = dokStatus(d);
+      html += '<tr><td>' + (d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + esc(d.nummer) + '</td><td>' + esc(d.datum) + '</td><td>' + esc(d.mottagare.namn) +
+        (d.mottagare.foretag ? '<div class="faint">' + esc(d.mottagare.foretag) + '</div>' : '') + '</td><td class="num">' + kr(K.dokumentSumma(d)) + '</td>' +
+        '<td class="' + st.klass + '">' + esc(st.text) + '</td><td style="white-space:nowrap"><button class="btn btn-secondary btn-small" data-action="visa-dok" data-id="' + esc(d.id) + '">Visa</button> ' +
+        (!d.makulerad && st.text.indexOf('Betald') < 0 ? '<button class="btn btn-secondary btn-small" data-action="makulera-dok" data-id="' + esc(d.id) + '">Makulera</button>' : '') + '</td></tr>';
+    });
+    return html + '</tbody></table></div>';
+  }
+
+  function vyDokumentForm() {
+    var u = dokUtkast;
+    var arF = u.typ === 'faktura';
+    var opt = function (lista, valt, etikett) {
+      return lista.map(function (x) { return '<option value="' + esc(x.id) + '"' + (x.id === valt ? ' selected' : '') + '>' + esc(etikett(x)) + '</option>'; }).join('');
+    };
+    var html = '<h2>' + (arF ? 'Ny faktura' : 'Nytt kvitto') + '</h2><div class="card dok-form">';
+    if (u.verifikation) html += '<p class="muted" style="margin-top:0">Kvittot gäller verifikation ' + u.verifikation.nr + '.</p>';
+    html += '<div class="grid2">' +
+      '<div><label for="dokMottagare">Mottagare</label><select id="dokMottagare" data-dokval="mottagare"><option value="">Ny mottagare…</option>' +
+      opt(store.mottagare, u.mottagareId, function (x) { return x.namn + (x.foretag ? ' – ' + x.foretag : ''); }) + '</select></div>' +
+      '<div><label for="dokAdress">Föreningens adress</label><select id="dokAdress" data-dok="adressId">' + (store.adresser.length ? '' : '<option value="">(ingen adress sparad)</option>') +
+      opt(store.adresser, u.adressId, function (x) { return x.etikett || rader(x.text)[0] || 'Adress'; }) + '</select></div>' +
+      '<div><label for="dokRef">Vår referens</label><select id="dokRef" data-dok="kontaktId"><option value="">(ingen)</option>' +
+      opt(store.kontakter, u.kontaktId, function (x) { return x.namn; }) + '</select></div>' +
+      '<div class="grid2" style="gap:0 8px"><div><label for="dokDatum">' + (arF ? 'Fakturadatum' : 'Utskrivningsdatum') + '</label><input type="date" id="dokDatum" data-dok="datum" value="' + esc(u.datum) + '"></div>' +
+      (arF ? '<div><label for="dokForfall">Förfallodatum</label><input type="date" id="dokForfall" data-dok="forfallodatum" value="' + esc(u.forfallodatum) + '"></div>' : '') + '</div></div>';
+    html += '<h3>' + (arF ? 'Fakturamottagare' : 'Mottagare') + '</h3><div class="grid2">' +
+      [['namn', 'Namn'], ['foretag', 'Företag eller organisation'], ['epost', 'E-post'], ['telefon', 'Telefon']].map(function (f) {
+        return '<div><label>' + f[1] + '</label><input data-dokm="' + f[0] + '" value="' + esc(u.mottagare[f[0]]) + '"></div>';
+      }).join('') +
+      '<div><label>Adress (en rad per rad)</label><textarea data-dokm="adress">' + esc(u.mottagare.adress) + '</textarea></div></div>';
+    html += '<h3>Rader</h3><div class="scroll"><table class="rader-tabell"><thead><tr><th>Artikel</th><th class="num">Antal</th><th>Beskrivning</th><th class="num">á pris</th>' +
+      (arF ? '<th>Konto</th>' : '') + '<th class="num">Total</th><th></th></tr></thead><tbody>';
+    u.rader.forEach(function (r, i) {
+      html += '<tr><td><select data-dokrad="' + i + '" data-f="artikelId" style="min-width:120px"><option value="">Välj…</option>' +
+        opt(store.artiklar, r.artikelId, function (x) { return x.beskrivning + (x.pris ? ' (' + kr(x.pris) + ')' : ''); }) + '</select></td>' +
+        '<td><input class="num" style="width:70px" inputmode="decimal" data-dokrad="' + i + '" data-f="antal" value="' + esc(r.antal) + '"></td>' +
+        '<td><input style="min-width:220px" data-dokrad="' + i + '" data-f="beskrivning" value="' + esc(r.beskrivning) + '"></td>' +
+        '<td><input class="num" style="width:110px" inputmode="decimal" data-dokrad="' + i + '" data-f="pris" value="' + esc(r.pris) + '"></td>' +
+        (arF ? '<td><input list="kontolista" style="width:80px" data-dokrad="' + i + '" data-f="konto" value="' + esc(r.konto) + '"></td>' : '') +
+        '<td class="num" id="dokTotal-' + i + '"></td><td>' + (u.rader.length > 1 ? '<button class="btn btn-secondary btn-small" data-action="dok-ta-bort-rad" data-rad="' + i + '" aria-label="Ta bort rad">×</button>' : '') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    var ar = aktivt();
+    if (ar && arF) html += '<datalist id="kontolista">' + ar.kontoplan.map(function (k) { return '<option value="' + k.nr + '">' + esc(k.namn) + '</option>'; }).join('') + '</datalist>';
+    html += '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="dok-ny-rad">Lägg till rad</button></div>' +
+      '<p id="dokSumma"></p><ul class="fellista" id="dokFel"></ul>' +
+      '<div class="row"><button class="btn" id="dokSpara" data-action="spara-dok">' + (arF ? 'Spara och skriv ut fakturan' : 'Spara och skriv ut kvittot') + '</button>' +
+      '<button class="btn btn-secondary" data-action="avbryt-dok">Avbryt</button></div>' +
+      (arF ? '<p class="faint">Fakturan läggs bland underlagen som väntar på betalning. När pengarna syns i kontoutdraget föreslås verifikationen automatiskt.</p>' : '') + '</div>';
+    return html;
+  }
+
+  function uppdateraDokStatus() {
+    var res = utkastTillDokument();
+    dokUtkast.rader.forEach(function (r, i) {
+      var el = document.getElementById('dokTotal-' + i);
+      if (!el) return;
+      try { el.textContent = r.pris ? kr(K.dokumentRadTotal({ antal: Number(String(r.antal).replace(',', '.')) || 0, pris: K.parseBelopp(r.pris) })) : ''; }
+      catch (e) { el.textContent = ''; }
+    });
+    var summa = res.dok.rader.reduce(function (s, r) { return s + (isFinite(r.antal) ? K.dokumentRadTotal(r) : 0); }, 0);
+    document.getElementById('dokSumma').innerHTML = '<strong>' + (dokUtkast.typ === 'faktura' ? 'Att betala: ' : 'Totalt: ') + kr(summa) + ' kr</strong> <span class="faint">(moms 0,00 kr)</span>';
+    var rort = dokUtkast.mottagare.namn || dokUtkast.rader.some(function (r) { return r.beskrivning || r.pris; });
+    document.getElementById('dokFel').innerHTML = rort ? res.fel.map(function (f) { return '<li>' + esc(f) + '</li>'; }).join('') : '';
+    document.getElementById('dokSpara').disabled = res.fel.length > 0;
+  }
+
+  var LISTOR = {
+    adresser: { rubrik: 'Föreningens adresser', hjalp: 'Den översta är förvald på nya fakturor och kvitton.', falt: [['etikett', 'Benämning, t.ex. Kassören', 'text'], ['text', 'Adress (en rad per rad, utan föreningens namn)', 'textarea']] },
+    kontakter: { rubrik: 'Kontaktpersoner (Vår referens)', hjalp: 'Den översta är förvald.', falt: [['namn', 'Namn', 'text'], ['epost', 'E-post', 'text'], ['mobil', 'Mobil', 'text']] },
+    artiklar: { rubrik: 'Artiklar', hjalp: 'Färdiga rader att välja på fakturor och kvitton. Kontot används när betalningen bokförs.', falt: [['beskrivning', 'Beskrivning', 'text'], ['pris', 'Pris (kr)', 'belopp'], ['konto', 'Konto', 'text']] },
+    mottagare: { rubrik: 'Mottagare', hjalp: 'Sparas automatiskt när du skriver en faktura eller ett kvitto.', falt: [['namn', 'Namn', 'text'], ['foretag', 'Företag', 'text'], ['adress', 'Adress', 'textarea'], ['epost', 'E-post', 'text'], ['telefon', 'Telefon', 'text']] }
+  };
+
+  function listRedigerare(nyckel) {
+    var def = LISTOR[nyckel];
+    var html = '<h3>' + def.rubrik + '</h3><p class="faint" style="margin:0">' + def.hjalp + '</p>';
+    store[nyckel].forEach(function (post, i) {
+      html += '<div class="listpost">' + def.falt.map(function (f) {
+        var attr = ' data-lista="' + nyckel + '" data-index="' + i + '" data-falt="' + f[0] + '" data-typ="' + f[2] + '"';
+        var v = f[2] === 'belopp' ? (post[f[0]] != null && post[f[0]] !== '' ? kr(post[f[0]]) : '') : (post[f[0]] || '');
+        return '<div><label>' + f[1] + '</label>' + (f[2] === 'textarea' ? '<textarea' + attr + '>' + esc(v) + '</textarea>' : '<input' + attr + ' value="' + esc(v) + '"' + (f[2] === 'belopp' ? ' class="num" inputmode="decimal"' : '') + '>') + '</div>';
+      }).join('') + '<div><button class="btn btn-secondary btn-small" data-action="ta-bort-post" data-lista="' + nyckel + '" data-index="' + i + '" aria-label="Ta bort">×</button></div></div>';
+    });
+    return html + '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="ny-post" data-lista="' + nyckel + '">Lägg till</button></div>';
+  }
+
+  function vyForening() {
+    var f = store.forening;
+    var html = '<h2 id="forening-installning">Föreningen</h2><div class="card"><p class="faint" style="margin-top:0">Uppgifterna används på fakturor och kvitton. De sparas bara i appen.</p><div class="grid2">' +
+      [['namn', 'Namn'], ['orgnr', 'Organisationsnummer'], ['bankgiro', 'Bankgiro'], ['webb', 'Webbplats'], ['epost', 'E-post']].map(function (x) {
+        return '<div><label>' + x[1] + '</label><input data-forening="' + x[0] + '" value="' + esc(f[x[0]]) + '"></div>';
+      }).join('') + '</div>' +
+      '<h3>Logotyp</h3><div class="row">' + (logoUrl ? '<img src="' + esc(logoUrl) + '" alt="Logotyp" style="max-height:60px;background:#fff;padding:4px;border-radius:4px">' : '<span class="faint">Ingen logotyp.</span>') +
+      '<button class="btn btn-secondary btn-small" data-action="valj-logo">' + (logoUrl ? 'Byt logotyp' : 'Ladda upp logotyp') + '</button>' +
+      (logoUrl ? '<button class="btn btn-secondary btn-small" data-action="ta-bort-logo">Ta bort</button>' : '') + '</div>';
+    ['adresser', 'kontakter', 'artiklar'].forEach(function (k) { html += listRedigerare(k); });
+    html += '<details style="margin-top:12px"><summary>Sparade mottagare (' + store.mottagare.length + ')</summary>' + listRedigerare('mottagare') + '</details></div>';
+    return html;
+  }
+
   function vyOm() {
     var html = '<h2>Om appen</h2><div class="card">' +
       '<p><strong>Föreningsbokföring ' + esc(VERSIONER[0].version) + '</strong> · ' + esc(VERSIONER[0].datum) + '</p>' +
@@ -2224,10 +2621,7 @@ var VERSIONER = [
           (lasNyckel() ? '<button class="btn btn-secondary btn-small" data-action="avbryt-byt-nyckel">Avbryt</button>' : '') + '</div>' +
           '<details style="margin-top:8px"><summary class="faint">Hur skaffar jag en nyckel?</summary>' + NY_NYCKEL_STEG + '</details>') +
       '</div>';
-    html += '<h2>Föreningen</h2><div class="card"><div class="grid2">' +
-      '<div><label for="forNamn">Namn</label><input id="forNamn" value="' + esc(store.forening.namn) + '"></div>' +
-      '<div><label for="forOrgnr">Organisationsnummer</label><input id="forOrgnr" value="' + esc(store.forening.orgnr) + '"></div></div>' +
-      '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="spara-forening">Spara</button></div></div>';
+    html += vyForening();
     html += '<h2>Säkerhetskopia och export</h2><div class="card"><p>Data sparas just nu bara i den här webbläsaren. Exportera en säkerhetskopia regelbundet. ' +
       'Inlästa filer (PDF:er och bilder) ingår inte i säkerhetskopian ännu; behåll originalen tills de sparas i OneDrive.</p><div class="row">' +
       '<button class="btn btn-secondary" data-action="exportera">Exportera allt (JSON)</button>' +
@@ -2258,6 +2652,9 @@ var VERSIONER = [
     if (t.dataset.inkorg) {
       inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { [t.dataset.inkorg]: t.value });
     }
+    if (dokUtkast && t.dataset.dok) { dokUtkast[t.dataset.dok] = t.value; uppdateraDokStatus(); }
+    if (dokUtkast && t.dataset.dokm) { dokUtkast.mottagare[t.dataset.dokm] = t.value; uppdateraDokStatus(); }
+    if (dokUtkast && t.dataset.dokrad != null && t.dataset.f !== 'artikelId') { dokUtkast.rader[Number(t.dataset.dokrad)][t.dataset.f] = t.value; uppdateraDokStatus(); }
   });
 
   document.addEventListener('change', function (e) {
@@ -2265,6 +2662,38 @@ var VERSIONER = [
     if (e.target.id === 'hbKonto') { valtKonto = e.target.value; render(); }
     var t = e.target;
     if (t.dataset.inkorg === 'konto') render();
+    if (dokUtkast && t.dataset.dokval === 'mottagare') {
+      var mo = hitta('mottagare', t.value);
+      dokUtkast.mottagareId = t.value;
+      dokUtkast.mottagare = mo ? { namn: mo.namn || '', foretag: mo.foretag || '', adress: mo.adress || '', epost: mo.epost || '', telefon: mo.telefon || '' } : { namn: '', foretag: '', adress: '', epost: '', telefon: '' };
+      render();
+    }
+    if (dokUtkast && t.dataset.dokrad != null && t.dataset.f === 'artikelId') {
+      var rad = dokUtkast.rader[Number(t.dataset.dokrad)];
+      var art = hitta('artiklar', t.value);
+      rad.artikelId = t.value;
+      if (art) {
+        rad.beskrivning = art.beskrivning + (dokUtkast.betaldDatum ? ', betald ' + dokUtkast.betaldDatum : '');
+        if (!dokUtkast.verifikation) rad.pris = art.pris ? K.formatBelopp(art.pris) : '';
+        rad.konto = art.konto || '';
+      }
+      render();
+    }
+    if (t.dataset.forening) {
+      store.forening[t.dataset.forening] = t.value.trim();
+      spara();
+      document.getElementById('rubrik').textContent = store.forening.namn || 'Föreningsbokföring';
+    }
+    if (t.dataset.lista) {
+      try {
+        var post = store[t.dataset.lista][Number(t.dataset.index)];
+        var v = t.value.trim();
+        if (t.dataset.typ === 'belopp') v = v ? Math.abs(K.parseBelopp(v)) : 0;
+        if (t.dataset.falt === 'konto' && v && !K.giltigtKontonummer(v)) throw new Error('Kontot ska vara fyra siffror, t.ex. 3100.');
+        post[t.dataset.falt] = v;
+        spara();
+      } catch (err) { visa(err.message, true); }
+    }
     if (t.dataset.actionChange === 'koppla' && t.value) {
       var ar = aktivt();
       var rad = ar.bankrader.find(function (r) { return r.id === t.dataset.id; });
@@ -2331,7 +2760,7 @@ var VERSIONER = [
 
   var HANDLINGAR = {
     'skapa-forsta': function () {
-      store.forening = { namn: varde('forNamn'), orgnr: varde('forOrgnr') };
+      store.forening = Object.assign({}, store.forening, { namn: varde('forNamn'), orgnr: varde('forOrgnr') });
       laggTillAr(K.skapaAr({ start: varde('nyStart'), slut: varde('nySlut') }));
       vy = 'verifikationer';
       visa('Räkenskapsåret är skapat.');
@@ -2438,6 +2867,8 @@ var VERSIONER = [
       render();
     },
     'ta-bort-underlag': function (t) {
+      var dokU = (aktivt().underlag || []).find(function (x) { return x.id === t.dataset.id; });
+      if (dokU && dokU.dokumentId) { HANDLINGAR['makulera-dok']({ dataset: { id: dokU.dokumentId } }); return; }
       if (!window.confirm('Ta bort underlaget? Filen raderas från den här webbläsaren.')) return;
       setAktivt(K.taBortUnderlag(aktivt(), t.dataset.id));
       taBortFil(t.dataset.id);
@@ -2511,10 +2942,91 @@ var VERSIONER = [
       vy = 'verifikationer';
       visa('Räkenskapsåret ' + K.arNamn(nytt) + ' är skapat med ingående balanser.');
     },
-    'spara-forening': function () {
-      store.forening = { namn: varde('forNamn'), orgnr: varde('forOrgnr') };
+    'ny-faktura': function () { dokUtkast = nyttDokUtkast('faktura'); dokVisas = null; meddelande = null; render(); },
+    'nytt-kvitto': function () { dokUtkast = nyttDokUtkast('kvitto'); dokVisas = null; meddelande = null; render(); },
+    'avbryt-dok': function () { dokUtkast = null; render(); },
+    'dok-ny-rad': function () { dokUtkast.rader.push({ artikelId: '', antal: '1', beskrivning: '', pris: '', konto: '' }); render(); },
+    'dok-ta-bort-rad': function (t) { dokUtkast.rader.splice(Number(t.dataset.rad), 1); render(); },
+    'spara-dok': function () {
+      sparaDokument().then(function (d) {
+        visa((d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + d.nummer + ' är sparad.' + (d.typ === 'faktura' ? ' Den väntar nu på betalning bland underlagen.' : ''));
+        skrivUt(d);
+      }).catch(function (err) { visa(err.message, true); });
+    },
+    'visa-dok': function (t) { vy = 'dokument'; dokUtkast = null; dokVisas = t.dataset.id; meddelande = null; render(); window.scrollTo(0, 0); },
+    'stang-dok': function () { dokVisas = null; render(); },
+    'skriv-ut-dok': function (t) { skrivUt(hitta('dokument', t.dataset.id)); },
+    'makulera-dok': function (t) {
+      var d = hitta('dokument', t.dataset.id);
+      if (!window.confirm('Makulera ' + (d.typ === 'faktura' ? 'faktura ' : 'kvitto ') + d.nummer + '? Numret används inte igen.')) return;
+      if (d.underlagId && store.ar[d.arId]) {
+        var u = (store.ar[d.arId].underlag || []).find(function (x) { return x.id === d.underlagId; });
+        if (u && u.verifikation == null) { store.ar[d.arId] = K.taBortUnderlag(store.ar[d.arId], u.id); taBortFil(u.id); }
+      }
+      d.makulerad = true;
       spara();
-      visa('Föreningens uppgifter är sparade.');
+      visa((d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + d.nummer + ' är makulerad.');
+    },
+    'kvitto-fran-ver': function (t) {
+      var ar = aktivt();
+      var nr = Number(t.dataset.nr);
+      var v = K.hittaVerifikation(ar, nr);
+      var bank = (ar.bankrader || []).find(function (r) { return r.verifikation === nr; });
+      var belopp = v.rader.filter(function (r) { return Number(r.konto) >= 1900 && Number(r.konto) <= 1999 && r.belopp > 0; }).reduce(function (s, r) { return s + r.belopp; }, 0);
+      var namn = K.namnFranBanktext(bank ? bank.text : v.text);
+      var mott = store.mottagare.find(function (x) { return x.namn.toLowerCase() === namn.toLowerCase(); });
+      dokUtkast = nyttDokUtkast('kvitto');
+      dokUtkast.verifikation = { ar: store.aktivt, nr: nr };
+      dokUtkast.betaldDatum = v.datum;
+      dokUtkast.mottagareId = mott ? mott.id : '';
+      dokUtkast.mottagare = mott ? { namn: mott.namn, foretag: mott.foretag || '', adress: mott.adress || '', epost: mott.epost || '', telefon: mott.telefon || '' } : Object.assign(dokUtkast.mottagare, { namn: namn });
+      dokUtkast.rader = [{ artikelId: '', antal: '1', beskrivning: v.text + ', betald ' + v.datum, pris: K.formatBelopp(belopp), konto: '' }];
+      vy = 'dokument';
+      dokVisas = null;
+      meddelande = null;
+      render();
+    },
+    'till-forening': function () {
+      vy = 'arkiv'; meddelande = null; render();
+      var el = document.getElementById('forening-installning');
+      if (el) el.scrollIntoView();
+    },
+    'ny-post': function (t) {
+      var k = t.dataset.lista;
+      var post = { id: nyttId() };
+      LISTOR[k].falt.forEach(function (f) { post[f[0]] = f[2] === 'belopp' ? 0 : ''; });
+      store[k].push(post);
+      spara();
+      render();
+    },
+    'ta-bort-post': function (t) {
+      if (!window.confirm('Ta bort posten?')) return;
+      store[t.dataset.lista].splice(Number(t.dataset.index), 1);
+      spara();
+      render();
+    },
+    'valj-logo': function () {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = function () {
+        var fil = input.files[0];
+        if (!fil) return;
+        if (fil.size > 1500000) { visa('Bilden är för stor. Använd en logotyp under 1,5 MB.', true); return; }
+        sparaFil('logotyp', fil, fil.name).then(function () {
+          store.forening.harLogotyp = true;
+          spara();
+          return laddaLogo();
+        }).then(function () { visa('Logotypen är sparad.'); });
+      };
+      input.click();
+    },
+    'ta-bort-logo': function () {
+      taBortFil('logotyp');
+      store.forening.harLogotyp = false;
+      logoUrl = null;
+      spara();
+      visa('Logotypen är borttagen.');
     },
     'exportera': function () {
       laddaNer('foreningsbokforing-' + idag() + '.json', JSON.stringify(store, null, 2), 'application/json');
@@ -2550,7 +3062,9 @@ var VERSIONER = [
   };
 
   ladda();
+  LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
   render();
+  laddaLogo();
 })();
 </script>
 </body>
