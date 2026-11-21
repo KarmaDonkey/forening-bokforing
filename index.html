@@ -167,7 +167,7 @@
   .dropzon { border: 2px dashed rgba(55, 63, 81, 0.3); border-radius: 12px; }
   .listpost { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) auto; gap: 6px; align-items: end; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
   .listpost textarea, .dok-form textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 7px 9px; width: 100%; min-height: 60px; }
-  .forhandsvisning { overflow-x: auto; background: var(--surface-2); padding: 12px; border-radius: 8px; }
+  .forhandsvisning { overflow: hidden; background: var(--surface-2); padding: 6px; border-radius: 8px; }
   #utskrift { display: none; }
   /* Fakturor och kvitton: alltid ljusa, oavsett tema, i A4-format. */
   .dok { background: #fff; color: #1a1a1a; width: 180mm; min-height: 250mm; margin: 0 auto; padding: 12mm; font: 10.5pt/1.45 "Roboto Flex", Arial, sans-serif; font-variant-numeric: tabular-nums; display: flex; flex-direction: column; box-sizing: content-box; }
@@ -225,7 +225,7 @@
     .card { padding: 14px; border-radius: 10px; }
     th, td { padding: 6px 5px; }
     .forhandsvisning { padding: 6px; }
-    .forhandsvisning .dok { zoom: 0.48; }
+
     /* Tabeller med många kolumner visas som kort. */
     table.kortlista thead { display: none; }
     table.kortlista tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--hairline); }
@@ -247,9 +247,7 @@
     td[style*="nowrap"] { white-space: normal !important; }
     td[style*="nowrap"] .btn { margin: 2px 0; }
   }
-  @media (max-width: 380px) {
-    .forhandsvisning .dok { zoom: 0.42; }
-  }
+
   /* Stora skärmar */
   @media (min-width: 1600px) {
     body { font-size: 16.5px; }
@@ -304,6 +302,16 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.8', datum: '2026-11-21',
+    nyheter: [
+      'Fakturor, kvitton och handlingar till årsmötet blir riktiga PDF-filer i A4, med text som går att markera och söka i.',
+      'Ny knapp "Dela / skicka" på telefonen: skicka PDF:en med Mail, Messages eller WhatsApp, spara den i Filer eller skriv ut den.',
+      '"Ladda ner PDF" på datorn. "Skriv ut" visas där det fungerar och ersätts av Dela i hemskärmsappen på iPhone.',
+      'Fakturor och kvitton sparas som PDF i OneDrive under Fakturor och kvitton.',
+      'Förhandsvisningen förminskas så att hela A4-sidan syns, även på iPhone.'
+    ]
+  },
   {
     version: '1.7', datum: '2026-11-21',
     nyheter: [
@@ -1871,7 +1879,7 @@ var VERSIONER = [
   }
 
   function kvittoSokvag(d) {
-    return arMapp(d.datum.slice(0, 4)) + '/Fakturor och kvitton/' + sakertNamn('Kvitto ' + d.nummer + '.html');
+    return arMapp(d.datum.slice(0, 4)) + '/Fakturor och kvitton/' + sakertNamn('Kvitto ' + d.nummer + '.pdf');
   }
 
   // "Swish från 46701234567 ANNA ANDERSSON" -> "Anna Andersson"
@@ -2298,6 +2306,7 @@ var VERSIONER = [
   // det talar bara om vilken app som loggar in. Andra adresser anger sitt eget under År och arkiv.
   var STANDARD_KLIENTER = { 'karmadonkey.github.io': '0c0a38fc-1bb6-47a2-b690-e9e749dfb800' };
   var QR_URL = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+  var JSPDF_URL = 'https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js';
   var NYCKEL_ANDRAD = 'forening-bokforing:claude-nyckel-andrad';
   var INBJUDAN = 'forening-bokforing:inbjudan';
   var od = { clientId: null, refreshToken: null, konto: null, mapp: null, lage: null, eTag: null, senast: null, smutsig: false };
@@ -2697,7 +2706,9 @@ var VERSIONER = [
     for (var k = 0; k < store.dokument.length; k++) {
       var d = store.dokument[k];
       if (d.typ !== 'kvitto' || d.odId || d.makulerad) continue;
-      var kvitto = await laddaUpp(K.kvittoSokvag(d), new Blob([dokumentFil(d)], { type: 'text/html' }));
+      var kvittoBlob = await skapaDokumentPdf(d).catch(function () { return null; });
+      if (!kvittoBlob) continue;
+      var kvitto = await laddaUpp(K.kvittoSokvag(d), kvittoBlob);
       d.odId = kvitto.id;
       andrat = true;
     }
@@ -3076,6 +3087,362 @@ var VERSIONER = [
     setTimeout(klar, 1000);
   }
 
+  // ---------- PDF ----------
+  // Fakturor, kvitton och årsmöteshandlingar ritas som riktiga PDF-filer (A4, sökbar text) med jsPDF.
+
+  var jspdfLaddas = null;
+  function laddaJsPdf() {
+    if (window.jspdf) return Promise.resolve(window.jspdf.jsPDF);
+    if (!jspdfLaddas) {
+      jspdfLaddas = new Promise(function (ok, fel) {
+        var sk = document.createElement('script');
+        sk.src = JSPDF_URL;
+        sk.onload = function () { ok(window.jspdf.jsPDF); };
+        sk.onerror = function () { jspdfLaddas = null; fel(new Error('PDF-verktyget kunde inte laddas. Kontrollera internetanslutningen.')); };
+        document.head.appendChild(sk);
+      });
+    }
+    return jspdfLaddas;
+  }
+
+  // PDF:ens standardtypsnitt klarar svenska bokstäver men inte alla specialtecken.
+  function pt(t) {
+    return String(t == null ? '' : t).replace(/[\u2212\u2013\u2014]/g, '-').replace(/[\u00a0\u202f]/g, ' ').replace(/\u2192/g, '->').replace(/\u2026/g, '...');
+  }
+  function krPdf(ore) { return pt(kr(ore)) + ' kr'; }
+
+  var SKIFFER = [55, 63, 81], GRA = [85, 85, 85], LINJE = [200, 203, 210];
+
+  function nyPdf(JsPdf) {
+    var doc = new JsPdf({ unit: 'mm', format: 'a4' });
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(26, 26, 26);
+    return doc;
+  }
+
+  function ritaLogo(doc, x, y, maxB, maxH) {
+    if (!logoUrl) return 0;
+    try {
+      var prop = doc.getImageProperties(logoUrl);
+      var skala = Math.min(maxB / prop.width, maxH / prop.height);
+      var b = prop.width * skala, h = prop.height * skala;
+      doc.addImage(logoUrl, prop.fileType || 'JPEG', x, y, b, h);
+      return h;
+    } catch (e) { return 0; }
+  }
+
+  function etikett(doc, text, x, y) {
+    doc.setFontSize(7.5); doc.setTextColor.apply(doc, GRA);
+    doc.text(pt(text).toUpperCase(), x, y, { charSpace: 0.2 });
+    doc.setTextColor(26, 26, 26);
+  }
+
+  async function skapaDokumentPdf(d) {
+    var doc = nyPdf(await laddaJsPdf());
+    var f = d.forening || {};
+    var arF = d.typ === 'faktura';
+    var V = 15, H = 195;
+    // Sidhuvud
+    var logoH = ritaLogo(doc, V, 14, 26, 24);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+    doc.text(pt(f.namn), V, 14 + (logoH ? logoH + 6 : 4));
+    doc.setFontSize(24); doc.setTextColor.apply(doc, SKIFFER);
+    doc.text(arF ? 'Faktura' : 'Kvitto', H, 22, { align: 'right' });
+    doc.setTextColor(26, 26, 26);
+    var meta = arF
+      ? [['Fakturadatum', d.datum], ['Fakturanr', d.nummer], ['Förfallodatum', d.forfallodatum]]
+      : [['Kvittonr', d.nummer], ['Utskrivningsdatum', d.datum], ['Betaldatum', d.betaldDatum], ['Betalsätt', d.betalsatt], ['Org.nummer', f.orgnr]];
+    var y = 30;
+    meta.filter(function (m) { return m[1]; }).forEach(function (m) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor.apply(doc, GRA);
+      doc.text(pt(m[0]) + ':', 140, y);
+      doc.setTextColor(26, 26, 26);
+      doc.text(pt(m[1]), H, y, { align: 'right' });
+      y += 5;
+    });
+    // Mottagare och referens
+    y = Math.max(y + 6, 62);
+    var m = d.mottagare || {}, ref = d.referens || {};
+    etikett(doc, arF ? 'Fakturamottagare' : 'Mottagare', V, y);
+    if (ref.namn) etikett(doc, 'Vår referens', 110, y);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    var mRader = [m.namn, m.foretag].concat(rader(m.adress), [m.telefon, m.epost]).filter(Boolean);
+    mRader.forEach(function (r, i) { doc.text(pt(r), V, y + 5 + i * 4.6); });
+    var refRader = [ref.namn, ref.epost, ref.mobil].filter(Boolean);
+    refRader.forEach(function (r, i) { doc.text(pt(r), 110, y + 5 + i * 4.6); });
+    y += 8 + Math.max(mRader.length, refRader.length) * 4.6;
+    // Rader
+    var kol = { antal: 32, beskr: 37, pris: 160, total: H };
+    var rubrik = function () {
+      etikett(doc, 'Beskrivning', kol.beskr, y);
+      doc.setFontSize(7.5); doc.setTextColor.apply(doc, GRA);
+      doc.text('ANTAL', kol.antal, y, { align: 'right' });
+      doc.text('Á PRIS', kol.pris, y, { align: 'right' }); doc.text('TOTAL', kol.total, y, { align: 'right' });
+      doc.setTextColor(26, 26, 26);
+      doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.4); doc.line(V, y + 2, H, y + 2);
+      y += 7;
+    };
+    rubrik();
+    doc.setFontSize(10);
+    d.rader.forEach(function (r) {
+      var text = doc.splitTextToSize(pt(r.beskrivning), 95);
+      if (y + text.length * 4.6 > 230) { doc.addPage(); y = 20; rubrik(); doc.setFontSize(10); }
+      doc.setFont('helvetica', 'normal');
+      doc.text(pt(String(r.antal).replace('.', ',')), kol.antal, y, { align: 'right' });
+      doc.text(text, kol.beskr, y);
+      doc.text(krPdf(r.pris), kol.pris, y, { align: 'right' });
+      doc.text(krPdf(K.dokumentRadTotal(r)), kol.total, y, { align: 'right' });
+      y += text.length * 4.6 + 1.5;
+      doc.setDrawColor.apply(doc, LINJE); doc.setLineWidth(0.2); doc.line(V, y - 3, H, y - 3);
+    });
+    // Summa
+    var summa = K.dokumentSumma(d);
+    y += 3;
+    doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.4); doc.line(110, y - 4, H, y - 4);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+    doc.text(arF ? 'Att betala' : 'Totalt betalt', 110, y + 1);
+    doc.text(krPdf(summa), H, y + 1, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor.apply(doc, GRA);
+    doc.text('Föreningen är inte momsregistrerad.', H, y + 6, { align: 'right' });
+    doc.setTextColor(26, 26, 26);
+    y += 14;
+    if (arF) {
+      // Betalningsruta
+      var falt = [['Att betala', krPdf(summa)], ['Förfallodatum', d.forfallodatum]];
+      if (f.bankgiro) falt.push(['Bankgiro', f.bankgiro]);
+      if (f.swish) falt.push(['Swish', f.swish]);
+      falt.push(['Referens', d.nummer]);
+      var bredd = (H - V) / falt.length;
+      doc.setFillColor(244, 244, 244); doc.rect(V, y, bredd, 15, 'F');
+      doc.setDrawColor.apply(doc, SKIFFER); doc.setLineWidth(0.5); doc.roundedRect(V, y, H - V, 15, 1.5, 1.5, 'S');
+      falt.forEach(function (x, i) {
+        var bx = V + i * bredd;
+        if (i) { doc.setDrawColor.apply(doc, LINJE); doc.setLineWidth(0.2); doc.line(bx, y, bx, y + 15); }
+        etikett(doc, x[0], bx + 3, y + 5);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(i ? 10.5 : 12);
+        doc.text(pt(x[1]), bx + 3, y + 11.5);
+      });
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+      doc.text('Ange fakturanumret som referens eller meddelande när du betalar.', V, y + 21);
+    } else {
+      doc.setFontSize(10);
+      var tack = doc.splitTextToSize(pt('Beloppet ovan är betalt till ' + (f.namn || 'föreningen') + (d.betaldDatum ? ' den ' + d.betaldDatum : '') +
+        (d.betalsatt ? ' via ' + (d.betalsatt === 'Swish' ? d.betalsatt : d.betalsatt.toLowerCase()) : '') + '. Tack!'), 115);
+      doc.text(tack, V, y);
+      // Stämpel
+      doc.setDrawColor(46, 125, 79); doc.setTextColor(46, 125, 79); doc.setLineWidth(0.8);
+      doc.roundedRect(150, y - 6, 45, 13, 2, 2, 'S');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
+      doc.text('BETALD', 172.5, y + 3, { align: 'center', charSpace: 1.2 });
+      doc.setTextColor(26, 26, 26);
+    }
+    // Sidfot på varje sida
+    var sidor = doc.getNumberOfPages();
+    for (var s2 = 1; s2 <= sidor; s2++) {
+      doc.setPage(s2);
+      var fy = 262;
+      doc.setDrawColor(187, 187, 187); doc.setLineWidth(0.2); doc.line(V, fy, H, fy);
+      doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+      doc.text('Adress', V, fy + 5);
+      if (f.webb || f.epost) doc.text(f.webb ? 'Webb' : 'E-post', 80, fy + 5);
+      if (f.orgnr) doc.text('Org.nummer', 140, fy + 5);
+      doc.setFont('helvetica', 'normal');
+      [f.namn].concat(rader(d.avsandare)).filter(Boolean).forEach(function (r, i) { doc.text(pt(r), V, fy + 9 + i * 3.8); });
+      var mitt = [];
+      if (f.webb) mitt.push(f.webb);
+      if (f.webb && f.epost) mitt.push('');
+      if (f.epost) mitt.push(f.epost);
+      mitt.forEach(function (r, i) { doc.text(pt(r), 80, fy + 9 + i * 3.8); });
+      if (f.webb && f.epost) { doc.setFont('helvetica', 'bold'); doc.text('E-post', 80, fy + 9 + 3.8); doc.setFont('helvetica', 'normal'); }
+      if (f.orgnr) doc.text(pt(f.orgnr), 140, fy + 9);
+      if (f.bankgiro) { doc.setFont('helvetica', 'bold'); doc.text('Bankgiro', 140, fy + 9 + 3.8 + 1); doc.setFont('helvetica', 'normal'); doc.text(pt(f.bankgiro), 140, fy + 9 + 7.6 + 1); }
+      if (sidor > 1) { doc.setTextColor.apply(doc, GRA); doc.text('Sida ' + s2 + ' av ' + sidor, H, 290, { align: 'right' }); doc.setTextColor(26, 26, 26); }
+    }
+    doc.setProperties({ title: (arF ? 'Faktura ' : 'Kvitto ') + d.nummer, author: f.namn || '', creator: 'Föreningsbokföring' });
+    return doc.output('blob');
+  }
+
+  async function skapaArsmotePdf(ar) {
+    var doc = nyPdf(await laddaJsPdf());
+    var a = arsmoteData(ar);
+    var f = store.forening;
+    var fg = foregaende(ar);
+    var rr = K.resultatrakning(ar, { foregaende: fg });
+    var br = K.balansrakning(ar);
+    var V = 15, H = 195, NED = 275;
+    var y;
+    var nySidaOm = function (behov) { if (y + behov > NED) { doc.addPage(); y = 20; } };
+    // Sidhuvud
+    var logoH = ritaLogo(doc, V, 14, 24, 22);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+    var ny = 14 + (logoH ? logoH + 6 : 4);
+    doc.text(pt(f.namn || ''), V, ny);
+    if (f.orgnr) { doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.text('Org.nr ' + pt(f.orgnr), V, ny + 5); }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor.apply(doc, SKIFFER);
+    doc.text('Ekonomisk redovisning', H, 22, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(26, 26, 26);
+    doc.text('Räkenskapsåret ' + ar.start + ' - ' + ar.slut, H, 28, { align: 'right' });
+    y = ny + 14;
+    var rubrik = function (text) {
+      nySidaOm(16);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor.apply(doc, SKIFFER);
+      doc.text(pt(text), V, y);
+      doc.setDrawColor.apply(doc, SKIFFER); doc.setLineWidth(0.4); doc.line(V, y + 1.8, H, y + 1.8);
+      doc.setTextColor(26, 26, 26);
+      y += 8;
+    };
+    var stycke = function (text) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+      rader(text).forEach(function (r) {
+        doc.splitTextToSize(pt(r), H - V).forEach(function (rad) { nySidaOm(5); doc.text(rad, V, y); y += 4.8; });
+        y += 1.5;
+      });
+      y += 3;
+    };
+    var tabell = function (rubrikNu, rubrikFg, raderna) {
+      nySidaOm(12);
+      doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
+      doc.text(pt(rubrikNu), 160, y, { align: 'right' }); doc.text(pt(rubrikFg), H, y, { align: 'right' });
+      doc.setTextColor(26, 26, 26);
+      y += 5;
+      raderna.forEach(function (r) {
+        nySidaOm(6);
+        if (r.typ === 'grupp') { doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text(pt(r.text), V, y); y += 5; return; }
+        if (r.typ === 'summa' || r.typ === 'total') {
+          doc.setDrawColor.apply(doc, r.typ === 'total' ? [26, 26, 26] : [150, 150, 150]); doc.setLineWidth(r.typ === 'total' ? 0.4 : 0.2);
+          doc.line(V, y - 3.6, H, y - 3.6);
+          doc.setFont('helvetica', 'bold');
+        } else doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.text(pt(r.text), V + (r.typ ? 0 : 2), y);
+        doc.text(pt(r.nu), 160, y, { align: 'right' });
+        doc.text(pt(r.fg), H, y, { align: 'right' });
+        y += r.typ === 'total' ? 7 : 5;
+      });
+      y += 4;
+    };
+    rubrik('Ekonomisk berättelse');
+    if (a.berattelse) stycke(a.berattelse); else { doc.setFontSize(10); doc.text('(Ingen berättelse ifylld.)', V, y); y += 8; }
+    rubrik('Resultaträkning');
+    var rrRader = [];
+    rr.grupper.forEach(function (g) {
+      rrRader.push({ typ: 'grupp', text: g.namn });
+      g.konton.forEach(function (r) { rrRader.push({ text: r.namn, nu: kr(r.belopp), fg: fg ? kr(r.jamforelse) : '' }); });
+      rrRader.push({ typ: 'summa', text: 'Summa ' + g.namn.toLowerCase(), nu: kr(g.summa), fg: fg ? kr(g.jamforelse) : '' });
+    });
+    rrRader.push({ typ: 'total', text: 'Årets resultat', nu: kr(rr.aretsResultat), fg: fg ? kr(rr.jamforelseResultat) : '' });
+    tabell(K.arNamn(ar), fg ? K.arNamn(fg) : '', rrRader);
+    rubrik('Balansräkning');
+    var brRader = [];
+    [['Tillgångar', br.tillgangar], ['Eget kapital och skulder', br.egetKapitalOchSkulder]].forEach(function (dd) {
+      dd[1].grupper.forEach(function (g) {
+        brRader.push({ typ: 'grupp', text: g.namn });
+        g.konton.forEach(function (r) { brRader.push({ text: r.namn, nu: kr(r.belopp), fg: kr(r.jamforelse) }); });
+      });
+      brRader.push({ typ: 'total', text: 'Summa ' + dd[0].toLowerCase(), nu: kr(dd[1].summa), fg: kr(dd[1].ingaende) });
+    });
+    tabell(ar.slut, K.laggTillDagar(ar.start, -1), brRader);
+    var res = rr.aretsResultat;
+    rubrik('Förslag till resultatdisposition');
+    stycke(a.forslag || ('Styrelsen föreslår att årets resultat, ' + (res < 0 ? 'underskott ' : 'överskott ') + kr(Math.abs(res)) + ' kr, balanseras i ny räkning.'));
+    rubrik('Redovisningsprinciper');
+    stycke(a.principer);
+    var namnLista = rader(a.underskrifter);
+    if (!namnLista.length) namnLista = ['', '', ''];
+    nySidaOm(30 + Math.ceil(namnLista.length / 2) * 22);
+    rubrik('Underskrifter');
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.text(pt([a.ort, a.datum].filter(Boolean).join(' ') || 'Ort och datum: ______________________'), V, y); y += 16;
+    namnLista.forEach(function (n, i) {
+      var x = i % 2 ? 110 : V;
+      doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.3); doc.line(x, y, x + 80, y);
+      doc.setFontSize(9.5); doc.text(pt(n), x, y + 4.5);
+      if (i % 2 || i === namnLista.length - 1) y += 22;
+    });
+    var sidor = doc.getNumberOfPages();
+    for (var s3 = 1; s3 <= sidor; s3++) {
+      doc.setPage(s3);
+      doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
+      doc.text(pt((f.namn || '') + ' · Ekonomisk redovisning ' + K.arNamn(ar)), V, 290);
+      doc.text('Sida ' + s3 + ' av ' + sidor, H, 290, { align: 'right' });
+      doc.setTextColor(26, 26, 26);
+    }
+    doc.setProperties({ title: 'Ekonomisk redovisning ' + K.arNamn(ar), author: f.namn || '', creator: 'Föreningsbokföring' });
+    return doc.output('blob');
+  }
+
+  function dokumentFilnamn(d) { return K.sakertNamn((d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + d.nummer + '.pdf'); }
+  function arsmoteFilnamn(ar) { return K.sakertNamn('Ekonomisk redovisning ' + K.arNamn(ar).replace('/', '-') + '.pdf'); }
+
+  // PDF:en skapas i förväg när förhandsvisningen öppnas, så att delningsmenyn kan öppnas direkt
+  // när man trycker (Safari kräver att delning startar direkt i samband med trycket).
+  var pdfCache = {};
+  function forbered(nyckel, skapa) {
+    if (pdfCache[nyckel]) return;
+    pdfCache[nyckel] = { status: 'skapas' };
+    skapa().then(function (blob) { pdfCache[nyckel] = { status: 'klar', blob: blob }; uppdateraPdfKnappar(); },
+      function (err) { pdfCache[nyckel] = { status: 'fel', fel: err.message }; uppdateraPdfKnappar(); });
+  }
+  function uppdateraPdfKnappar() {
+    document.querySelectorAll('[data-pdf]').forEach(function (b) {
+      var c = pdfCache[b.dataset.pdf];
+      b.disabled = !c || c.status !== 'klar';
+      if (c && c.status === 'fel') b.title = c.fel;
+    });
+    document.querySelectorAll('[data-pdf-status]').forEach(function (el) {
+      var c = pdfCache[el.dataset.pdfStatus];
+      el.textContent = !c || c.status === 'skapas' ? 'Skapar PDF…' : c.status === 'fel' ? c.fel : '';
+      el.className = 'faint' + (c && c.status === 'fel' ? ' fel' : '');
+    });
+  }
+  function kanDela() {
+    try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.pdf', { type: 'application/pdf' })] })); } catch (e) { return false; }
+  }
+  function arIosHemskarm() { return window.navigator.standalone === true; }
+
+  function pdfKnappar(nyckel, utskriftsAction, id) {
+    return (kanDela() ? '<button class="btn btn-small" data-action="dela-pdf" data-pdf="' + esc(nyckel) + '" disabled>Dela / skicka</button>' : '') +
+      '<button class="btn ' + (kanDela() ? 'btn-secondary ' : '') + 'btn-small" data-action="ladda-ner-pdf" data-pdf="' + esc(nyckel) + '" disabled>Ladda ner PDF</button>' +
+      (arIosHemskarm() ? '' : '<button class="btn btn-secondary btn-small" data-action="' + utskriftsAction + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>Skriv ut</button>') +
+      '<span data-pdf-status="' + esc(nyckel) + '" class="faint">Skapar PDF…</span>';
+  }
+
+  function delaEllerLaddaNer(nyckel, dela) {
+    var c = pdfCache[nyckel];
+    if (!c || c.status !== 'klar') return;
+    var namn = nyckel.split('|')[1];
+    if (dela && kanDela()) {
+      var fil = new File([c.blob], namn, { type: 'application/pdf' });
+      navigator.share({ files: [fil], title: namn.replace(/\.pdf$/, '') }).catch(function (err) {
+        if (err && err.name === 'AbortError') return;
+        laddaNer(namn, c.blob, 'application/pdf');
+      });
+      return;
+    }
+    laddaNer(namn, c.blob, 'application/pdf');
+  }
+
+  // Förhandsvisningar av A4-sidor skalas så att hela sidan syns, även på telefonen.
+  function skalaForhandsvisningar() {
+    document.querySelectorAll('.forhandsvisning').forEach(function (ram) {
+      var dok = ram.querySelector('.dok');
+      if (!dok) return;
+      dok.style.transform = '';
+      ram.style.height = '';
+      var tillganglig = ram.clientWidth - 12;
+      var naturlig = dok.offsetWidth;
+      var skala = Math.min(1, tillganglig / naturlig);
+      if (skala < 1) {
+        dok.style.transformOrigin = 'top left';
+        dok.style.transform = 'scale(' + skala + ')';
+        dok.style.margin = '0';
+        ram.style.height = Math.ceil(dok.offsetHeight * skala + 12) + 'px';
+      } else {
+        dok.style.margin = '';
+      }
+    });
+  }
+
   function sparaDokument() {
     var res = utkastTillDokument();
     if (res.fel.length) throw new Error(res.fel.join(' '));
@@ -3100,13 +3467,22 @@ var VERSIONER = [
 
     var sparat = Promise.resolve();
     if (d.typ === 'faktura') {
-      var filnamn = 'Faktura ' + d.nummer.replace(':', '_') + '.html';
+      var filnamn = dokumentFilnamn(d);
       var u = K.fakturaTillUnderlag(d, filnamn);
       var arId = arForDatum(d.forfallodatum) || arForDatum(d.datum) || store.aktivt;
       store.ar[arId] = K.laggTillUnderlag(store.ar[arId], u);
       d.underlagId = u.id;
       d.arId = arId;
-      sparat = sparaFil(u.id, new Blob([dokumentFil(d)], { type: 'text/html' }), filnamn);
+      sparat = skapaDokumentPdf(d).then(function (blob) {
+        pdfCache['dok-' + d.id + '|' + filnamn] = { status: 'klar', blob: blob };
+        return sparaFil(u.id, blob, filnamn);
+      }).catch(function () {
+        // Utan PDF-verktyget (t.ex. utan internet) sparas en HTML-kopia i stället.
+        var html = 'Faktura ' + d.nummer.replace(':', '_') + '.html';
+        store.ar[arId] = K.andraUnderlag(store.ar[arId], u.id, { filnamn: html });
+        sparaLokalt();
+        return sparaFil(u.id, new Blob([dokumentFil(d)], { type: 'text/html' }), html);
+      });
     }
     store.dokument.push(d);
     spara();
@@ -3166,6 +3542,8 @@ var VERSIONER = [
     }[vy](ar);
     main.innerHTML = msg + html;
     ritaQr();
+    skalaForhandsvisningar();
+    uppdateraPdfKnappar();
     visaValdFlik();
     if (vy === 'ny') uppdateraUtkastStatus();
     if (vy === 'dokument' && dokUtkast) uppdateraDokStatus();
@@ -3658,8 +4036,12 @@ var VERSIONER = [
       '<label for="amUnderskrifter">Styrelsen (ett namn per rad, gärna med roll)</label><textarea id="amUnderskrifter" data-arsmote="underskrifter" rows="4" placeholder="Förnamn Efternamn, ordförande"' + lasbar + '>' + esc(a.underskrifter) + '</textarea>' +
       '<div class="row" style="margin-top:12px"><button class="btn" data-action="skriv-ut-arsmote">Förhandsgranska och skriv ut</button></div></div>';
     if (odNu.visaArsmote) {
-      html += '<div class="card"><div class="row" style="justify-content:space-between"><strong>Förhandsvisning</strong><div class="row">' +
-        '<button class="btn btn-small" data-action="skriv-ut-arsmote-nu">Skriv ut / spara som PDF</button><button class="btn btn-secondary btn-small" data-action="stang-arsmote">Stäng</button></div></div>' +
+      // Ny PDF varje gång förhandsvisningen öppnas, så att ändringar i texterna kommer med.
+      var amNyckel = 'arsmote-' + store.aktivt + '-' + (odNu.arsmoteVersion || 0) + '|' + arsmoteFilnamn(ar);
+      forbered(amNyckel, function () { return skapaArsmotePdf(ar); });
+      html += '<div class="card"><div class="row" style="justify-content:space-between"><strong>Förhandsvisning</strong>' +
+        '<button class="btn btn-secondary btn-small" data-action="stang-arsmote">Stäng</button></div>' +
+        '<div class="row" style="margin-top:8px">' + pdfKnappar(amNyckel, 'skriv-ut-arsmote-nu') + '</div>' +
         '<div class="forhandsvisning" style="margin-top:8px">' + arsmoteInnehall(ar) + '</div></div>';
     }
     return html;
@@ -3737,9 +4119,11 @@ var VERSIONER = [
     if (dokVisas) {
       var d = hitta('dokument', dokVisas);
       if (d) {
-        html += '<div class="card"><div class="row" style="justify-content:space-between"><strong>' + (d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + esc(d.nummer) + '</strong><div class="row">' +
-          '<button class="btn btn-small" data-action="skriv-ut-dok" data-id="' + esc(d.id) + '">Skriv ut / spara som PDF</button>' +
-          '<button class="btn btn-secondary btn-small" data-action="stang-dok">Stäng</button></div></div>' +
+        var nyckel = 'dok-' + d.id + '|' + dokumentFilnamn(d);
+        forbered(nyckel, function () { return skapaDokumentPdf(d); });
+        html += '<div class="card"><div class="row" style="justify-content:space-between"><strong>' + (d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + esc(d.nummer) + '</strong>' +
+          '<button class="btn btn-secondary btn-small" data-action="stang-dok">Stäng</button></div>' +
+          '<div class="row" style="margin-top:8px">' + pdfKnappar(nyckel, 'skriv-ut-dok', d.id) + '</div>' +
           '<div class="forhandsvisning" style="margin-top:8px">' + dokumentInnehall(d) + '</div></div>';
       }
     }
@@ -3798,7 +4182,7 @@ var VERSIONER = [
     if (ar && arF) html += '<datalist id="kontolista">' + ar.kontoplan.map(function (k) { return '<option value="' + k.nr + '">' + esc(k.namn) + '</option>'; }).join('') + '</datalist>';
     html += '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="dok-ny-rad">Lägg till rad</button></div>' +
       '<p id="dokSumma"></p><ul class="fellista" id="dokFel"></ul>' +
-      '<div class="row"><button class="btn" id="dokSpara" data-action="spara-dok">' + (arF ? 'Spara och skriv ut fakturan' : 'Spara och skriv ut kvittot') + '</button>' +
+      '<div class="row"><button class="btn" id="dokSpara" data-action="spara-dok">' + (arF ? 'Spara fakturan' : 'Spara kvittot') + '</button>' +
       '<button class="btn btn-secondary" data-action="avbryt-dok">Avbryt</button></div>' +
       (arF ? '<p class="faint">Fakturan läggs bland underlagen som väntar på betalning. När pengarna syns i kontoutdraget föreslås verifikationen automatiskt.</p>' : '') + '</div>';
     return html;
@@ -4002,7 +4386,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport]');
@@ -4062,7 +4446,7 @@ var VERSIONER = [
       var am = arsmoteData(arA);
       am[t.dataset.arsmote] = t.value;
       setAktivt(Object.assign({}, arA, { arsmote: am }));
-      if (odNu.visaArsmote) render();
+      if (odNu.visaArsmote) { odNu.arsmoteVersion = (odNu.arsmoteVersion || 0) + 1; render(); }
     }
     if (t.dataset.forening) {
       store.forening[t.dataset.forening] = t.value.trim();
@@ -4277,7 +4661,9 @@ var VERSIONER = [
       setAktivt(Object.assign({}, ar, { arsmote: a }));
       render();
     },
-    'skriv-ut-arsmote': function () { odNu.visaArsmote = true; render(); },
+    'skriv-ut-arsmote': function () { odNu.visaArsmote = true; odNu.arsmoteVersion = (odNu.arsmoteVersion || 0) + 1; render(); },
+    'dela-pdf': function (t) { delaEllerLaddaNer(t.dataset.pdf, true); },
+    'ladda-ner-pdf': function (t) { delaEllerLaddaNer(t.dataset.pdf, false); },
     'stang-arsmote': function () { odNu.visaArsmote = false; render(); },
     'skriv-ut-arsmote-nu': function () {
       document.getElementById('utskrift').innerHTML = arsmoteInnehall(aktivt());
@@ -4424,8 +4810,8 @@ var VERSIONER = [
     'dok-ta-bort-rad': function (t) { dokUtkast.rader.splice(Number(t.dataset.rad), 1); render(); },
     'spara-dok': function () {
       sparaDokument().then(function (d) {
-        visa((d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + d.nummer + ' är sparad.' + (d.typ === 'faktura' ? ' Den väntar nu på betalning bland underlagen.' : ''));
-        skrivUt(d);
+        visa((d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + d.nummer + ' är sparad.' + (d.typ === 'faktura' ? ' Den väntar nu på betalning bland underlagen.' : '') +
+          ' Dela, ladda ner eller skriv ut den nedan.');
       }).catch(function (err) { visa(err.message, true); });
     },
     'visa-dok': function (t) { vy = 'dokument'; dokUtkast = null; dokVisas = t.dataset.id; meddelande = null; render(); window.scrollTo(0, 0); },
@@ -4696,6 +5082,7 @@ var VERSIONER = [
   });
 
   document.getElementById('nav').addEventListener('scroll', markeraNavSlut, { passive: true });
+  window.addEventListener('resize', function () { skalaForhandsvisningar(); markeraNavSlut(); });
 
   // Hämta igen när appen kommer tillbaka i fokus, så att ändringar från en annan enhet syns.
   document.addEventListener('visibilitychange', function () {
