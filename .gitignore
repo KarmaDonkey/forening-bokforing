@@ -13,3 +13,4 @@ privat/
 .DS_Store
 node_modules/
 *.png
+!ikon-*.png
