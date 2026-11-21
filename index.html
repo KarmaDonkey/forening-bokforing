@@ -309,6 +309,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.17', datum: '2026-11-21',
+    nyheter: [
+      'Rättelse: årsfiler där rubriken Verifikationsnummer står på flera rader (t.ex. 2023) läses nu in.',
+      'Rättelse: ingående balanser räknades två gånger i arkivkopiorna, så balansräkningen visade dubbla belopp. Läs in de år du redan läst in igen, så blir de rätt.'
+    ]
+  },
+  {
     version: '1.16', datum: '2026-11-21',
     nyheter: [
       'Tidigare år från Excel heter nu arkivkopior.',
@@ -2353,11 +2360,14 @@ var VERSIONER = [
   function cellText(c) { return c == null ? '' : String(c).trim(); }
 
   // Rubrikraden: den första raden som innehåller alla rubrikerna. Ger { rad, kol: { rubrik: index } }.
+  // Rubriker jämförs utan mellanslag och radbrytningar (i vissa år står "Verifikationsnummer" på flera rader).
+  function nyck(t) { return cellText(t).toLowerCase().replace(/[\s\u00ad]+/g, ''); }
+
   function rubriker(rader, ord) {
     for (var i = 0; i < Math.min(rader.length, 40); i++) {
       var kol = {};
-      (rader[i] || []).forEach(function (c, j) { var t = cellText(c).toLowerCase(); if (t && kol[t] == null) kol[t] = j; });
-      if (ord.every(function (o) { return kol[o.toLowerCase()] != null; })) return { rad: i, kol: kol };
+      (rader[i] || []).forEach(function (c, j) { var t = nyck(c); if (t && kol[t] == null) kol[t] = j; });
+      if (ord.every(function (o) { return kol[nyck(o)] != null; })) return { rad: i, kol: kol };
     }
     return null;
   }
@@ -2426,16 +2436,18 @@ var VERSIONER = [
     // Grundbok: en rad har en debetsida och/eller en kreditsida.
     var gb = flik(bok, 'Grundbok');
     var gr = gb && rubriker(gb, ['Verifikationsnummer', 'Debet Konto-nr', 'Debet belopp', 'Kredit Konto-nr', 'Kredit Belopp']);
-    var ver = [], perNr = {}, ar = {};
+    var ver = [], perNr = {}, ar = {}, ibRader = [];
     if (!gr) ut.saknas.push('Grundbok');
     else {
       var k = gr.kol;
       gb.slice(gr.rad + 1).forEach(function (r) {
         var vnr = r[k['verifikationsnummer']];
-        var dk = excelKonto(r[k['debet konto-nr']]), db = excelBelopp(r[k['debet belopp']]);
-        var kk = excelKonto(r[k['kredit konto-nr']]), kb = excelBelopp(r[k['kredit belopp']]);
+        var dk = excelKonto(r[k['debetkonto-nr']]), db = excelBelopp(r[k['debetbelopp']]);
+        var kk = excelKonto(r[k['kreditkonto-nr']]), kb = excelBelopp(r[k['kreditbelopp']]);
         if ((vnr === null || vnr === undefined || vnr === '') && !db && !kb) return;
         if (!db && !kb) return;
+        // Ingående balanser ligger både här (verifikation 0) och i fliken IngåendeBalanser: räkna dem bara en gång.
+        if (/^\s*ingående balans/i.test(cellText(r[k['beskrivning']]))) { ibRader.push({ dk: dk, db: db, kk: kk, kb: kb }); return; }
         var nr = Number(vnr);
         if (!Number.isInteger(nr)) { ut.avvikelser.push('En rad i grundboken har ogiltigt verifikationsnummer (' + cellText(vnr) + ') och hoppades över.'); return; }
         var v = perNr[nr];
@@ -2443,15 +2455,20 @@ var VERSIONER = [
         var d = excelDatum(r[k['registreringsdatum']]);
         if (d && !v.datum) v.datum = d;
         if (!v.text) v.text = cellText(r[k['beskrivning']]);
-        if (db) { if (!dk) ut.avvikelser.push('Verifikation ' + nr + ': debetbelopp utan konto.'); v.rader.push({ konto: dk || '????', belopp: db }); if (dk && !namn[dk]) namn[dk] = cellText(r[k['debet konto']]); }
-        if (kb) { if (!kk) ut.avvikelser.push('Verifikation ' + nr + ': kreditbelopp utan konto.'); v.rader.push({ konto: kk || '????', belopp: -kb }); if (kk && !namn[kk]) namn[kk] = cellText(r[k['kredit konto']]); }
+        if (db) { if (!dk) ut.avvikelser.push('Verifikation ' + nr + ': debetbelopp utan konto.'); v.rader.push({ konto: dk || '????', belopp: db }); if (dk && !namn[dk]) namn[dk] = cellText(r[k['debetkonto']]); }
+        if (kb) { if (!kk) ut.avvikelser.push('Verifikation ' + nr + ': kreditbelopp utan konto.'); v.rader.push({ konto: kk || '????', belopp: -kb }); if (kk && !namn[kk]) namn[kk] = cellText(r[k['kreditkonto']]); }
         if (d) ar[d.slice(0, 4)] = (ar[d.slice(0, 4)] || 0) + 1;
       });
     }
     // Ingående balanser
     var ibf = flik(bok, 'IngåendeBalanser');
     var ir = ibf && rubriker(ibf, ['Konto-nr', 'Amount', 'Type']);
-    if (!ir) ut.saknas.push('IngåendeBalanser');
+    if (!ir && ibRader.length) {
+      ibRader.forEach(function (x) {
+        if (x.db && x.dk) ut.ingaendeBalans[x.dk] = (ut.ingaendeBalans[x.dk] || 0) + x.db;
+        if (x.kb && x.kk) ut.ingaendeBalans[x.kk] = (ut.ingaendeBalans[x.kk] || 0) - x.kb;
+      });
+    } else if (!ir) ut.saknas.push('IngåendeBalanser');
     else {
       ibf.slice(ir.rad + 1).forEach(function (r) {
         var nr = excelKonto(r[ir.kol['konto-nr']]), b = excelBelopp(r[ir.kol['amount']]);
@@ -2502,7 +2519,7 @@ var VERSIONER = [
         var m = kom.match(AVGIFTSKOMMENTAR);
         var b = excelBelopp(r[bkol['belopp']]);
         if (!m || !b || b <= 0) return;
-        var datum = excelDatum(r[bkol['bokf dag']]) || excelDatum(r[bkol['transdag']]);
+        var datum = excelDatum(r[bkol['bokfdag']]) || excelDatum(r[bkol['transdag']]);
         if (!datum) { ut.avvikelser.push('Avgiften "' + avgiftstextUtanNamn(kom) + '" i bankfliken saknar datum.'); return; }
         var personnamn = (kom.match(/\s-\s+(.+)$/) || [])[1] || cellText(r[bkol['motpart']]);
         var typ = cellText(r[bkol['transaktionstyp']]), ref = cellText(r[bkol['referens']]);
