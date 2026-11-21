@@ -91,6 +91,18 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - Frågetecken vid rubrikerna med vad, varför och hur, och länkar till Bokföringsnämnden, Skatteverket och Riksidrottsförbundet. Kassörens årshjul och en guide för revisorn under Om appen, i revisionspaketet och för rollen revisor.
 
+## Årsmötet och Stockholms stad (från version 1.22)
+
+- Tidsfrister enligt stadgarna, föredragningslista och röstlängd (18 år enligt stadgarna eller 12 år enligt stadens villkor).
+- Ekonomisk redovisning med noter om medlemsavgifter och bidrag per bidragsgivare, och en ekonomitext till verksamhetsberättelsen.
+- Checklista för de årliga handlingarna i Idrottsportalen och kontroll av medlemsantal och nolltaxa mot exporten från RF:s system (inget sparas).
+- Apelido (capoeiranamn) för medlemmar och roller.
+
+## Kommande
+
+- 1.23: ny struktur med startsidan Översikt (att göra, medlemmar, på gång, vem som är inne) och huvuddelarna Bokföring, Medlemmar, Föreningen och Inställningar.
+- 1.24: styrelsemodul (möten och beslut, uppgifter, förtroendeuppdrag, dokument och stadgeändringar som ärenden till årsmötet).
+
 ## Integritet
 
 - Koden kan vara publik. Bokföringsdata, medlemsnamn och underlag ligger bara i OneDrive.

@@ -65,3 +65,20 @@ test('rollfilen läses in och kontrolleras', () => {
   eq(f.regMapp, { driveId: 'D', id: 'R' });
   assert.throws(() => K.lasRollfil({}), /okänt format/);
 });
+
+test('apelido på personer med roller och på medlemmar', () => {
+  let f = roller();
+  f = K.sattApelidoRoll(f, ADMIN, KASSOR.replace('kassor', 'admin'), 'Soba');
+  assert.equal(K.visaPerson(f, ADMIN), 'Soba');
+  assert.equal(K.visaPerson(f, BOK), BOK);
+  assert.throws(() => K.sattApelidoRoll(f, BOK, BOK, 'X'), /systemadministratör/);
+  // Apelido följer med när rollerna ändras
+  assert.equal(K.sattRoller(f, ADMIN, ADMIN, ['admin', 'kassor', 'styrelse']).personer.find((p) => p.epost === ADMIN).apelido, 'Soba');
+  assert.equal(K.lasRollfil(json(f)).personer.find((p) => p.epost === ADMIN).apelido, 'Soba');
+  let reg = K.laggTillMedlem(K.tomtRegister(), { namn: 'Påhittad Person', kategori: 'vuxen', apelido: 'Formiga' }).reg;
+  assert.equal(K.visaNamn(reg.medlemmar[0]), 'Formiga – Påhittad Person');
+  reg = K.andraMedlem(reg, 'm1', { apelido: '' });
+  assert.equal(K.visaNamn(reg.medlemmar[0]), 'Påhittad Person');
+  reg = K.andraMedlem(reg, 'm1', { apelido: 'Formiga' });
+  assert.ok(!('apelido' in K.avforMedlem(reg, 'm1', '2031-01-01', 'utträde').medlemmar[0]), 'apelidot tas bort vid avförande');
+});
