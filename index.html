@@ -102,6 +102,21 @@
   #arvaljare { font-size: 13px; color: var(--ink-soft); }
   #arvaljare select { padding: 3px 8px; font-size: 13px; border-radius: 999px; }
   #synkstatus { font-size: 12px; color: var(--ink-faint); min-height: 1em; }
+  /* Cirklar för dem som har appen öppen, som i Word. */
+  .narvaro { display: flex; justify-content: center; align-items: center; }
+  .narvaro:empty { display: none; }
+  .avatar { position: relative; width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--surface); color: #fff; font: 600 12px/1 "Roboto Flex", system-ui, sans-serif;
+    display: inline-flex; align-items: center; justify-content: center; padding: 0; margin-left: -6px; cursor: default; }
+  .avatar:first-child { margin-left: 0; }
+  .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+  .avatar.skrivratt { box-shadow: 0 0 0 2px var(--guld); }
+  .avatar.fler { background: var(--surface-2); color: var(--ink); }
+  .avatar-info { display: none; position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 60; min-width: 190px; max-width: 80vw;
+    background: var(--surface); color: var(--ink); border: 1px solid var(--hairline); border-radius: 10px; padding: 9px 11px; box-shadow: var(--skugga), 0 6px 18px rgba(0, 0, 0, 0.12);
+    font: 400 12.5px/1.45 "Roboto Flex", system-ui, sans-serif; text-align: left; white-space: normal; }
+  .avatar-info strong { display: block; font-size: 13.5px; }
+  .avatar:hover .avatar-info, .avatar:focus .avatar-info, .avatar.oppen .avatar-info { display: block; }
+  .min-bild { width: 48px; height: 48px; font-size: 16px; margin: 0; }
   #synkstatus.fel { color: var(--over); }
   #navbar { position: sticky; top: 0; z-index: 20; }
   nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 18px; padding: 6px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
@@ -299,6 +314,7 @@
     <h1 id="rubrik">Föreningsbokföring</h1>
     <div class="row" id="arvaljare"></div>
     <div id="synkstatus" role="status"></div>
+    <div id="narvaro" class="narvaro" aria-label="Har appen öppen"></div>
   </header>
 </div>
 <div id="navbar"><nav id="nav" aria-label="Huvudmeny"></nav><nav id="undernav" aria-label="Undermeny"></nav></div>
@@ -319,6 +335,17 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.25', datum: '2026-11-21',
+    nyheter: [
+      'De som har appen öppen visas som små cirklar överst, med initialer eller bild, som i Word. Den som har skrivrätten har en guldring.',
+      'Håll muspekaren över en cirkel (eller tryck på den i mobilen) för att se apelido, e-post, roller, skrivrätt och när personen senast var aktiv.',
+      'Lägg till en egen bild under Inställningar, Roller. Den följer med till dina andra enheter.',
+      'Styrelsen syns nu också när de har appen öppen. Rutan Just nu på översikten är borttagen.',
+      'Rättelse: apelido för personer under Roller sparas nu.',
+      'Rättelse: strecken mellan paragraferna i protokollen syns igen.'
+    ]
+  },
   {
     version: '1.24', datum: '2026-11-21',
     nyheter: [
@@ -3132,6 +3159,48 @@ var VERSIONER = [
     return { data: ut, krockar: krockar };
   }
 
+  // ---------- Närvaro ----------
+  // Initialer till cirkeln för den som är inne: från apelido eller namn, annars från e-postadressen.
+  function initialer(namn) {
+    var s = String(namn || '').trim();
+    if (/@/.test(s)) s = s.split('@')[0].replace(/[._\-+]+/g, ' ');
+    var ord = s.split(/\s+/).filter(Boolean);
+    if (!ord.length) return '?';
+    if (ord.length > 1) return (ord[0][0] + ord[ord.length - 1][0]).toUpperCase();
+    return ord[0][0].toUpperCase() + (ord[0][1] || '').toLowerCase();
+  }
+
+  // En färg (nyans 0–359) per person, alltid densamma för samma e-postadress.
+  function narvaroFarg(nyckel) {
+    var h = 0, t = String(nyckel || '').toLowerCase();
+    for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) % 360;
+    return h;
+  }
+
+  // Närvaro från flera filer (bokföringens och styrelsens mapp): den senaste uppgiften per person.
+  function slaIhopNarvaro(listor) {
+    var ut = {};
+    listor.forEach(function (l) {
+      Object.keys(l || {}).forEach(function (k) {
+        var x = l[k];
+        if (!x || !x.tid) return;
+        var f = ut[k];
+        if (!f || f.tid < x.tid) ut[k] = Object.assign({}, x, { bild: x.bild || (f && f.bild) || null });
+        else if (!f.bild && x.bild) f.bild = x.bild;
+      });
+    });
+    return ut;
+  }
+
+  // De som varit aktiva de senaste minuterna (standard fem), utom jag själv. Senast aktiv först.
+  function aktivaNu(narvaro, jag, nuMs, minuter) {
+    var grans = nuMs - (minuter || 5) * 60000;
+    jag = String(jag || '').toLowerCase();
+    return Object.keys(narvaro || {}).filter(function (k) { return k !== jag && new Date(narvaro[k].tid).getTime() > grans; })
+      .map(function (k) { var x = narvaro[k]; return { vem: k, tid: x.tid, skrivratt: !!x.skrivratt, bild: x.bild || null, minuter: Math.max(0, Math.round((nuMs - new Date(x.tid).getTime()) / 60000)) }; })
+      .sort(function (a, b) { return a.tid < b.tid ? 1 : a.tid > b.tid ? -1 : 0; });
+  }
+
   function uppdragSomGarUt(upp, datum) {
     return upp.uppdrag.filter(function (u) { return u.till && u.till <= datum; }).sort(function (a, b) { return a.till < b.till ? -1 : 1; });
   }
@@ -3703,6 +3772,10 @@ var VERSIONER = [
     taBortUppdrag: taBortUppdrag,
     uppdragSomGarUt: uppdragSomGarUt,
     slaIhopPoster: slaIhopPoster,
+    initialer: initialer,
+    narvaroFarg: narvaroFarg,
+    slaIhopNarvaro: slaIhopNarvaro,
+    aktivaNu: aktivaNu,
     visaNamn: visaNamn,
     sattApelidoRoll: sattApelidoRoll,
     visaPerson: visaPerson,
@@ -6152,6 +6225,7 @@ var VERSIONER = [
     sattStatus(odNu.status, !!odNu.fel);
     document.getElementById('rubrik').textContent = store.forening.namn || 'Föreningsbokföring';
     renderArvaljare();
+    ritaNarvaro();
     var nav = document.getElementById('nav');
     var main = document.getElementById('main');
     var msg = ovningsBanner() + revisionBanner() + skrivrattBanner() + konfliktBanner() + regKonfliktBanner() + styrKrockBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
@@ -7441,6 +7515,9 @@ var VERSIONER = [
     var f = odNu.roller, jag = mig();
     var mina = K.rollerFor(f, jag);
     var html = '<h2 id="roller">Roller och skrivrätt' + hjalp('skrivratt') + '</h2><div class="card">' + narvaroText();
+    html += '<div class="row" style="align-items:center;margin:8px 0">' + avatar(jag, minBild(), 'min-bild', '', 'Din cirkel') +
+      '<span class="faint">Din cirkel när du har appen öppen.</span><button class="btn btn-secondary btn-small" data-action="min-bild-valj">' + (minBild() ? 'Byt bild' : 'Lägg till bild') + '</button>' +
+      (minBild() ? '<button class="btn btn-secondary btn-small" data-action="min-bild-bort">Ta bort bilden</button>' : '') + '</div>';
     html += '<p style="margin-top:0">Du är inloggad som <strong>' + esc(jag) + '</strong>' + (mina.length ? ' med rollen ' + esc(mina.map(rollnamn).join(' och ')) : '') + '. ' +
       'Skrivrätten har <strong>' + esc(f.skrivratt ? K.visaPerson(f, f.skrivratt) : 'ingen') + '</strong>. Bara den som har skrivrätten kan ändra något; alla andra ser bokföringen i läsläge.</p>';
     var mottagare = f.personer.filter(function (p) { return p.epost !== f.skrivratt && K.kanFaSkrivratt(f, p.epost); });
@@ -7485,26 +7562,91 @@ var VERSIONER = [
 
   var NARVAROFIL = 'narvaro.json';
 
-  // Medan appen är öppen skriver den in sig i narvaro.json ungefär varannan minut. Den som bara får läsa kan inte synas.
+  // Medan appen är öppen skriver den in sig ungefär varannan minut: i narvaro.json i bokföringsmappen, eller,
+  // för styrelsen som bara läser bokföringen, i styrelsens mapp. Den som bara får läsa (revisorn) kan inte synas.
+  async function lasNarvaro(url) {
+    var res = await graf(url + '/content', { tillat: [403, 404], ra: true });
+    if (res.status === 403 || res.status === 404) return null;
+    try { return await res.json(); } catch (e) { return {}; }
+  }
+  async function skrivInNarvaro(url, lista) {
+    lista = lista || {};
+    var grans = Date.now() - 24 * 3600 * 1000;
+    Object.keys(lista).forEach(function (k) { if (!lista[k] || new Date(lista[k].tid).getTime() < grans) delete lista[k]; });
+    lista[mig()] = { tid: new Date().toISOString(), skrivratt: kanSkriva() };
+    var bild = minBild();
+    if (bild) lista[mig()].bild = bild;
+    await graf(url + '/content', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lista), tillat: [403, 412] }).catch(function () { /* frivilligt */ });
+    return lista;
+  }
   async function uppdateraNarvaro() {
     if (!odAnslutet() || document.visibilityState !== 'visible') return;
-    var lista = {};
-    var res = await graf(iMappen(NARVAROFIL) + '/content', { tillat: [404], ra: true });
-    if (res.status !== 404) { try { lista = await res.json(); } catch (e) { lista = {}; } }
-    if (od.lage !== 'lasare' && mig()) {
-      var grans = Date.now() - 24 * 3600 * 1000;
-      Object.keys(lista).forEach(function (k) { if (!lista[k] || new Date(lista[k].tid).getTime() < grans) delete lista[k]; });
-      lista[mig()] = { tid: new Date().toISOString(), skrivratt: kanSkriva() };
-      await graf(iMappen(NARVAROFIL) + '/content', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lista), tillat: [403, 412] }).catch(function () { /* frivilligt */ });
+    var dataUrl = iMappen(NARVAROFIL);
+    var data = await lasNarvaro(dataUrl);
+    var styrUrl0 = styrBeh('styr') && od.styrMapp ? iStyrMappen(NARVAROFIL) : null;
+    var styr = styrUrl0 ? await lasNarvaro(styrUrl0).catch(function () { return null; }) : null;
+    if (mig()) {
+      if (od.lage !== 'lasare') data = await skrivInNarvaro(dataUrl, data);
+      else if (styrUrl0 && styrBeh('styr') === 'write') styr = await skrivInNarvaro(styrUrl0, styr);
     }
-    odNu.narvaro = lista;
+    odNu.narvaro = K.slaIhopNarvaro([data, styr]);
   }
 
   // De som varit aktiva de senaste fem minuterna, utom jag själv.
   function inneNu() {
-    var lista = odNu.narvaro || {}, grans = Date.now() - 5 * 60 * 1000;
-    return Object.keys(lista).filter(function (k) { return k !== mig() && lista[k] && new Date(lista[k].tid).getTime() > grans; })
-      .map(function (k) { return { vem: k, namn: odNu.roller ? K.visaPerson(odNu.roller, k) : k, minuter: Math.max(0, Math.round((Date.now() - new Date(lista[k].tid).getTime()) / 60000)) }; });
+    return K.aktivaNu(odNu.narvaro || {}, mig(), Date.now()).map(function (x) { return Object.assign(x, { namn: odNu.roller ? K.visaPerson(odNu.roller, x.vem) : x.vem }); });
+  }
+
+  // ---------- Din bild i cirkeln ----------
+  var MIN_BILD = 'forening-bokforing:min-bild';
+  function minBild() { try { return localStorage.getItem(MIN_BILD) || null; } catch (e) { return null; } }
+  function sattMinBild(url) {
+    try { if (url) localStorage.setItem(MIN_BILD, url); else localStorage.removeItem(MIN_BILD); } catch (e) { /* tomt */ }
+    // Bilden följer med till dina andra enheter via din egen appmapp.
+    if (od.refreshToken) sparaAppinstallningar({ bild: url || null }).catch(function () { /* frivilligt */ });
+  }
+  // En bild förminskas till en liten fyrkant (96 punkter), så att den får plats i närvarofilen.
+  function forminskaBild(fil) {
+    return new Promise(function (ok, fel) {
+      var url = URL.createObjectURL(fil), img = new Image();
+      img.onload = function () {
+        var sida = 96, c = document.createElement('canvas'), m = Math.min(img.width, img.height);
+        c.width = sida; c.height = sida;
+        c.getContext('2d').drawImage(img, (img.width - m) / 2, (img.height - m) / 2, m, m, 0, 0, sida, sida);
+        URL.revokeObjectURL(url);
+        ok(c.toDataURL('image/jpeg', 0.8));
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); fel(new Error('Bilden kunde inte läsas.')); };
+      img.src = url;
+    });
+  }
+
+  function avatar(vem, bild, klass, info, etikett) {
+    var f = odNu.roller, namn = f ? K.visaPerson(f, vem) : vem;
+    var bg = 'hsl(' + K.narvaroFarg(vem) + ', 42%, 40%)';
+    return '<button type="button" class="avatar' + (klass ? ' ' + klass : '') + '" style="background:' + bg + '" aria-label="' + esc(etikett || namn) + '">' +
+      (bild ? '<img src="' + esc(bild) + '" alt="">' : esc(K.initialer(namn))) + (info ? '<span class="avatar-info" role="tooltip">' + info + '</span>' : '') + '</button>';
+  }
+
+  // Cirklarna i sidhuvudet: de andra som har appen öppen just nu.
+  function ritaNarvaro() {
+    var el = document.getElementById('narvaro');
+    if (!el) return;
+    if (!odAnslutet()) { el.innerHTML = ''; return; }
+    var f = odNu.roller, s = odNu.senastSparat, inne = inneNu();
+    var visa0 = inne.slice(0, 5);
+    el.innerHTML = visa0.map(function (x) {
+      var p = f && f.personer.find(function (y) { return y.epost === x.vem; });
+      var roller = p ? p.roller.map(rollnamn).join(', ') : '';
+      var skriv = f ? f.skrivratt === x.vem : x.skrivratt;
+      var info = '<strong>' + esc(p && p.apelido ? p.apelido : x.vem) + '</strong>' +
+        (p && p.apelido ? esc(x.vem) + '<br>' : '') + (roller ? esc(roller) + '<br>' : '') +
+        (skriv ? 'Har skrivrätten<br>' : '') +
+        (x.minuter ? 'Aktiv för ' + x.minuter + ' min sedan' : 'Aktiv nu') +
+        (s && s.vem && s.vem.toLowerCase() === x.vem ? '<br>Sparade bokföringen senast, ' + esc(klockslag(s.tid)) : '');
+      return avatar(x.vem, x.bild, skriv ? 'skrivratt' : '', info, (p && p.apelido ? p.apelido : x.vem) + ' har appen öppen' + (skriv ? ' och har skrivrätten' : ''));
+    }).join('') + (inne.length > 5 ? '<button type="button" class="avatar fler" aria-label="' + (inne.length - 5) + ' till">+' + (inne.length - 5) +
+      '<span class="avatar-info" role="tooltip">' + inne.slice(5).map(function (x) { return esc(x.namn); }).join('<br>') + '</span></button>' : '');
   }
 
   function narvaroText() {
@@ -7513,7 +7655,7 @@ var VERSIONER = [
     var s = odNu.senastSparat;
     return (s && s.vem ? '<p class="faint" style="margin:4px 0">Senast sparat av ' + esc(odNu.roller && /@/.test(s.vem) ? K.visaPerson(odNu.roller, s.vem) : s.vem) + (s.tid ? ', ' + esc(klockslag(s.tid)) : '') + '.</p>' : '') +
       '<p class="faint" style="margin:4px 0">' + (inne.length ? 'Inne just nu: ' + inne.map(function (x) { return esc(x.namn) + ' (' + (x.minuter ? 'för ' + x.minuter + ' min sedan' : 'nyss') + ')'; }).join(', ') + '.'
-        : 'Ingen annan med skrivbehörighet har appen öppen just nu.') + ' Revisorn och styrelsen syns inte här.</p>';
+        : 'Ingen annan har appen öppen just nu.') + ' Den som är inne syns som en cirkel överst. Revisorn syns inte, eftersom revisorn bara får läsa.</p>';
   }
 
   // ---------- Årsmötet och Stockholms stad ----------
@@ -7719,11 +7861,6 @@ var VERSIONER = [
       ? '<ul style="margin:0">' + frister.map(function (f) { return '<li><strong>' + esc(f.datum) + '</strong> ' + esc(f.text) + '</li>'; }).join('') + '</ul>'
       : '<p class="faint" style="margin:0">Inga frister inlagda. Ange datum för årsmötet under Föreningen, Årsmötet, så visas fristerna här.</p>') +
       '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-vy="arsmote">Årsmötet</button></div></div>';
-    // Just nu
-    if (odAnslutet()) {
-      var f = odNu.roller;
-      html += '<div class="card"><h3 style="margin-top:0">Just nu</h3>' + (f ? '<p class="faint" style="margin:4px 0">Skrivrätten har ' + esc(f.skrivratt ? K.visaPerson(f, f.skrivratt) : 'ingen') + '.</p>' : '') + narvaroText() + '</div>';
-    }
     return html;
   }
 
@@ -7832,7 +7969,7 @@ var VERSIONER = [
       (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-just-ny">Lägg till justerare</button>' : '') + '</div>';
     // Paragrafer
     html += '<div class="card"><h3 style="margin-top:0">Paragrafer</h3>' + m.paragrafer.map(function (p, i) {
-      return '<div style="border-top:1px solid var(--linje);padding:8px 0"><div class="row" style="align-items:center"><strong>§ ' + (i + 1) + '</strong>' +
+      return '<div style="border-top:1px solid var(--hairline);padding:8px 0"><div class="row" style="align-items:center"><strong>§ ' + (i + 1) + '</strong>' +
         '<input data-pf="rubrik" data-si="' + i + '" value="' + esc(p.rubrik) + '" placeholder="Rubrik" style="flex:1;min-width:160px" aria-label="Rubrik för paragraf ' + (i + 1) + '"' + dis + '>' +
         (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-par-upp" data-si="' + i + '" aria-label="Flytta upp"' + (i ? '' : ' disabled') + '>Upp</button>' +
           '<button class="btn btn-secondary btn-small" data-action="styr-par-ner" data-si="' + i + '" aria-label="Flytta ner"' + (i < m.paragrafer.length - 1 ? '' : ' disabled') + '>Ner</button>' +
@@ -7846,7 +7983,7 @@ var VERSIONER = [
       return '<option value="">Ingen verifikation</option>' + lista.map(function (x) { return '<option value="' + esc(x[0]) + '"' + (x[0] === val ? ' selected' : '') + '>' + esc(x[1].slice(0, 70)) + '</option>'; }).join('');
     };
     html += '<div class="card"><h3 style="margin-top:0">Beslut' + hjalp('beslut') + '</h3>' + (m.beslut.length ? '' : '<p class="faint">Inga beslut i protokollet.</p>') + m.beslut.map(function (b, i) {
-      return '<div style="border-top:1px solid var(--linje);padding:8px 0"><textarea data-bf="text" data-si="' + i + '" rows="2" placeholder="Beslut" aria-label="Beslut ' + (i + 1) + '"' + dis + '>' + esc(b.text) + '</textarea>' +
+      return '<div style="border-top:1px solid var(--hairline);padding:8px 0"><textarea data-bf="text" data-si="' + i + '" rows="2" placeholder="Beslut" aria-label="Beslut ' + (i + 1) + '"' + dis + '>' + esc(b.text) + '</textarea>' +
         '<div class="row"><input data-bf="belopp" data-si="' + i + '" value="' + (b.belopp ? esc(kr(b.belopp)) : '') + '" placeholder="Belopp, kr (frivilligt)" style="max-width:180px" inputmode="decimal" aria-label="Belopp"' + dis + '>' +
         '<select data-bf="verifikation" data-si="' + i + '" style="max-width:320px" aria-label="Verifikation"' + dis + '>' + verOpt(b.verifikation || '') + '</select>' +
         (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-bes-bort" data-si="' + i + '">Ta bort</button>' : '') + '</div></div>';
@@ -9028,7 +9165,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport],[data-grupp]');
@@ -9231,8 +9368,8 @@ var VERSIONER = [
     if (t.dataset.actionChange === 'koppla' && t.value) {
       var ar = aktivt();
       var rad = ar.bankrader.find(function (r) { return r.id === t.dataset.id; });
-      var nu = forslagMedVal(ar, rad).underlagIds;
-      inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { underlagIds: nu.concat([t.value]), ungefar: true });
+      var valdaUnderlag = forslagMedVal(ar, rad).underlagIds;
+      inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { underlagIds: valdaUnderlag.concat([t.value]), ungefar: true });
       render();
     }
     if (t.dataset.underlag) {
@@ -9362,6 +9499,22 @@ var VERSIONER = [
       }).catch(function (err) { paketStatus = null; visa('Revisionspaketet kunde inte skapas: ' + err.message, true); });
     },
     'oppna-paket': function () { oppnaPaket(); },
+    'min-bild-valj': function () {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = function () {
+        var fil = input.files[0];
+        if (!fil) return;
+        forminskaBild(fil).then(function (url) {
+          sattMinBild(url);
+          uppdateraNarvaro().catch(function () { /* nästa gång */ });
+          visa('Din bild är sparad. De andra ser den nästa gång appen hämtar vem som är inne.');
+        }, function (err) { visa(err.message, true); });
+      };
+      input.click();
+    },
+    'min-bild-bort': function () { sattMinBild(null); uppdateraNarvaro().catch(function () { /* nästa gång */ }); visa('Bilden är borttagen. Cirkeln visar dina initialer.'); },
     'styr-vy': function (t) { vy = 'styrelsen'; styrVy = t.dataset.v; oppetMote = null; render(); },
     'styr-oppna': function (t) { vy = 'styrelsen'; styrVy = 'moten'; oppetMote = t.dataset.id; meddelande = null; render(); window.scrollTo(0, 0); },
     'styr-stang': function () { oppetMote = null; meddelande = null; render(); },
@@ -10356,6 +10509,7 @@ var VERSIONER = [
     return hamtaFranOneDrive().then(function () {
       return lasAppinstallningar().then(function (inst) {
         synkaNyckel(inst);
+        if (inst.bild !== undefined && (inst.bild || null) !== minBild()) { try { if (inst.bild) localStorage.setItem(MIN_BILD, inst.bild); else localStorage.removeItem(MIN_BILD); } catch (e) { /* tomt */ } }
         // Enheter som kopplades innan appmappen fanns (version 1.0) sparar mappen nu,
         // så att nya enheter hittar den när de loggar in.
         if (od.mapp && (!inst.mapp || inst.mapp.id !== od.mapp.id || inst.lage !== od.lage)) {
@@ -10384,6 +10538,12 @@ var VERSIONER = [
   });
 
   document.getElementById('nav').addEventListener('scroll', markeraNavSlut, { passive: true });
+  // Mobilen: ett tryck på en cirkel visar informationen, ett tryck till (eller utanför) döljer den.
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest('#narvaro .avatar');
+    document.querySelectorAll('#narvaro .avatar.oppen').forEach(function (x) { if (x !== a) x.classList.remove('oppen'); });
+    if (a) a.classList.toggle('oppen');
+  });
   window.addEventListener('resize', function () { skalaForhandsvisningar(); markeraNavSlut(); });
 
   // Hämta igen när appen kommer tillbaka i fokus, så att ändringar från en annan enhet syns.
@@ -10392,7 +10552,7 @@ var VERSIONER = [
     hamtaFranOneDrive().then(render, function () { render(); });
   });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && hjalpOppen) { hjalpOppen = null; render(); } });
-  setInterval(function () { if (odAnslutet() && !OVNING) uppdateraNarvaro().then(function () { if (vy === 'arkiv') render(); }, function () { /* frivilligt */ }); }, 120000);
+  setInterval(function () { if (odAnslutet() && !OVNING) uppdateraNarvaro().then(ritaNarvaro, function () { /* frivilligt */ }); }, 120000);
   setTimeout(function () { if (odAnslutet() && !OVNING) uppdateraNarvaro().then(render, function () { /* frivilligt */ }); }, 4000);
   window.addEventListener('beforeunload', function (e) {
     if (odAnslutet() && od.smutsig && !lasLage()) { e.preventDefault(); e.returnValue = ''; }
