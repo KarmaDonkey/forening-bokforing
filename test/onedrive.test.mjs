@@ -25,5 +25,5 @@ test('underlag hamnar i rätt mapp beroende på status', () => {
 });
 
 test('kvitton sparas under året de skrevs', () => {
-  assert.equal(K.kvittoSokvag({ datum: '2026-11-20', nummer: 'K2026-001' }), '2026/Fakturor och kvitton/Kvitto K2026-001.html');
+  assert.equal(K.kvittoSokvag({ datum: '2026-11-20', nummer: 'K2026-001' }), '2026/Fakturor och kvitton/Kvitto K2026-001.pdf');
 });
