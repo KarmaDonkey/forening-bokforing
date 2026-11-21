@@ -345,6 +345,15 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.31', datum: '2026-11-21',
+    nyheter: [
+      'Börja om med riktig bokföring (Inställningar, År och arkiv): testdatat tas bort, och du väljer vad som ska finnas kvar, till exempel föreningens uppgifter, kontoplanen, medlemmarna utan betalningar, förtroendeuppdragen och arkivkopiorna. Roller och behörigheter finns alltid kvar.',
+      'Innan något tas bort laddas en kopia av allt ner och läggs i övningsläget, och testfilerna i OneDrive flyttas till en mapp Testdata.',
+      'Övningsläget kan öppnas med en sparad kopia från en fil, så att en testmiljö kan tas fram igen.',
+      'Nästa räkenskapsår kan skapas från en arkivkopia, med arkivkopians utgående saldon som ingående balans.'
+    ]
+  },
+  {
     version: '1.30', datum: '2026-11-21',
     nyheter: [
       'Menyn Medlemmar heter nu Medlemsregister, med flikarna Statistik, Att koppla, Medlemmar, Betalare, Avgifter och Personuppgifter i undermenyn.'
@@ -1191,6 +1200,60 @@ var VERSIONER = [
       // Obetalda fakturor och outlösta kvitton följer med till nästa år.
       underlag: oppnaUnderlag(ar)
     });
+  }
+
+  // Ett nytt räkenskapsår efter en arkivkopia från Excel: utgående saldon blir ingående balans,
+  // årets resultat förs till 2069 och konton som saknas i kontoplanen läggs till.
+  function arFranArkiv(arkiv, kontoplan) {
+    var s = saldon(arkiv), ib = {}, resultat = 0;
+    Object.keys(s).forEach(function (nr) {
+      if (arBalanskonto(nr)) ib[nr] = s[nr];
+      else resultat += s[nr];
+    });
+    var plan = (kontoplan || standardKontoplan()).map(function (k) { return { nr: k.nr, namn: k.namn }; });
+    var finns = function (nr) { return plan.some(function (k) { return k.nr === nr; }); };
+    if (!finns('2069')) plan.push({ nr: '2069', namn: 'Årets resultat' });
+    ib['2069'] = (ib['2069'] || 0) + resultat;
+    Object.keys(ib).forEach(function (nr) { if (!finns(nr)) plan.push({ nr: nr, namn: kontonamn(arkiv, nr) || ('Konto ' + nr) }); });
+    var start = laggTillDagar(arkiv.slut, 1);
+    return skapaAr({ start: start, slut: laggTillDagar(laggTillAr(start, 1), -1), kontoplan: plan, ingaendeBalans: ib });
+  }
+
+  // Börja om på riktigt: testdatat tas bort och det som valts behålls.
+  // d = { bokforing, register, styrelse, uppdrag }. val: forening, kontoplan, regler, avgifter, uppdrag, arkivkopior (true/false)
+  // och medlemmar ('behall', 'utan-betalningar' eller 'ta-bort'). filer = appens filer i OneDrive som ska flyttas undan.
+  function borjaOm(d, val) {
+    var b = d.bokforing, filer = [], arkiv = {};
+    var vanliga = Object.keys(b.ar || {}).filter(function (id) { return !b.ar[id].grovkopia; }).sort();
+    Object.keys(b.ar || {}).forEach(function (id) {
+      var a = b.ar[id];
+      if (a.grovkopia && val.arkivkopior) { arkiv[id] = a; return; }
+      (a.underlag || []).forEach(function (u) { if (u.odId) filer.push({ odId: u.odId, namn: u.filnamn || u.namn || 'underlag' }); });
+    });
+    (b.dokument || []).forEach(function (x) { if (x.odId) filer.push({ odId: x.odId, namn: (x.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + (x.nummer || '') + '.pdf' }); });
+    var behall = function (k) { return val.forening && Array.isArray(b[k]) ? b[k] : []; };
+    var ny = {};
+    // Övriga uppgifter i bokföringsfilen (inställningar för föreningen) följer med föreningens uppgifter.
+    if (val.forening) Object.keys(b).forEach(function (k) { ny[k] = b[k]; });
+    Object.assign(ny, {
+      format: 1, forening: val.forening ? b.forening : { namn: '', orgnr: '' }, ar: arkiv,
+      aktivt: Object.keys(arkiv).sort().pop() || null,
+      regler: val.regler ? (b.regler || []) : [], motpartsregler: val.regler ? (b.motpartsregler || []) : [],
+      adresser: behall('adresser'), kontakter: behall('kontakter'), artiklar: behall('artiklar'), mottagare: behall('mottagare'), dokument: []
+    });
+    delete ny.medlemsregister;
+    var r = normaliseraRegister(d.register), t = tomtRegister();
+    var avg = val.avgifter ? { terminer: r.terminer, arsavgift: r.arsavgift, konton: r.konton, avforEfterAr: r.avforEfterAr } : { terminer: t.terminer, arsavgift: t.arsavgift, konton: t.konton, avforEfterAr: t.avforEfterAr };
+    var reg = val.medlemmar === 'behall' ? r
+      : val.medlemmar === 'utan-betalningar' ? Object.assign({}, r, { betalningar: [], ignorerade: [], kvitton: [] }, avg)
+      : Object.assign(t, avg);
+    if (val.medlemmar === 'behall') reg = Object.assign({}, r, avg);
+    var styr = normaliseraStyrelse(d.styrelse);
+    styr.moten.forEach(function (m) { if (m.underskrift && m.underskrift.fil && m.underskrift.fil.odId) filer.push({ odId: m.underskrift.fil.odId, namn: m.underskrift.fil.namn, styrelsen: true }); });
+    return {
+      bokforing: ny, register: reg, styrelse: tomStyrelse(), uppdrag: val.uppdrag ? normaliseraUppdrag(d.uppdrag) : tomaUppdrag(), filer: filer,
+      kontoplan: val.kontoplan && vanliga.length ? b.ar[vanliga[vanliga.length - 1]].kontoplan : null
+    };
   }
 
   // ---------- Bokslut och årsmöte ----------
@@ -3754,6 +3817,8 @@ var VERSIONER = [
     resultatrakning: resultatrakning,
     balansrakning: balansrakning,
     nastaAr: nastaAr,
+    arFranArkiv: arFranArkiv,
+    borjaOm: borjaOm,
     valideraAr: valideraAr,
     kontroller: kontroller,
     sieExport: sieExport,
@@ -7097,7 +7162,7 @@ var VERSIONER = [
           '<button class="btn btn-small" data-action="bokfor-disposition" data-ar="' + esc(nasta) + '">Bokför resultatdisposition</button></div>' : '') + '</div></li>';
     }
     html += '</ol></div>';
-    html += '<div class="card">Handlingarna till årsmötet och det Stockholms stad behöver finns under <strong>Föreningen</strong>. ' +
+    html += '<div class="card">Handlingarna till årsmötet och det Stockholms stad behöver finns under <strong>Styrelsen</strong>. ' +
       '<button class="btn btn-secondary btn-small" data-vy="arsmote">Till årsmötet</button> <button class="btn btn-secondary btn-small" data-vy="staden">Till Stockholms stad</button></div>';
     return html;
   }
@@ -8748,6 +8813,32 @@ var VERSIONER = [
     try { indexedDB.deleteDatabase(FILDB + '-ovning'); } catch (e) { /* tomt */ }
   }
 
+  // En helkopia: bokföringen, medlemsregistret och styrelsens material i en fil.
+  function helkopia() {
+    return { format: 'foreningsbokforing-helkopia', skapad: new Date().toISOString(), version: VERSIONER[0].version, forening: store.forening.namn || '',
+      bokforing: bokforingsdata(), medlemsregister: store.medlemsregister, styrelsen: sty.styr.data, uppdrag: sty.upp.data };
+  }
+  function laddaNerHelkopia(prefix) {
+    // Namn utan å, ä och ö, som appens andra säkerhetskopior.
+    laddaNer((prefix || 'helkopia') + '-foreningsbokforing-' + idag() + '.json', JSON.stringify(helkopia()), 'application/json');
+  }
+  // Lägger en helkopia (eller en vanlig säkerhetskopia av bokföringen) i övningsläget.
+  function helkopiaTillOvning(d) {
+    var bok = d && d.format === 'foreningsbokforing-helkopia' ? d.bokforing : d;
+    if (!bok || bok.format !== 1 || !bok.ar) throw new Error('Filen är ingen kopia från Föreningsbokföring.');
+    try {
+      raderaOvning();
+      localStorage.setItem('forening-bokforing:ovning:v1', JSON.stringify(bok));
+      if (d.medlemsregister) localStorage.setItem('forening-bokforing:ovning:medlemsregister', JSON.stringify(d.medlemsregister));
+      if (d.styrelsen || d.uppdrag) {
+        var x = tomSty();
+        if (d.styrelsen) x.styr.data = K.normaliseraStyrelse(d.styrelsen);
+        if (d.uppdrag) x.upp.data = K.normaliseraUppdrag(d.uppdrag);
+        localStorage.setItem('forening-bokforing:ovning:styrelsen', JSON.stringify(x));
+      }
+    } catch (e) { throw new Error('Övningen kunde inte skapas: webbläsarens lagring är full eller avstängd.'); }
+  }
+
   function ovningsAdress() { return location.href.split('#')[0].split('?')[0] + '?ovning'; }
 
   function vyOvning() {
@@ -8756,7 +8847,87 @@ var VERSIONER = [
       'Övningsläget öppnas i en ny flik med en kopia av bokföringen och medlemsregistret i den här webbläsaren. Inget sparas i OneDrive, och allt raderas när du avslutar. ' +
       'Claude används på riktigt när du läser in PDF:er och bilder.</p>' +
       '<div class="row"><button class="btn btn-secondary" data-action="ovning-starta">Öppna övningsläge med en kopia</button>' +
-      '<button class="btn btn-secondary btn-small" data-action="ovning-starta-tom">… eller med en tom förening</button></div></div>';
+      '<button class="btn btn-secondary btn-small" data-action="ovning-starta-tom">… eller med en tom förening</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="ovning-fran-fil">… eller med en sparad kopia</button></div>' +
+      '<p class="faint" style="margin-bottom:0">En sparad kopia är en fil som appen laddat ner, till exempel när du började om. Med den kan du ta fram en testmiljö igen, även på en annan dator. Underlag som ligger i OneDrive kan inte visas i övningen.</p></div>' + vyBorjaOm();
+  }
+
+  // ---------- Börja om ----------
+
+  function kanBorjaOm() {
+    if (OVNING || revision || lasLage()) return false;
+    if (!odAnslutet()) return true;
+    return odNu.roller ? K.harRoll(odNu.roller, mig(), 'admin') && kanSkriva() : od.lage === 'agare';
+  }
+  function senasteArkiv() {
+    var ids = Object.keys(store.ar).filter(function (id) { return store.ar[id].grovkopia; }).sort();
+    return ids.length ? ids[ids.length - 1] : null;
+  }
+  function vyBorjaOm() {
+    if (!kanBorjaOm()) return '';
+    var arkiv = senasteArkiv();
+    var nastaStart = arkiv ? K.laggTillDagar(store.ar[arkiv].slut, 1) : '';
+    var ruta = function (id, text, val) { return '<label style="display:flex;gap:8px;font-weight:normal;margin:4px 0"><input type="checkbox" id="' + id + '" style="width:auto"' + (val ? ' checked' : '') + '><span>' + text + '</span></label>'; };
+    var radio = function (v, text, val) { return '<label style="display:flex;gap:8px;font-weight:normal;margin:2px 0 2px 22px"><input type="radio" name="boMedl" value="' + v + '" style="width:auto"' + (val ? ' checked' : '') + '><span>' + text + '</span></label>'; };
+    return '<h2 id="borjaom">Börja om med riktig bokföring</h2><div class="card"><details><summary><strong>Ta bort testdatat och börja bokföra på riktigt</strong></summary>' +
+      '<p>Kryssa för det som ska finnas kvar. Allt annat tas bort.</p>' +
+      ruta('boForening', 'Föreningens uppgifter: namn, org.nr, logotyp, adresser, kontakter, artiklar och fakturamottagare', true) +
+      ruta('boKontoplan', 'Kontoplanen', true) +
+      ruta('boRegler', 'Inlärda konteringsförslag', false) +
+      ruta('boAvgifter', 'Avgifter och konton för medlems- och terminsavgifter', true) +
+      '<p style="margin:6px 0 2px">Medlemsregistret:</p>' +
+      radio('utan-betalningar', 'Behåll medlemmarna, ta bort betalningar och kvitton', true) +
+      radio('behall', 'Behåll medlemmarna och betalningarna', false) +
+      radio('ta-bort', 'Ta bort alla medlemmar', false) +
+      ruta('boUppdrag', 'Förtroendeuppdragen', true) +
+      ruta('boArkiv', 'Arkivkopiorna från Excel' + (arkiv ? ' (' + Object.keys(store.ar).filter(function (id) { return store.ar[id].grovkopia; }).sort().join(', ') + ')' : ''), true) +
+      (arkiv ? ruta('boNyttAr', 'Skapa räkenskapsåret ' + esc(nastaStart.slice(0, 4)) + ' med ingående balans från arkivkopian ' + esc(arkiv), true) : '') +
+      '<p class="faint">Roller och behörigheter finns kvar, liksom mapparna och delningarna i OneDrive. Bokföringen (alla vanliga år, verifikationer, fakturor och kvitton) och styrelsens protokoll, beslut, uppgifter och ärenden tas bort.</p>' +
+      '<p class="faint">Innan något tas bort laddar appen ner en kopia av allt och lägger den i övningsläget, så att testmiljön finns kvar. ' +
+      (odAnslutet() ? 'Filerna som appen laddat upp under testerna (underlag, kvitton, inskannade protokoll) flyttas till en mapp Testdata i ' + esc(od.rot ? od.rot.namn : od.mapp.namn) + '. Protokoll och handlingar som sparats i mötesmapparna (ÅM, SM) rörs inte; titta själv efter testfiler där. ' : '') +
+      'Andra enheter och personer får den nya versionen nästa gång de öppnar appen.</p>' +
+      '<div class="row"><button class="btn" data-action="borja-om">Börja om…</button></div></details></div>';
+  }
+
+  async function borjaOmNu(val, arkivId) {
+    if (odAnslutet()) {
+      sattStatus('Sparar innan…');
+      await synkaUpp();
+      await synkaStyrelsen().catch(function () { /* sparas igen efteråt */ });
+      if (od.smutsig || od.regSmutsig || odNu.konflikt) throw new Error('Allt kunde inte sparas i OneDrive. Försök igen.');
+    }
+    var kopia = helkopia();
+    helkopiaTillOvning(kopia);
+    var res = K.borjaOm({ bokforing: kopia.bokforing, register: kopia.medlemsregister, styrelse: kopia.styrelsen, uppdrag: kopia.uppdrag }, val);
+    var flyttade = 0;
+    if (odAnslutet() && res.filer.length) {
+      sattStatus('Flyttar testfilerna…');
+      var bas = od.rot || od.mapp;
+      var mapp = await sakerstallUndermapp(bas.driveId, bas.id, 'Testdata (borttaget ' + idag() + ')');
+      var namn = [];
+      for (var i = 0; i < res.filer.length; i++) {
+        var f = res.filer[i];
+        var nytt = K.ledigtNamn(namn, K.sakertNamn(f.namn || 'fil'));
+        var ok = await graf('/drives/' + bas.driveId + '/items/' + f.odId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nytt, parentReference: { id: mapp.id } }), tillat: [403, 404] });
+        if (typeof ok !== 'number') { namn.push(nytt); flyttade++; }
+      }
+    }
+    var nyttAr = null;
+    if (arkivId && res.bokforing.ar[arkivId]) {
+      try { nyttAr = K.arFranArkiv(res.bokforing.ar[arkivId], res.kontoplan); }
+      catch (e) { nyttAr = null; res.nyttArFel = e.fel ? e.fel.join(' ') : e.message; }
+    }
+    store = res.bokforing;
+    LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
+    store.medlemsregister = res.register;
+    sty.styr = Object.assign(sty.styr, { data: res.styrelse, smutsig: true });
+    sty.upp = Object.assign(sty.upp, { data: res.uppdrag, smutsig: true });
+    sparaStyrLokalt();
+    oppetMote = null; utkast = nyttUtkast(); kvittoUtkast = null; valdMedlem = null;
+    if (nyttAr) laggTillAr(nyttAr); else spara();
+    if (odAnslutet()) { await synkaUpp(); await synkaStyrelsen().catch(function () { /* nästa gång */ }); }
+    sattStatus(odAnslutet() ? 'Synkad med OneDrive' : '');
+    return { flyttade: flyttade, nyttAr: nyttAr ? K.arNamn(nyttAr) : null, nyttArFel: res.nyttArFel || null };
   }
 
   // ---------- Revisionspaket och delning med revisorn ----------
@@ -8968,6 +9139,10 @@ var VERSIONER = [
         '<div class="row" style="margin-top:8px"><button class="btn btn-secondary" data-action="ta-bort-arkivkopia">Ta bort arkivkopian</button></div></div>';
     }
     var nastaId = Object.keys(store.ar).find(function (id) { return store.ar[id].start === K.laggTillDagar(ar.slut, 1); });
+    if (!nastaId && !lasLage()) {
+      html += '<h2>Nästa räkenskapsår</h2><div class="card"><p style="margin-top:0">Skapa räkenskapsåret efter ' + esc(K.arNamn(ar)) + ' med arkivkopians utgående saldon som ingående balans. Årets resultat läggs på konto 2069. Kontrollera den ingående balansen i balansräkningen under Rapporter.</p>' +
+        '<button class="btn" data-action="nasta-ar-arkiv">Skapa nästa räkenskapsår</button></div>';
+    }
     if (nastaId) {
       var diff = K.ubMotIb(ar, store.ar[nastaId]);
       html += '<h2>Utgående balans mot ' + esc(nastaId) + '</h2><div class="card">' + (diff.length
@@ -10143,6 +10318,45 @@ var VERSIONER = [
         .catch(function (err) { sattStatus(''); visa(err.fel ? err.fel.join(' ') : err.message, true); });
     },
     'ovning-starta': function () { kopieraTillOvning(false); window.open(ovningsAdress(), '_blank'); },
+    'ovning-fran-fil': function () {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json,.json';
+      input.onchange = function () {
+        var fil = input.files[0];
+        if (!fil) return;
+        fil.text().then(function (txt) {
+          helkopiaTillOvning(JSON.parse(txt));
+          window.open(ovningsAdress(), '_blank');
+          visa('Övningsläget är öppnat med kopian från filen ' + fil.name + '.');
+        }).catch(function (err) { visa(err.message, true); });
+      };
+      input.click();
+    },
+    'borja-om': function () {
+      var bock = function (id) { return !!(document.getElementById(id) || {}).checked; };
+      var val = { forening: bock('boForening'), kontoplan: bock('boKontoplan'), regler: bock('boRegler'), avgifter: bock('boAvgifter'), uppdrag: bock('boUppdrag'), arkivkopior: bock('boArkiv'),
+        medlemmar: (document.querySelector('input[name="boMedl"]:checked') || {}).value || 'utan-betalningar' };
+      var arkivId = val.arkivkopior && bock('boNyttAr') ? senasteArkiv() : null;
+      var svar = window.prompt('Bokföringen och styrelsens material tas bort (en kopia laddas ner och läggs i övningsläget först). Skriv BÖRJA OM för att fortsätta.');
+      if (svar == null) return;
+      if (svar.trim().toUpperCase() !== 'BÖRJA OM') throw new Error('Inget är borttaget. Skriv BÖRJA OM för att bekräfta.');
+      // Kopian laddas ner direkt, medan webbläsaren räknar det som en följd av klicket (annars tappas filnamnet).
+      laddaNerHelkopia('testdata');
+      borjaOmNu(val, arkivId).then(function (res) {
+        vy = res.nyttAr ? 'oversikt' : 'arkiv';
+        render();
+        visa('Klart. Testdatat är borttaget, och en kopia finns i övningsläget och som fil.' + (res.flyttade ? ' ' + antal(res.flyttade, 'fil', 'filer') + ' från testerna ligger i mappen Testdata i OneDrive.' : '') +
+          (res.nyttAr ? ' Räkenskapsåret ' + res.nyttAr + ' är skapat med ingående balans från arkivkopian; kontrollera den i balansräkningen under Bokföring, Rapporter.' : '') +
+          (res.nyttArFel ? ' Nästa räkenskapsår kunde inte skapas från arkivkopian: ' + res.nyttArFel : ''), !!res.nyttArFel);
+      }).catch(function (err) { sattStatus(''); visa('Inget är borttaget: ' + err.message, true); });
+    },
+    'nasta-ar-arkiv': function () {
+      var nytt = K.arFranArkiv(aktivt());
+      laggTillAr(nytt);
+      vy = 'rapporter'; rapportVy = 'br';
+      visa('Räkenskapsåret ' + K.arNamn(nytt) + ' är skapat med ingående balans från arkivkopian. Kontrollera den ingående balansen i balansräkningen nedan.');
+    },
     'ovning-starta-tom': function () { kopieraTillOvning(true); window.open(ovningsAdress(), '_blank'); },
     'ovning-aterstall': function () {
       if (!window.confirm('Börja om med en ny kopia av den riktiga bokföringen? Allt du gjort i övningen försvinner.')) return;

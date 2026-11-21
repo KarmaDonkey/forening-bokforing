@@ -92,6 +92,13 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 ## Övningsläge (från version 1.19)
 
 - En kopia av bokföringen och medlemsregistret i webbläsaren (adressen slutar på `?ovning`). Allt går att prova; inget sparas i OneDrive och allt raderas när övningen avslutas.
+- Från 1.31: övningen kan öppnas med en sparad helkopia (bokföring, register och styrelsens material i en fil).
+
+## Börja om (från version 1.31)
+
+- Testdatat tas bort och det som valts behålls: föreningens uppgifter, kontoplanen, avgifterna, medlemmarna (med eller utan betalningar), förtroendeuppdragen och arkivkopiorna. Roller, mappar och delningar finns alltid kvar.
+- Först laddas en helkopia ner och läggs i övningsläget, och appens testfiler i OneDrive flyttas till en mapp Testdata.
+- Nästa räkenskapsår kan skapas från en arkivkopia (utgående saldon blir ingående balans, resultatet på 2069).
 
 ## Förklaringar (från version 1.21)
 
