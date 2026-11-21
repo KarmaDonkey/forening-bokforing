@@ -71,6 +71,12 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Appens mapp, t.ex. `Föreningen/Föreningsbokföring`, med undermapparna `Bokföring och underlag` (bokföringen, logotypen och årsmappar med underlag; kan delas med revisorn) och `Medlemsregister` (delas inte).
 - Föreningens Excel-filer ligger kvar där de är och läses in i appen som grovkopior.
 
+## Revisorn (från version 1.15)
+
+- Med Microsoft-konto: kassören delar mappen `Bokföring och underlag` från appen med läsbehörighet. Revisorn öppnar appen via länken i mejlet och läser bokföringen och underlagen, alltid aktuellt.
+- Utan konto: kassören skapar ett revisionspaket (zip) för året. Revisorn öppnar det i appen med Öppna revisionspaket; inget sparas hos revisorn. Paketet innehåller också rapporterna som PDF och en SIE-fil.
+- Medlemsregistret ingår aldrig.
+
 ## Integritet
 
 - Koden kan vara publik. Bokföringsdata, medlemsnamn och underlag ligger bara i OneDrive.
@@ -86,6 +92,5 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Är räkenskapsåret samma som kalenderåret?
 - Är föreningen momsregistrerad? Troligen inte.
 - Hur ser Swedbanks exportfil ut (kolumner, format)?
-- Ska revisorerna och styrelsen kunna läsa rapporterna direkt, till exempel via en delad OneDrive-mapp?
 - Azure-appregistreringen: ska vi återanvända den från Ledger eller skapa en ny för föreningen?
 - Har föreningen en budget som ska följas upp i verktyget?

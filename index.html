@@ -309,6 +309,15 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.15', datum: '2026-11-21',
+    nyheter: [
+      'Dela bokföringen med revisorn direkt från appen: skriv revisorns e-postadress, så får revisorn läsbehörighet till mappen Bokföring och underlag och ett mejl med länk till appen. Medlemsregistret delas inte. Du ser vem som har tillgång och kan ta bort delningen.',
+      'Revisionspaket: allt revisorn behöver för ett år i en zip-fil, med verifikationer, underlag, rapporter som PDF och SIE-fil. Skapas under År och arkiv och kan delas eller laddas ner.',
+      'Revisorn kan öppna paketet i appen utan konto, med knappen Öppna revisionspaket. Allt är endast läsning och inget sparas i revisorns webbläsare.',
+      'Finns inte mappen du skriver in när du kopplar OneDrive kan appen skapa den.'
+    ]
+  },
+  {
     version: '1.14', datum: '2026-11-21',
     nyheter: [
       'Appens filer kan ligga i en egen mapp med två undermappar: Bokföring och underlag (som du kan dela med revisorn) och Medlemsregister (som du inte delar). Knappen Flytta flyttar det som finns i dag; dina Excel-filer rörs inte.',
@@ -2578,6 +2587,38 @@ var VERSIONER = [
     }).filter(function (x) { return x.ub !== x.ib; });
   }
 
+
+  // ---------- Revisionspaket ----------
+  // Ett år med verifikationer, underlag och rapporter i en zip-fil, som revisorn kan öppna i appen utan konto.
+
+  var PAKETFORMAT = 'foreningsbokforing-revisionspaket';
+
+  function revisionspaketData(data, arId, opt) {
+    opt = opt || {};
+    var ar = data.ar[arId];
+    if (!ar) throw BokforingsFel('Räkenskapsåret ' + arId + ' finns inte.');
+    var f = data.forening || {};
+    var ut = {
+      format: PAKETFORMAT, skapad: opt.skapad || null, version: opt.version || '', arId: arId,
+      forening: { namn: f.namn || '', orgnr: f.orgnr || '', bankgiro: f.bankgiro || '', swish: f.swish || '', webb: f.webb || '', epost: f.epost || '' },
+      ar: {}, filer: {}
+    };
+    ut.ar[arId] = ar;
+    // Föregående år följer med för jämförelsetalen i resultat- och balansräkningen.
+    var fgId = Object.keys(data.ar).find(function (id) { return data.ar[id].slut === laggTillDagar(ar.start, -1); });
+    if (fgId) ut.ar[fgId] = Object.assign({}, data.ar[fgId], { underlag: [], bankrader: [] });
+    (ar.underlag || []).forEach(function (u) { ut.filer[u.id] = 'Underlag/' + underlagSokvag(arId, u); });
+    return ut;
+  }
+
+  function lasRevisionspaket(d) {
+    if (!d || d.format !== PAKETFORMAT || !d.ar || !d.ar[d.arId]) throw BokforingsFel('Filen är inget revisionspaket från Föreningsbokföring.');
+    var fel = [];
+    Object.keys(d.ar).forEach(function (id) { valideraAr(d.ar[id]).forEach(function (x) { fel.push(id + ': ' + x); }); });
+    if (fel.length) throw BokforingsFel('Revisionspaketet är skadat: ' + fel.slice(0, 3).join(' '));
+    return { forening: d.forening || {}, ar: d.ar, aktivt: d.arId, filer: d.filer || {}, skapad: d.skapad || '', version: d.version || '' };
+  }
+
   // ---------- Avförande och kvitton ----------
 
   // Avför en medlem (utträde eller enligt stadgarna) och tar bort personuppgifterna.
@@ -2901,6 +2942,8 @@ var VERSIONER = [
     kvittorader: kvittorader,
     nastaKvittonummer: nastaKvittonummer,
     registreraKvitto: registreraKvitto,
+    revisionspaketData: revisionspaketData,
+    lasRevisionspaket: lasRevisionspaket,
     namnNyckel: namnNyckel,
     visningsnamn: visningsnamn,
     terminIText: terminIText,
@@ -2952,6 +2995,9 @@ var VERSIONER = [
   var valdTermin = null;
   var avgiftUtkast = {};
   var excelForhand = null;
+  // Ett öppnat revisionspaket: allt finns bara i minnet och inget sparas i webbläsaren.
+  var revision = null;
+  var paketStatus = null;
   var oppenVer = null;
   var valtKonto = '1930';
   var meddelande = null;
@@ -2990,6 +3036,7 @@ var VERSIONER = [
 
   // Sparar registret i webbläsaren och, om det har ändrats, i OneDrive en kort stund senare.
   function sparaRegister() {
+    if (revision) return false;
     var rs = JSON.stringify(store.medlemsregister);
     if (rs === senastRegJson) return false;
     senastRegJson = rs;
@@ -3004,12 +3051,14 @@ var VERSIONER = [
   }
 
   function sparaLokalt() {
+    if (revision) return;
     try { localStorage.setItem(LAGRING, JSON.stringify(bokforingsdata())); }
     catch (e) { visa('Kunde inte spara i webbläsaren. Exportera en säkerhetskopia under År och arkiv.', true); }
   }
 
   // Sparar i webbläsaren och, när appen är kopplad till OneDrive, även där en kort stund senare.
   function spara() {
+    if (revision) return;
     sparaLokalt();
     sparaRegister();
     if (odAnslutet() && !lasLage()) {
@@ -3097,12 +3146,21 @@ var VERSIONER = [
     });
   }
   function sparaFil(id, blob, namn) { return dbAnrop('readwrite', function (s) { return s.put({ blob: blob, namn: namn }, id); }); }
+  // Ett underlag ur det öppnade revisionspaketet.
+  async function filIPaket(id) {
+    var vag = revision.filer[id];
+    var f = vag && revision.zip.file(vag);
+    if (!f) return null;
+    var blob = await f.async('blob');
+    return { blob: new Blob([blob], { type: filtyp(vag) }) };
+  }
+
   function hamtaFil(id) { return dbAnrop('readonly', function (s) { return s.get(id); }); }
   function taBortFil(id) { return dbAnrop('readwrite', function (s) { return s.delete(id); }); }
 
   function visaFil(id) {
     var fonster = window.open('', '_blank');
-    hamtaFil(id).then(function (rec) {
+    (revision ? filIPaket(id) : hamtaFil(id)).then(function (rec) {
       if (rec) return rec;
       return hamtaFilFranOneDrive(id);
     }).then(function (rec) {
@@ -3224,6 +3282,7 @@ var VERSIONER = [
   var STANDARD_KLIENTER = { 'karmadonkey.github.io': '0c0a38fc-1bb6-47a2-b690-e9e749dfb800' };
   var QR_URL = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
   var JSPDF_URL = 'https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js';
+  var JSZIP_URL = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
   var XLSX_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
   var HTML2CANVAS_URL = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
   var NYCKEL_ANDRAD = 'forening-bokforing:claude-nyckel-andrad';
@@ -3236,8 +3295,8 @@ var VERSIONER = [
     if (!od.clientId && STANDARD_KLIENTER[location.host]) od.clientId = STANDARD_KLIENTER[location.host];
   }
   function sparaOd() { try { localStorage.setItem(OD_NYCKEL, JSON.stringify(od)); } catch (e) { /* tomt */ } }
-  function odAnslutet() { return !!(od.clientId && od.refreshToken && od.mapp); }
-  function lasLage() { return odAnslutet() && od.lage === 'lasare'; }
+  function odAnslutet() { return !revision && !!(od.clientId && od.refreshToken && od.mapp); }
+  function lasLage() { return !!revision || (odAnslutet() && od.lage === 'lasare'); }
   function omdirigering() { return location.origin + location.pathname; }
 
   function sattStatus(text, fel) {
@@ -3438,7 +3497,11 @@ var VERSIONER = [
     sokvag = sokvag.replace(/^\/+|\/+$/g, '');
     if (!sokvag) throw new Error('Skriv sökvägen till mappen, t.ex. Föreningen/Bokföring.');
     var post = await graf('/me/drive/root:/' + enc(sokvag), { tillat: [404] });
-    if (post === 404) throw new Error('Hittar ingen mapp som heter ' + sokvag + ' i din OneDrive. Kontrollera stavningen.');
+    if (post === 404) {
+      if (!window.confirm('Det finns ingen mapp ' + sokvag + ' i din OneDrive. Skapa den?')) throw new Error('Hittar ingen mapp som heter ' + sokvag + ' i din OneDrive. Kontrollera stavningen.');
+      await skapaSokvag(sokvag);
+      post = await graf('/me/drive/root:/' + enc(sokvag));
+    }
     if (!post.folder) throw new Error(sokvag + ' är en fil, inte en mapp.');
     var driveId = post.parentReference.driveId;
     // Äldre upplägg: bokföringsfilen ligger direkt i mappen. Annars används (och skapas) appens undermappar.
@@ -3775,6 +3838,7 @@ var VERSIONER = [
   }
 
   async function hamtaFilFranOneDrive(id) {
+    if (revision) return null;
     if (!odAnslutet()) return null;
     var u = null;
     Object.keys(store.ar).some(function (arId) { u = (store.ar[arId].underlag || []).find(function (x) { return x.id === id; }) || null; return !!u; });
@@ -4274,6 +4338,21 @@ var VERSIONER = [
   // Fakturor, kvitton och årsmöteshandlingar ritas som riktiga PDF-filer (A4, sökbar text) med jsPDF.
 
   var jspdfLaddas = null;
+  var jszipLaddas = null;
+  function laddaJsZip() {
+    if (window.JSZip) return Promise.resolve(window.JSZip);
+    if (!jszipLaddas) {
+      jszipLaddas = new Promise(function (ok, fel) {
+        var sk = document.createElement('script');
+        sk.src = JSZIP_URL;
+        sk.onload = function () { ok(window.JSZip); };
+        sk.onerror = function () { jszipLaddas = null; fel(new Error('Verktyget för zip-filer kunde inte laddas. Kontrollera internetanslutningen.')); };
+        document.head.appendChild(sk);
+      });
+    }
+    return jszipLaddas;
+  }
+
   var xlsxLaddas = null;
   function laddaXlsx() {
     if (window.XLSX) return Promise.resolve(window.XLSX);
@@ -4875,6 +4954,10 @@ var VERSIONER = [
     return html + '<span data-pdf-status="' + esc(nyckel + (bildnyckel ? ',' + bildnyckel : '')) + '" class="faint">Skapar filer…</span>';
   }
 
+  function filtyp(namn) {
+    return /\.jpe?g$/i.test(namn) ? 'image/jpeg' : /\.png$/i.test(namn) ? 'image/png' : /\.zip$/i.test(namn) ? 'application/zip' : /\.se$/i.test(namn) ? 'text/plain' : 'application/pdf';
+  }
+
   function delaEllerLaddaNer(nyckel, dela) {
     var c = pdfCache[nyckel];
     if (!c || c.status !== 'klar') return;
@@ -4882,7 +4965,7 @@ var VERSIONER = [
     var namn = nyckel.split('|')[1];
     if (dela) {
       // Bara filen, utan titel eller text: då tar Mail, Messenger och WhatsApp emot den som en bilaga.
-      var typ = /\.jpg$/.test(namn) ? 'image/jpeg' : 'application/pdf';
+      var typ = filtyp(namn);
       var fil = new File([c.blob], namn, { type: typ, lastModified: Date.now() });
       if (!navigator.canShare || !navigator.canShare({ files: [fil] })) {
         visa('Den här webbläsaren kan inte dela filer.' + (arIos() ? ' Öppna appen i Safari och försök igen.' : ' Använd Ladda ner.'), true);
@@ -4896,7 +4979,7 @@ var VERSIONER = [
       });
       return;
     }
-    laddaNer(namn, c.blob, /\.jpg$/.test(namn) ? 'image/jpeg' : 'application/pdf');
+    laddaNer(namn, c.blob, filtyp(namn));
   }
 
   // Förhandsvisningar av A4-sidor skalas så att hela sidan syns, även på telefonen.
@@ -4995,7 +5078,7 @@ var VERSIONER = [
     renderArvaljare();
     var nav = document.getElementById('nav');
     var main = document.getElementById('main');
-    var msg = konfliktBanner() + regKonfliktBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
+    var msg = revisionBanner() + konfliktBanner() + regKonfliktBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
     if (!ar) {
       nav.innerHTML = '';
       main.innerHTML = msg + (vy === 'om' ? '<p><button class="btn btn-secondary btn-small" data-vy="inlasning">Tillbaka</button></p>' + vyOm() : vyStart());
@@ -5077,7 +5160,9 @@ var VERSIONER = [
       snabb = '<p class="muted" style="margin-bottom:0">Du är inloggad, men appen hittade ingen sparad mapp för ditt konto. Välj föreningens mapp, så hämtas bokföringen.</p>' +
         vyOneDrive() + '<h2>Ny förening</h2>';
     }
-    return snabb + '<div class="card"><h2 style="margin-top:0">Kom igång</h2>' +
+    var revisor = '<div class="card"><h2 style="margin-top:0">Är du revisor?</h2><p>Har du fått ett revisionspaket (en zip-fil) från föreningen kan du öppna det här. Du behöver inget konto, och inget sparas.</p>' +
+      '<button class="btn btn-secondary" data-action="oppna-paket">Öppna revisionspaket</button></div>';
+    return revisor + snabb + '<div class="card"><h2 style="margin-top:0">Kom igång</h2>' +
       '<p>Skapa föreningens första räkenskapsår, eller läs in en säkerhetskopia.</p>' +
       '<div class="grid2">' +
       '<div><label for="forNamn">Föreningens namn</label><input id="forNamn" value="' + esc(store.forening.namn) + '"></div>' +
@@ -5800,6 +5885,7 @@ var VERSIONER = [
       '<button class="btn btn-secondary btn-small" data-action="od-byt-mapp">Byt mapp</button>' +
       '<button class="btn btn-secondary btn-small" data-action="od-logga-ut">Logga ut</button></div>';
     if (!lasLage()) {
+      html += vyDelning();
       html += '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="od-qr-enhet">Lägg till en enhet</button>' +
         '<button class="btn btn-secondary btn-small" data-action="od-qr-revisor">Bjud in revisor</button></div>';
     }
@@ -5841,10 +5927,11 @@ var VERSIONER = [
   }
 
   function vyArkiv(ar) {
+    if (revision) return vyRevisionInfo();
     if (lasLage()) return vyOneDrive();
     var varningar = ar.grovkopia ? [] : K.kontroller(ar);
     var arLast = ar.lastTom === ar.slut;
-    var html = vyOneDrive() + vyExcelHistorik();
+    var html = vyOneDrive() + vyRevisionspaket(ar) + vyExcelHistorik();
     if (ar.grovkopia) return html + vyArkivRest(ar);
     html += '<h2>Kontroller</h2><div class="card">' + (varningar.length
       ? '<ul>' + varningar.map(function (w) { return '<li>' + esc(w.meddelande) + '</li>'; }).join('') + '</ul>'
@@ -5889,6 +5976,140 @@ var VERSIONER = [
     return html;
   }
 
+
+  // ---------- Revisionspaket och delning med revisorn ----------
+
+  async function skapaRevisionspaket(arId) {
+    var JSZip = await laddaJsZip();
+    var zip = new JSZip();
+    var ar = store.ar[arId];
+    var namn = K.arNamn(ar);
+    var data = K.revisionspaketData(bokforingsdata(), arId, { skapad: idag(), version: VERSIONER[0].version });
+    var steg = function (t) { paketStatus = t; var el = document.getElementById('paketStatus'); if (el) el.textContent = t; };
+    zip.file('bokforing.json', JSON.stringify(data));
+    var saknas = [];
+    for (var i = 0; i < RAPPORTER.length; i++) {
+      steg('Skapar ' + RAPPORTER[i][1].toLowerCase() + '…');
+      zip.file('Rapporter/' + K.sakertNamn(RAPPORTTITLAR[RAPPORTER[i][0]] + ' ' + namn.replace('/', '-') + '.pdf'), await skapaRapportPdf(ar, RAPPORTER[i][0]));
+    }
+    if (!ar.grovkopia) {
+      try { zip.file('Rapporter/' + arsmoteFilnamn(ar), await skapaArsmotePdf(ar)); } catch (e) { /* årsmöteshandlingarna är frivilliga */ }
+      zip.file(K.sakertNamn('Bokföring ' + namn.replace('/', '-') + '.se'), K.tillCp437(K.sieExport(ar, { forening: store.forening, genererad: idag() })));
+    }
+    var lista = ar.underlag || [];
+    for (var j = 0; j < lista.length; j++) {
+      steg('Hämtar underlag ' + (j + 1) + ' av ' + lista.length + '…');
+      var rec = await hamtaFil(lista[j].id).catch(function () { return null; });
+      if (!rec) rec = await hamtaFilFranOneDrive(lista[j].id).catch(function () { return null; });
+      if (rec) zip.file(data.filer[lista[j].id], rec.blob); else saknas.push(lista[j].filnamn);
+    }
+    if (logoUrl) { try { zip.file('logotyp', await (await fetch(logoUrl)).blob()); } catch (e) { /* frivilligt */ } }
+    var adress = omdirigering();
+    zip.file('Läs mig.txt', [
+      'Revisionspaket för ' + (store.forening.namn || 'föreningen') + ', räkenskapsår ' + namn + '.',
+      'Skapat ' + idag() + ' med Föreningsbokföring ' + VERSIONER[0].version + '.',
+      '',
+      'Så öppnar du paketet (inget konto behövs, och inget sparas):',
+      '1. Gå till ' + adress,
+      '2. Tryck på "Öppna revisionspaket" och välj den här zip-filen.',
+      '3. Läs verifikationer, huvudbok och rapporter, och öppna underlagen genom att trycka på dem.',
+      '',
+      'Rapporterna finns också som PDF i mappen Rapporter, och underlagen i mappen Underlag.',
+      ar.grovkopia ? '' : 'Filen med ändelsen .se är bokföringen i SIE-format, för den som har ett eget redovisningsprogram.',
+      saknas.length ? '\nUnderlag som saknas i paketet: ' + saknas.join(', ') : ''
+    ].join('\r\n'));
+    steg('Packar…');
+    var blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    paketStatus = null;
+    return { blob: blob, saknas: saknas };
+  }
+
+  function vyRevisionspaket(ar) {
+    var html = '<h2 id="revisionspaket">Revisionspaket</h2><div class="card"><p style="margin-top:0">Allt revisorn behöver för ' + esc(K.arNamn(ar)) + ' i en zip-fil: verifikationer, underlag, rapporter som PDF' + (ar.grovkopia ? '' : ' och SIE-fil') + '. ' +
+      'Revisorn behöver inget konto: paketet öppnas i appen på ' + esc(omdirigering()) + ' med knappen Öppna revisionspaket, och inget sparas där. Medlemsregistret följer inte med.</p>';
+    if (odNu.paket && odNu.paket.arId === store.aktivt) {
+      html += '<div class="row">' + pdfKnappar(odNu.paket.nyckel, 'ladda-ner-pdf') + '</div>' +
+        (odNu.paket.saknas.length ? '<p class="fel">Underlag som saknas i paketet: ' + esc(odNu.paket.saknas.join(', ')) + '</p>' : '');
+    } else {
+      html += '<div class="row"><button class="btn btn-secondary" data-action="skapa-paket"' + (paketStatus ? ' disabled' : '') + '>Skapa revisionspaket för ' + esc(K.arNamn(ar)) + '</button>' +
+        '<span id="paketStatus" class="faint">' + esc(paketStatus || '') + '</span></div>';
+    }
+    return html + '</div>';
+  }
+
+  function vyRevisionInfo() {
+    return '<div class="card"><h2 style="margin-top:0">Revisionspaket</h2><p>Du läser ett revisionspaket för <strong>' + esc(store.forening.namn || '') + '</strong>, skapat ' + esc(revision.skapad) + '. ' +
+      'Allt är endast läsning, och inget sparas i den här webbläsaren. Stänger du sidan behöver du öppna zip-filen igen.</p>' +
+      '<div class="row"><button class="btn btn-secondary" data-action="stang-paket">Stäng paketet</button></div></div>';
+  }
+
+  function revisionBanner() {
+    if (!revision) return '';
+    return '<div class="card" style="border-left:4px solid var(--guld)"><strong>Revisionspaket</strong> · ' + esc(store.forening.namn || '') + ' · skapat ' + esc(revision.skapad) +
+      '. Endast läsning, inget sparas. <button class="tag knapp-tag" data-action="stang-paket">Stäng paketet</button></div>';
+  }
+
+  function oppnaPaket() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.zip,application/zip';
+    input.onchange = async function () {
+      var fil = input.files[0];
+      if (!fil) return;
+      try {
+        var JSZip = await laddaJsZip();
+        var zip = await JSZip.loadAsync(fil);
+        var j = zip.file('bokforing.json');
+        if (!j) throw new Error('Zip-filen är inget revisionspaket från Föreningsbokföring.');
+        var p = K.lasRevisionspaket(JSON.parse(await j.async('string')));
+        revision = { zip: zip, filer: p.filer, skapad: p.skapad, version: p.version };
+        clearTimeout(odNu.timer);
+        store = { format: 1, forening: p.forening, ar: p.ar, aktivt: p.aktivt, regler: [], motpartsregler: [], medlemsregister: K.tomtRegister() };
+        LISTNYCKLAR.forEach(function (k) { store[k] = []; });
+        var logo = zip.file('logotyp');
+        logoUrl = logo ? URL.createObjectURL(await logo.async('blob')) : null;
+        vy = 'rapporter';
+        visa('Revisionspaketet är öppnat.');
+      } catch (err) { visa(err.fel ? err.fel.join(' ') : 'Paketet kunde inte öppnas: ' + err.message, true); }
+    };
+    input.click();
+  }
+
+  // Delning av mappen Bokföring och underlag med revisorn, via Microsoft. Revisorn loggar in med sitt Microsoft-konto.
+  async function delaMedRevisor(epost) {
+    epost = String(epost || '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(epost)) throw new Error('Skriv revisorns e-postadress.');
+    await graf('/drives/' + od.mapp.driveId + '/items/' + od.mapp.id + '/invite', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipients: [{ email: epost }], roles: ['read'], requireSignIn: true, sendInvitation: true,
+        message: 'Du har fått läsbehörighet till bokföringen för ' + (store.forening.namn || 'föreningen') + '. Öppna den i appen med den här länken och logga in med ditt Microsoft-konto: ' + inbjudningslank()
+      })
+    });
+    await hamtaDelningar();
+  }
+
+  async function hamtaDelningar() {
+    var data = await graf('/drives/' + od.mapp.driveId + '/items/' + od.mapp.id + '/permissions');
+    odNu.delningar = (data.value || []).filter(function (p) { return (p.roles || []).indexOf('owner') < 0; }).map(function (p) {
+      var vem = (p.invitation && p.invitation.email) || (p.grantedToV2 && p.grantedToV2.user && (p.grantedToV2.user.email || p.grantedToV2.user.displayName)) ||
+        (p.grantedTo && p.grantedTo.user && p.grantedTo.user.displayName) || (p.link ? 'Länk' + (p.link.scope === 'anonymous' ? ' för vem som helst' : '') : 'Okänd');
+      return { id: p.id, vem: vem, roller: (p.roles || []).join(', '), lank: !!p.link };
+    });
+  }
+
+  function vyDelning() {
+    var html = '<h3>Revisorn</h3><p class="faint" style="margin-top:0">Dela ' + (od.rot ? 'mappen <strong>' + esc(DATAMAPP) + '</strong>' : 'bokföringsmappen') + ' med revisorn, med läsbehörighet. Microsoft skickar ett mejl med en länk till appen, och revisorn loggar in med sitt Microsoft-konto (gratis att skaffa med vilken e-postadress som helst). ' +
+      'Medlemsregistret delas inte. Har revisorn inget konto: skapa ett revisionspaket i stället.</p>' +
+      (od.rot ? '' : '<p class="fel">Bokföringen ligger direkt i ' + esc(od.mapp.sokvag || od.mapp.namn) + '. Delar du den mappen kommer allt i den med, till exempel Excel-filer. Flytta appens filer till en egen mapp först.</p>') +
+      '<div class="row"><input id="revisorEpost" type="email" placeholder="revisorns e-postadress" style="max-width:320px"><button class="btn btn-small" data-action="od-dela">Dela och skicka inbjudan</button></div>';
+    if (odNu.delningar) {
+      html += odNu.delningar.length ? '<ul style="margin:8px 0">' + odNu.delningar.map(function (d) {
+        return '<li>' + esc(d.vem) + ' <span class="faint">(' + esc(d.roller === 'read' ? 'läsa' : d.roller) + ')</span> <button class="tag knapp-tag" data-action="od-sluta-dela" data-id="' + esc(d.id) + '">Ta bort</button></li>';
+      }).join('') + '</ul>' : '<p class="faint">Mappen är inte delad med någon.</p>';
+    } else html += '<div class="row" style="margin-top:6px"><button class="btn btn-secondary btn-small" data-action="od-visa-delningar">Visa vem som har tillgång</button></div>';
+    return html;
+  }
 
   // ---------- Tidigare år från Excel ----------
 
@@ -6427,7 +6648,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport]');
@@ -6690,6 +6911,33 @@ var VERSIONER = [
     },
     'rensa-logg': function () { logg = []; render(); },
     'visa-fil': function (t) { visaFil(t.dataset.id); },
+    'skapa-paket': function () {
+      var arId = store.aktivt;
+      paketStatus = 'Skapar revisionspaketet…';
+      render();
+      skapaRevisionspaket(arId).then(function (res) {
+        var namn = K.sakertNamn('Revisionspaket ' + (store.forening.namn ? store.forening.namn + ' ' : '') + K.arNamn(store.ar[arId]).replace('/', '-') + '.zip');
+        var nyckel = 'paket-' + arId + '-' + Date.now().toString(36) + '|' + namn;
+        pdfCache[nyckel] = { status: 'klar', blob: res.blob };
+        odNu.paket = { arId: arId, nyckel: nyckel, saknas: res.saknas };
+        visa('Revisionspaketet är klart (' + Math.round(res.blob.size / 1024) + ' kB). Dela eller ladda ner det nedan.');
+        setTimeout(function () { var el = document.getElementById('revisionspaket'); if (el) el.scrollIntoView(); }, 0);
+      }).catch(function (err) { paketStatus = null; visa('Revisionspaketet kunde inte skapas: ' + err.message, true); });
+    },
+    'oppna-paket': function () { oppnaPaket(); },
+    'stang-paket': function () { location.reload(); },
+    'od-dela': function () {
+      var epost = varde('revisorEpost');
+      sattStatus('Delar…');
+      delaMedRevisor(epost).then(function () { sattStatus('Synkad med OneDrive'); visa('Mappen är delad med ' + epost + '. Microsoft skickar ett mejl med inbjudan.'); })
+        .catch(function (err) { sattStatus(''); visa('Delningen misslyckades: ' + err.message, true); });
+    },
+    'od-visa-delningar': function () { hamtaDelningar().then(render).catch(function (err) { visa(err.message, true); }); },
+    'od-sluta-dela': function (t) {
+      if (!window.confirm('Ta bort åtkomsten? Personen kan då inte längre läsa bokföringen.')) return;
+      graf('/drives/' + od.mapp.driveId + '/items/' + od.mapp.id + '/permissions/' + encodeURIComponent(t.dataset.id), { method: 'DELETE' })
+        .then(hamtaDelningar).then(function () { visa('Åtkomsten är borttagen.'); }).catch(function (err) { visa(err.message, true); });
+    },
     'excel-valj': function () {
       var input = document.createElement('input');
       input.type = 'file';
