@@ -127,6 +127,7 @@
   .bankrad .belopp { font-weight: 600; white-space: nowrap; font-size: 16px; }
   .knapp-tag { background: none; cursor: pointer; font: inherit; font-size: 11px; }
   .tag.ok { color: var(--good); border-color: var(--good); }
+  .trolig { background: var(--surface-2); border-radius: 8px; padding: 6px 10px; justify-content: space-between; }
   .logg { margin: 8px 0; padding-left: 18px; font-size: 14px; }
   a { color: var(--lank); }
   footer { margin-top: 40px; background: var(--kol); color: var(--kol-text); text-align: center; padding: 22px 16px; font-size: 13px; }
@@ -204,6 +205,14 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.2', datum: '2026-11-21',
+    nyheter: [
+      'Underlag kan bifogas i efterhand till en verifikation som redan är bokförd, antingen som en ny fil eller genom att koppla ett väntande underlag.',
+      'Bankkort visar en trolig faktura även när beloppet skiljer lite (t.ex. öresavrundning), när betalningen kom sent eller när fakturan ligger i ett annat räkenskapsår. Ett tryck på Koppla räcker.',
+      'Verifikationer med bifogat underlag räknas inte längre som "underlag saknas".'
+    ]
+  },
   {
     version: '1.1', datum: '2026-11-21',
     nyheter: [
@@ -826,7 +835,7 @@ var VERSIONER = [
 
     ar.verifikationer.forEach(function (v) {
       if (rattade[v.nr]) return;
-      if ((!v.underlag || v.underlag.length === 0) && !v.underlagKommentar) {
+      if (underlagForVerifikation(ar, v.nr).length === 0 && !v.underlagKommentar) {
         varningar.push({ typ: 'saknarUnderlag', nr: v.nr, meddelande: 'Verifikation ' + v.nr + ' (' + v.text + ') saknar underlag.' });
       }
     });
@@ -1231,7 +1240,12 @@ var VERSIONER = [
     var rader = [{ konto: bankrad.konto, belopp: bankrad.belopp }];
     var text, kalla, kommentar = '';
     var summaUnderlag = us.reduce(function (s, u) { return s + bankbelopp(u); }, 0);
-    if (us.length && summaUnderlag === bankrad.belopp) {
+    if (us.length === 1 && opt && opt.ungefar && summaUnderlag !== bankrad.belopp) {
+      // Ett underlag som troligen hör hit men vars belopp skiljer: banken avgör beloppet.
+      rader.push({ konto: giltigt(us[0].foreslagetKonto) || giltigt(regelKonto), belopp: -bankrad.belopp });
+      text = [us[0].motpart, us[0].beskrivning].filter(Boolean).join(': ');
+      kalla = 'underlag';
+    } else if (us.length && summaUnderlag === bankrad.belopp) {
       us.forEach(function (u) { rader.push({ konto: giltigt(u.foreslagetKonto) || giltigt(regelKonto), belopp: -bankbelopp(u) }); });
       text = us.length === 1
         ? [us[0].motpart, us[0].beskrivning].filter(Boolean).join(': ')
@@ -1290,6 +1304,77 @@ var VERSIONER = [
     }
     us.forEach(function (u, i) { nyttAr = andraUnderlag(nyttAr, u.id, { verifikation: nr, arkivnamn: namn[i] }); });
     return { ar: nyttAr, verifikation: res.verifikation };
+  }
+
+  // ---------- Underlag i efterhand ----------
+
+  // Kopplar ett underlag som väntar till en verifikation som redan är bokförd.
+  // Beloppen i verifikationen ändras inte; underlaget kompletterar den.
+  function kopplaUnderlagTillVerifikation(ar, nr, underlagId, tid) {
+    var v = hittaVerifikation(ar, nr);
+    if (!v) throw BokforingsFel('Verifikation ' + nr + ' finns inte.');
+    var u = (ar.underlag || []).find(function (x) { return x.id === underlagId; });
+    if (!u) throw BokforingsFel('Underlaget finns inte.');
+    if (u.verifikation != null) throw BokforingsFel('Underlaget hör redan till verifikation ' + u.verifikation + '.');
+    return andraUnderlag(ar, underlagId, { verifikation: nr, arkivnamn: arkivnamn(nr, u.filnamn), bifogad: tid || null });
+  }
+
+  function bifogaNyttUnderlag(ar, nr, fil) {
+    if (!hittaVerifikation(ar, nr)) throw BokforingsFel('Verifikation ' + nr + ' finns inte.');
+    if (!fil || !fil.id || !fil.filnamn) throw BokforingsFel('Filen saknas.');
+    return laggTillUnderlag(ar, {
+      id: fil.id, filnamn: fil.filnamn, dokumenttyp: 'bifogat', motpart: '', belopp: 0, riktning: 'utgift',
+      verifikation: nr, arkivnamn: arkivnamn(nr, fil.filnamn), bifogad: fil.tid || null
+    });
+  }
+
+  // Alla underlag som hör till en verifikation: de som angavs vid bokföringen och de som bifogats efteråt.
+  function underlagForVerifikation(ar, nr) {
+    var v = hittaVerifikation(ar, nr);
+    if (!v) return [];
+    var namn = (v.underlag || []).slice();
+    (ar.underlag || []).forEach(function (u) {
+      if (u.verifikation === nr && u.arkivnamn && namn.indexOf(u.arkivnamn) < 0) namn.push(u.arkivnamn);
+    });
+    return namn;
+  }
+
+  function flyttaUnderlag(franAr, tillAr, id) {
+    var u = (franAr.underlag || []).find(function (x) { return x.id === id; });
+    if (!u) throw BokforingsFel('Underlaget finns inte.');
+    if (u.verifikation != null) throw BokforingsFel('Ett bokfört underlag kan inte flyttas till ett annat år.');
+    return {
+      fran: Object.assign({}, franAr, { underlag: franAr.underlag.filter(function (x) { return x.id !== id; }) }),
+      till: Object.assign({}, tillAr, { underlag: (tillAr.underlag || []).concat([Object.assign({}, u)]) })
+    };
+  }
+
+  // Underlag som troligen hör till en bankrad trots att belopp eller datum inte stämmer exakt,
+  // t.ex. öresavrundning, sen betalning eller en faktura som ligger i ett annat räkenskapsår.
+  // extra: väntande underlag från andra år, som [{ arId, underlag }].
+  function trolligaUnderlag(ar, bankrad, extra) {
+    var kandidater = oppnaUnderlag(ar).map(function (u) { return { arId: null, u: u }; })
+      .concat((extra || []).filter(function (x) { return arBetalbartUnderlag(x.underlag) && x.underlag.verifikation == null; })
+        .map(function (x) { return { arId: x.arId, u: x.underlag }; }));
+    var ut = [];
+    kandidater.forEach(function (k) {
+      var u = k.u;
+      if ((bankbelopp(u) < 0) !== (bankrad.belopp < 0)) return;
+      var skillnad = Math.abs(bankbelopp(u) - bankrad.belopp);
+      var grans = Math.max(5000, Math.round(Math.abs(bankrad.belopp) * 0.02));
+      if (skillnad > grans) return;
+      var mal = u.forfallodatum || u.datum;
+      var dagar = mal ? dagarMellan(mal, bankrad.datum) : 0;
+      if (dagar < -30 || dagar > 150) return;
+      var exakt = skillnad === 0 && inomFonster(u, bankrad) && !k.arId;
+      if (exakt) return;
+      var skal = [];
+      if (skillnad) skal.push('beloppet skiljer ' + formatBelopp(skillnad) + ' kr');
+      if (!inomFonster(u, bankrad)) skal.push('betalningen ligger ' + Math.abs(dagar) + ' dagar ' + (dagar < 0 ? 'före' : 'efter') + ' ' + (u.forfallodatum ? 'förfallodagen' : 'fakturadatum'));
+      if (k.arId) skal.push('underlaget ligger i räkenskapsåret ' + k.arId);
+      ut.push({ underlag: u, arId: k.arId, skal: skal, poang: skillnad * 10 + Math.abs(dagar) - (matchpoang(u, bankrad) >= 500 ? 100000 : 0) });
+    });
+    return ut.sort(function (a, b) { return a.poang - b.poang; }).slice(0, 3);
   }
 
   // ---------- Tolkning av underlag med Claude ----------
@@ -1666,6 +1751,11 @@ var VERSIONER = [
     kontoAttLara: kontoAttLara,
     tillampaMotpartsregler: tillampaMotpartsregler,
     kopplaBokforda: kopplaBokforda,
+    kopplaUnderlagTillVerifikation: kopplaUnderlagTillVerifikation,
+    bifogaNyttUnderlag: bifogaNyttUnderlag,
+    underlagForVerifikation: underlagForVerifikation,
+    flyttaUnderlag: flyttaUnderlag,
+    trolligaUnderlag: trolligaUnderlag,
     nastaDokumentnummer: nastaDokumentnummer,
     dokumentRadTotal: dokumentRadTotal,
     dokumentSumma: dokumentSumma,
@@ -2523,9 +2613,19 @@ var VERSIONER = [
     render();
   }
 
+  // Väntande underlag i andra räkenskapsår, t.ex. en decemberfaktura som betalas i januari.
+  function andraArsUnderlag() {
+    var ut = [];
+    Object.keys(store.ar).forEach(function (id) {
+      if (id === store.aktivt) return;
+      K.oppnaUnderlag(store.ar[id]).forEach(function (u) { ut.push({ arId: id, underlag: u }); });
+    });
+    return ut;
+  }
+
   function forslagMedVal(ar, rad) {
     var val = inkorgVal[rad.id] || {};
-    var f = K.forslagForBankrad(ar, rad, store.regler, val.underlagIds ? { underlagIds: val.underlagIds } : undefined);
+    var f = K.forslagForBankrad(ar, rad, store.regler, val.underlagIds ? { underlagIds: val.underlagIds, ungefar: !!val.ungefar } : undefined);
     if (val.konto != null && f.rader.length === 2) f.rader[1].konto = val.konto.trim();
     if (val.text != null) f.text = val.text;
     // Inbetalningar och bankavgifter syns i bankutdraget och behöver inget eget underlag.
@@ -2882,7 +2982,16 @@ var VERSIONER = [
           valbara.map(function (u) { return '<option value="' + esc(u.id) + '">' + esc((u.datum || '') + ' ' + (u.motpart || u.filnamn)) + ' ' + kr(u.belopp) + '</option>'; }).join('') + '</select>';
       }
       if (inkorgVal[r.id] && inkorgVal[r.id].underlagIds) html += '<button class="btn btn-secondary btn-small" data-action="aterstall" data-id="' + esc(r.id) + '">Återställ</button>';
-      html += '</div><div class="row" style="margin-top:8px">' +
+      html += '</div>';
+      if (f.kalla !== 'underlag') {
+        K.trolligaUnderlag(ar, r, andraArsUnderlag()).forEach(function (t) {
+          var u = t.underlag;
+          html += '<div class="row trolig" style="margin-top:8px"><span><strong>Trolig ' + (u.riktning === 'intakt' ? 'inbetalning' : 'faktura') + ':</strong> ' +
+            esc(u.motpart || u.filnamn) + ', ' + kr(u.belopp) + ' kr' + (u.datum ? ', ' + esc(u.datum) : '') + ' <span class="faint">(' + esc(t.skal.join(', ')) + ')</span></span>' +
+            '<button class="btn btn-secondary btn-small" data-action="koppla-trolig" data-id="' + esc(r.id) + '" data-u="' + esc(u.id) + '" data-ar="' + esc(t.arId || '') + '">Koppla</button></div>';
+        });
+      }
+      html += '<div class="row" style="margin-top:8px">' +
         '<button class="btn btn-small" data-action="bokfor-rad" data-id="' + esc(r.id) + '"' + (f.komplett ? '' : ' disabled') + '>Bokför</button>' +
         '<button class="btn btn-secondary btn-small" data-action="redigera-rad" data-id="' + esc(r.id) + '">Dela upp eller ändra…</button></div></div>';
     });
@@ -2952,11 +3061,19 @@ var VERSIONER = [
         '<td class="num">' + (r.belopp > 0 ? kr(r.belopp) : '') + '</td><td class="num">' + (r.belopp < 0 ? kr(-r.belopp) : '') + '</td></tr>';
     });
     html += '</tbody></table>';
-    if (v.underlag && v.underlag.length) {
-      html += '<p class="faint">Underlag: ' + v.underlag.map(function (namn) {
+    var allaUnderlag = K.underlagForVerifikation(ar, v.nr);
+    if (allaUnderlag.length) {
+      html += '<p class="faint">Underlag: ' + allaUnderlag.map(function (namn) {
         var u = (ar.underlag || []).find(function (x) { return x.arkivnamn === namn; });
-        return u ? '<button class="tag knapp-tag" data-action="visa-fil" data-id="' + esc(u.id) + '">' + esc(namn) + '</button>' : esc(namn);
+        return (u ? '<button class="tag knapp-tag" data-action="visa-fil" data-id="' + esc(u.id) + '">' + esc(namn) + '</button>' : esc(namn)) +
+          (u && u.bifogad ? ' <span class="faint">(bifogat ' + esc(u.bifogad.slice(0, 10)) + ')</span>' : '');
       }).join(' ') + '</p>';
+    }
+    if (!lasLage() && v.rattar == null) {
+      var vantande = K.oppnaUnderlag(ar);
+      html += '<div class="row ej-utskrift" style="margin:6px 0"><button class="btn btn-secondary btn-small" data-action="bifoga-fil" data-nr="' + v.nr + '">Bifoga fil</button>' +
+        (vantande.length ? '<select data-action-change="koppla-ver" data-nr="' + v.nr + '" style="width:auto;max-width:100%"><option value="">Koppla väntande underlag…</option>' +
+          vantande.map(function (u) { return '<option value="' + esc(u.id) + '">' + esc((u.datum || '') + ' ' + (u.motpart || u.filnamn)) + ' ' + kr(u.belopp) + '</option>'; }).join('') + '</select>' : '') + '</div>';
     }
     if (v.underlagKommentar) html += '<p class="faint">' + esc(v.underlagKommentar) + '</p>';
     if (v.registrerad) html += '<p class="faint">Registrerad ' + esc(v.registrerad.slice(0, 16).replace('T', ' ')) + '</p>';
@@ -3504,11 +3621,19 @@ var VERSIONER = [
         spara();
       } catch (err) { visa(err.message, true); }
     }
+    if (t.dataset.actionChange === 'koppla-ver' && t.value) {
+      if (lasLage()) { visa('Endast läsning.', true); return; }
+      try {
+        setAktivt(K.kopplaUnderlagTillVerifikation(aktivt(), Number(t.dataset.nr), t.value, new Date().toISOString()));
+        visa('Underlaget är kopplat till verifikation ' + t.dataset.nr + '.');
+      } catch (err) { visa(err.fel ? err.fel.join(' ') : err.message, true); }
+      return;
+    }
     if (t.dataset.actionChange === 'koppla' && t.value) {
       var ar = aktivt();
       var rad = ar.bankrader.find(function (r) { return r.id === t.dataset.id; });
       var nu = forslagMedVal(ar, rad).underlagIds;
-      inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { underlagIds: nu.concat([t.value]) });
+      inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { underlagIds: nu.concat([t.value]), ungefar: true });
       render();
     }
     if (t.dataset.underlag) {
@@ -3660,6 +3785,32 @@ var VERSIONER = [
     'ib-fran-bank': function (t) {
       setAktivt(K.sattIngaendeSaldo(aktivt(), '1930', Number(t.dataset.belopp)));
       visa('Ingående balans på 1930 är satt till ' + kr(Number(t.dataset.belopp)) + ' kr.');
+    },
+    'koppla-trolig': function (t) {
+      if (t.dataset.ar) {
+        var res = K.flyttaUnderlag(store.ar[t.dataset.ar], aktivt(), t.dataset.u);
+        store.ar[t.dataset.ar] = res.fran;
+        setAktivt(res.till);
+      }
+      inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { underlagIds: [t.dataset.u], ungefar: true });
+      render();
+    },
+    'bifoga-fil': function (t) {
+      var nr = Number(t.dataset.nr);
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/pdf,image/*,.html,.txt,.xlsx,.xls,.csv,.eml,.msg';
+      input.onchange = function () {
+        var fil = input.files[0];
+        if (!fil) return;
+        var id = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        var filnamn = sakertFilnamn(fil.name);
+        sparaFil(id, fil, filnamn).then(function () {
+          setAktivt(K.bifogaNyttUnderlag(aktivt(), nr, { id: id, filnamn: filnamn, tid: new Date().toISOString() }));
+          visa(filnamn + ' är bifogad till verifikation ' + nr + '.');
+        }).catch(function (err) { visa(err.message, true); });
+      };
+      input.click();
     },
     'aterstall': function (t) { delete inkorgVal[t.dataset.id]; render(); },
     'bokfor-underlag': function (t) {
