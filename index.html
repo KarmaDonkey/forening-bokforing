@@ -206,6 +206,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.3', datum: '2026-11-21',
+    nyheter: [
+      'Ny rapport "Bankavstämning": bankens saldo mot bokfört saldo månad för månad.',
+      'Listor över det som inte stämmer: banktransaktioner som inte är bokförda, bokföringar på bankkontot som saknas i kontoutdraget, och ställen där kontoutdragets saldo inte går ihop.'
+    ]
+  },
+  {
     version: '1.2', datum: '2026-11-21',
     nyheter: [
       'Underlag kan bifogas i efterhand till en verifikation som redan är bokförd, antingen som en ny fil eller genom att koppla ett väntande underlag.',
@@ -1111,6 +1118,54 @@ var VERSIONER = [
     };
   }
 
+  // Avstämning månad för månad: bankens sista saldo i varje månad mot bokfört saldo samma dag.
+  function bankavstamningPerManad(ar, konto) {
+    konto = konto || '1930';
+    var rader = (ar.bankrader || []).filter(function (r) { return r.konto === konto; });
+    var ut = [];
+    var m = ar.start.slice(0, 7);
+    var sista = ar.slut.slice(0, 7);
+    while (m <= sista) {
+      var iManad = rader.filter(function (r) { return r.datum.slice(0, 7) === m; });
+      var medSaldo = iManad.filter(function (r) { return r.saldo != null; });
+      var post = { manad: m, antal: iManad.length, obokforda: iManad.filter(function (r) { return r.verifikation == null; }).length };
+      if (medSaldo.length) {
+        var s = medSaldo[medSaldo.length - 1];
+        post.datum = s.datum;
+        post.bankSaldo = s.saldo;
+        post.bokfortSaldo = saldon(ar, { tom: s.datum })[konto] || 0;
+        post.skillnad = post.bokfortSaldo - s.saldo;
+      }
+      ut.push(post);
+      var d = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 1));
+      m = d.toISOString().slice(0, 7);
+    }
+    return ut;
+  }
+
+  // Det som inte stämmer mellan bokföringen och kontoutdraget.
+  function bankavvikelser(ar, konto) {
+    konto = konto || '1930';
+    var rader = (ar.bankrader || []).filter(function (r) { return r.konto === konto; });
+    var lankade = {}, rattade = {};
+    rader.forEach(function (r) { if (r.verifikation != null) lankade[r.verifikation] = true; });
+    ar.verifikationer.forEach(function (v) { if (v.rattar != null) { rattade[v.rattar] = true; rattade[v.nr] = true; } });
+    var fran = rader.length ? rader[0].datum : null;
+    var till = rader.length ? rader[rader.length - 1].datum : null;
+    var utanBank = !rader.length ? [] : ar.verifikationer.filter(function (v) {
+      if (lankade[v.nr] || rattade[v.nr] || v.datum < fran || v.datum > till) return false;
+      return v.rader.reduce(function (s, r) { return r.konto === konto ? s + r.belopp : s; }, 0) !== 0;
+    }).map(function (v) {
+      return { nr: v.nr, datum: v.datum, text: v.text, belopp: v.rader.reduce(function (s, r) { return r.konto === konto ? s + r.belopp : s; }, 0) };
+    });
+    return {
+      obokforda: rader.filter(function (r) { return r.verifikation == null; }),
+      utanBank: utanBank,
+      saldofel: kontrolleraSaldon(rader),
+      period: fran ? { fran: fran, till: till } : null
+    };
+  }
+
   // ---------- Regler: banktext -> konto ----------
 
   function riktningFor(belopp) { return belopp < 0 ? 'ut' : 'in'; }
@@ -1734,6 +1789,8 @@ var VERSIONER = [
     importeraBankrader: importeraBankrader,
     oppnaBankrader: oppnaBankrader,
     bankavstamning: bankavstamning,
+    bankavstamningPerManad: bankavstamningPerManad,
+    bankavvikelser: bankavvikelser,
     hittaRegel: hittaRegel,
     larRegel: larRegel,
     laggTillUnderlag: laggTillUnderlag,
@@ -3023,7 +3080,7 @@ var VERSIONER = [
           (foregaende(ar) ? '<p class="faint">Ingående balans kommer från föregående år. Kontrollera bokföringen där.</p>'
             : '<button class="btn btn-secondary btn-small" data-action="ib-fran-bank" data-belopp="' + avst.ingaendeEnligtBank + '">Sätt ingående balans till ' + kr(avst.ingaendeEnligtBank) + ' kr (mot 2067 Balanserad vinst eller förlust)</button>');
       }
-      html += '</div>';
+      html += '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="till-bankavstamning">Visa avstämning per månad</button></div></div>';
     }
     return html;
   }
@@ -3190,7 +3247,7 @@ var VERSIONER = [
     return html;
   }
 
-  var RAPPORTER = [['rr', 'Resultaträkning'], ['br', 'Balansräkning'], ['sb', 'Saldobalans'], ['gb', 'Grundbok']];
+  var RAPPORTER = [['rr', 'Resultaträkning'], ['br', 'Balansräkning'], ['sb', 'Saldobalans'], ['gb', 'Grundbok'], ['bank', 'Bankavstämning']];
 
   function vyRapporter(ar) {
     var html = '<div class="row ej-utskrift" style="margin-top:12px">' + RAPPORTER.map(function (r) {
@@ -3202,6 +3259,7 @@ var VERSIONER = [
     if (rapportVy === 'br') html += rapportBR(ar);
     if (rapportVy === 'sb') html += rapportSB(ar);
     if (rapportVy === 'gb') html += rapportGB(ar);
+    if (rapportVy === 'bank') html += rapportBank(ar);
     return html + '</div>';
   }
 
@@ -3261,6 +3319,40 @@ var VERSIONER = [
       });
     });
     return html + '</tbody></table></div>';
+  }
+
+  var MANADER = ['januari', 'februari', 'mars', 'april', 'maj', 'juni', 'juli', 'augusti', 'september', 'oktober', 'november', 'december'];
+  function manadsnamn(m) { return MANADER[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4); }
+
+  function rapportBank(ar) {
+    var html = '<h2 style="margin-top:0">Bankavstämning, konto 1930</h2>';
+    if (!(ar.bankrader || []).length) return html + '<p class="muted">Inga kontoutdrag är inlästa för året ännu. Läs in ett kontoutdrag under Läs in.</p>';
+    var sistaMedData = (ar.bankrader || []).reduce(function (m, r) { return r.datum.slice(0, 7) > m ? r.datum.slice(0, 7) : m; }, '');
+    var manader = K.bankavstamningPerManad(ar).filter(function (m) { return m.manad <= sistaMedData; });
+    html += '<div class="scroll"><table><thead><tr><th>Månad</th><th class="num">Banken</th><th class="num">Bokfört</th><th class="num">Skillnad</th><th>Status</th></tr></thead><tbody>';
+    manader.forEach(function (m) {
+      var status;
+      if (!m.antal) status = '<span class="faint">inga transaktioner inlästa</span>';
+      else if (m.skillnad == null) status = '<span class="faint">' + antal(m.antal, 'transaktion', 'transaktioner') + ', utan saldo</span>';
+      else if (m.skillnad === 0 && !m.obokforda) status = '<span class="ok">stämmer</span>';
+      else if (m.obokforda) status = '<span class="fel">' + antal(m.obokforda, 'transaktion', 'transaktioner') + ' ej bokförd' + (m.obokforda === 1 ? '' : 'a') + '</span>';
+      else status = '<span class="fel">skiljer</span>';
+      html += '<tr><td>' + esc(manadsnamn(m.manad)) + (m.datum ? '<div class="faint">saldo ' + esc(m.datum) + '</div>' : '') + '</td>' +
+        '<td class="num">' + (m.bankSaldo != null ? kr(m.bankSaldo) : '') + '</td><td class="num">' + (m.bokfortSaldo != null ? kr(m.bokfortSaldo) : '') + '</td>' +
+        '<td class="num' + (m.skillnad ? ' fel' : '') + '">' + (m.skillnad != null ? kr(m.skillnad) : '') + '</td><td>' + status + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    var a = K.bankavvikelser(ar);
+    html += '<h3>Banktransaktioner som inte är bokförda (' + a.obokforda.length + ')</h3>';
+    html += a.obokforda.length ? '<ul>' + a.obokforda.map(function (r) { return '<li>' + esc(r.datum) + ' ' + esc(r.text) + ' <strong>' + kr(r.belopp) + '</strong></li>'; }).join('') + '</ul>' +
+      (lasLage() ? '' : '<button class="btn btn-secondary btn-small ej-utskrift" data-vy="inlasning">Bokför under Läs in</button>') : '<p class="ok">Alla är bokförda.</p>';
+    html += '<h3>Bokfört på 1930 men saknas i kontoutdraget (' + a.utanBank.length + ')</h3>';
+    html += a.utanBank.length ? '<p class="faint" style="margin:0">Verifikationer mellan ' + esc(a.period.fran) + ' och ' + esc(a.period.till) + ' som rör bankkontot men inte motsvaras av någon rad i kontoutdraget. Kan vara felbokningar, dubbletter eller transaktioner som saknas i det inlästa utdraget.</p><ul>' +
+      a.utanBank.map(function (v) { return '<li><button class="tag knapp-tag" data-action="oppna-ver" data-nr="' + v.nr + '">Ver ' + v.nr + '</button> ' + esc(v.datum) + ' ' + esc(v.text) + ' <strong>' + kr(v.belopp) + '</strong></li>'; }).join('') + '</ul>'
+      : '<p class="ok">Inga.</p>';
+    html += '<h3>Saldot går inte ihop i kontoutdraget (' + a.saldofel.length + ')</h3>';
+    html += a.saldofel.length ? '<p class="faint" style="margin:0">Kan betyda att en rad saknas i det inlästa utdraget.</p><ul>' + a.saldofel.map(function (f) { return '<li>' + esc(f) + '</li>'; }).join('') + '</ul>' : '<p class="ok">Inga.</p>';
+    return html;
   }
 
   function vyKontoplan(ar) {
@@ -3551,7 +3643,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning'];
+  var LASBARA = ['oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport]');
@@ -3786,6 +3878,8 @@ var VERSIONER = [
       setAktivt(K.sattIngaendeSaldo(aktivt(), '1930', Number(t.dataset.belopp)));
       visa('Ingående balans på 1930 är satt till ' + kr(Number(t.dataset.belopp)) + ' kr.');
     },
+    'oppna-ver': function (t) { vy = 'verifikationer'; oppenVer = Number(t.dataset.nr); meddelande = null; render(); },
+    'till-bankavstamning': function () { vy = 'rapporter'; rapportVy = 'bank'; meddelande = null; render(); },
     'koppla-trolig': function (t) {
       if (t.dataset.ar) {
         var res = K.flyttaUnderlag(store.ar[t.dataset.ar], aktivt(), t.dataset.u);
