@@ -303,6 +303,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.10', datum: '2026-11-21',
+    nyheter: [
+      'Ny knapp "Dela som bild" på fakturor och kvitton. Den skapar en skarp bild av A4-sidan som går att skicka i Messenger, WhatsApp och andra chattappar som inte tar emot PDF.',
+      'På datorn finns "Ladda ner som bild".'
+    ]
+  },
+  {
     version: '1.9', datum: '2026-11-21',
     nyheter: [
       'Dela skickar nu bara PDF-filen, utan titel och text, så att Mail, Messenger och WhatsApp tar emot den som en bilaga.',
@@ -2315,6 +2322,7 @@ var VERSIONER = [
   var STANDARD_KLIENTER = { 'karmadonkey.github.io': '0c0a38fc-1bb6-47a2-b690-e9e749dfb800' };
   var QR_URL = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
   var JSPDF_URL = 'https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js';
+  var HTML2CANVAS_URL = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
   var NYCKEL_ANDRAD = 'forening-bokforing:claude-nyckel-andrad';
   var INBJUDAN = 'forening-bokforing:inbjudan';
   var od = { clientId: null, refreshToken: null, konto: null, mapp: null, lage: null, eTag: null, senast: null, smutsig: false };
@@ -3379,6 +3387,43 @@ var VERSIONER = [
     return doc.output('blob');
   }
 
+  // ---------- Bild av fakturor och kvitton (för chattappar som inte tar emot PDF) ----------
+
+  var html2canvasLaddas = null;
+  function laddaHtml2canvas() {
+    if (window.html2canvas) return Promise.resolve(window.html2canvas);
+    if (!html2canvasLaddas) {
+      html2canvasLaddas = new Promise(function (ok, fel) {
+        var sk = document.createElement('script');
+        sk.src = HTML2CANVAS_URL;
+        sk.onload = function () { ok(window.html2canvas); };
+        sk.onerror = function () { html2canvasLaddas = null; fel(new Error('Bildverktyget kunde inte laddas. Kontrollera internetanslutningen.')); };
+        document.head.appendChild(sk);
+      });
+    }
+    return html2canvasLaddas;
+  }
+
+  // Ritar A4-sidan utanför skärmen och gör den till en JPEG i dubbel upplösning.
+  async function skapaDokumentBild(d) {
+    var h2c = await laddaHtml2canvas();
+    var ram = document.createElement('div');
+    ram.style.cssText = 'position:fixed;left:-10000px;top:0;width:800px;background:#fff;';
+    ram.innerHTML = dokumentInnehall(d);
+    document.body.appendChild(ram);
+    try {
+      if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      var canvas = await h2c(ram.querySelector('.dok'), { scale: 2, backgroundColor: '#ffffff', logging: false });
+      return await new Promise(function (ok, fel) {
+        canvas.toBlob(function (b) { if (b) ok(b); else fel(new Error('Bilden kunde inte skapas.')); }, 'image/jpeg', 0.9);
+      });
+    } finally {
+      ram.remove();
+    }
+  }
+
+  function dokumentBildnamn(d) { return K.sakertNamn((d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + d.nummer + '.jpg'); }
+
   function dokumentFilnamn(d) { return K.sakertNamn((d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + d.nummer + '.pdf'); }
   function arsmoteFilnamn(ar) { return K.sakertNamn('Ekonomisk redovisning ' + K.arNamn(ar).replace('/', '-') + '.pdf'); }
 
@@ -3398,9 +3443,12 @@ var VERSIONER = [
       if (c && c.status === 'fel') b.title = c.fel;
     });
     document.querySelectorAll('[data-pdf-status]').forEach(function (el) {
-      var c = pdfCache[el.dataset.pdfStatus];
-      el.textContent = !c || c.status === 'skapas' ? 'Skapar PDF…' : c.status === 'fel' ? c.fel : '';
-      el.className = 'faint' + (c && c.status === 'fel' ? ' fel' : '');
+      var nycklar = el.dataset.pdfStatus.split(',');
+      var cs = nycklar.map(function (n) { return pdfCache[n]; });
+      var skapas = cs.some(function (c) { return !c || c.status === 'skapas'; });
+      var fel = cs.filter(function (c) { return c && c.status === 'fel'; }).map(function (c) { return c.fel; });
+      el.textContent = skapas ? 'Skapar filer…' : fel.join(' ');
+      el.className = 'faint' + (fel.length ? ' fel' : '');
     });
   }
   function kanDela() {
@@ -3409,19 +3457,24 @@ var VERSIONER = [
   function arIosHemskarm() { return window.navigator.standalone === true; }
   function arIos() { return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
 
-  function pdfKnappar(nyckel, utskriftsAction, id) {
+  function pdfKnappar(nyckel, utskriftsAction, id, bildnyckel) {
     var html = '';
+    var bild = function (klass) {
+      if (!bildnyckel) return '';
+      return kanDela() ? '<button class="btn btn-secondary btn-small" data-action="dela-pdf" data-pdf="' + esc(bildnyckel) + '" disabled>Dela som bild</button>'
+        : '<button class="btn btn-secondary btn-small" data-action="ladda-ner-pdf" data-pdf="' + esc(bildnyckel) + '" disabled>Ladda ner som bild</button>';
+    };
     if (arIos()) {
       // På iPhone och iPad går allt via delningsmenyn: skicka, Spara i Filer eller Skriv ut.
       html += kanDela()
-        ? '<button class="btn btn-small" data-action="dela-pdf" data-pdf="' + esc(nyckel) + '" disabled>Dela, spara eller skriv ut</button>'
+        ? '<button class="btn btn-small" data-action="dela-pdf" data-pdf="' + esc(nyckel) + '" disabled>Dela, spara eller skriv ut</button>' + bild()
         : '<span class="fel">Den här webbläsaren kan inte dela filer. Öppna appen i Safari och försök igen.</span>';
     } else {
       if (kanDela()) html += '<button class="btn btn-small" data-action="dela-pdf" data-pdf="' + esc(nyckel) + '" disabled>Dela / skicka</button>';
-      html += '<button class="btn ' + (kanDela() ? 'btn-secondary ' : '') + 'btn-small" data-action="ladda-ner-pdf" data-pdf="' + esc(nyckel) + '" disabled>Ladda ner PDF</button>';
+      html += '<button class="btn ' + (kanDela() ? 'btn-secondary ' : '') + 'btn-small" data-action="ladda-ner-pdf" data-pdf="' + esc(nyckel) + '" disabled>Ladda ner PDF</button>' + bild();
     }
     if (!arIosHemskarm()) html += '<button class="btn btn-secondary btn-small" data-action="' + utskriftsAction + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>Skriv ut</button>';
-    return html + '<span data-pdf-status="' + esc(nyckel) + '" class="faint">Skapar PDF…</span>';
+    return html + '<span data-pdf-status="' + esc(nyckel + (bildnyckel ? ',' + bildnyckel : '')) + '" class="faint">Skapar filer…</span>';
   }
 
   function delaEllerLaddaNer(nyckel, dela) {
@@ -3430,9 +3483,10 @@ var VERSIONER = [
     var namn = nyckel.split('|')[1];
     if (dela) {
       // Bara filen, utan titel eller text: då tar Mail, Messenger och WhatsApp emot den som en bilaga.
-      var fil = new File([c.blob], namn, { type: 'application/pdf', lastModified: Date.now() });
+      var typ = /\.jpg$/.test(namn) ? 'image/jpeg' : 'application/pdf';
+      var fil = new File([c.blob], namn, { type: typ, lastModified: Date.now() });
       if (!navigator.canShare || !navigator.canShare({ files: [fil] })) {
-        visa('Den här webbläsaren kan inte dela PDF-filer.' + (arIos() ? ' Öppna appen i Safari och försök igen.' : ' Använd Ladda ner PDF.'), true);
+        visa('Den här webbläsaren kan inte dela filer.' + (arIos() ? ' Öppna appen i Safari och försök igen.' : ' Använd Ladda ner.'), true);
         return;
       }
       navigator.share({ files: [fil] }).catch(function (err) {
@@ -3443,7 +3497,7 @@ var VERSIONER = [
       });
       return;
     }
-    laddaNer(namn, c.blob, 'application/pdf');
+    laddaNer(namn, c.blob, /\.jpg$/.test(namn) ? 'image/jpeg' : 'application/pdf');
   }
 
   // Förhandsvisningar av A4-sidor skalas så att hela sidan syns, även på telefonen.
@@ -4144,10 +4198,13 @@ var VERSIONER = [
       var d = hitta('dokument', dokVisas);
       if (d) {
         var nyckel = 'dok-' + d.id + '|' + dokumentFilnamn(d);
+        var bildnyckel = 'bild-' + d.id + '|' + dokumentBildnamn(d);
         forbered(nyckel, function () { return skapaDokumentPdf(d); });
+        forbered(bildnyckel, function () { return skapaDokumentBild(d); });
         html += '<div class="card"><div class="row" style="justify-content:space-between"><strong>' + (d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + esc(d.nummer) + '</strong>' +
           '<button class="btn btn-secondary btn-small" data-action="stang-dok">Stäng</button></div>' +
-          '<div class="row" style="margin-top:8px">' + pdfKnappar(nyckel, 'skriv-ut-dok', d.id) + '</div>' +
+          '<div class="row" style="margin-top:8px">' + pdfKnappar(nyckel, 'skriv-ut-dok', d.id, bildnyckel) + '</div>' +
+          (kanDela() ? '<p class="faint" style="margin:6px 0 0">Bilden passar chattappar som Messenger och WhatsApp. PDF:en passar mejl och arkiv.</p>' : '') +
           '<div class="forhandsvisning" style="margin-top:8px">' + dokumentInnehall(d) + '</div></div>';
       }
     }
