@@ -163,6 +163,11 @@
   .avgift-panel { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; margin-top: 8px; }
   .avgift-panel table td { border-bottom: 0; padding: 3px 4px; vertical-align: middle; }
   .avgift-panel input.num { width: 110px; text-align: right; }
+  .hjalp-knapp { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--ink-faint); background: none; color: var(--ink-soft); font: 700 13px/1 system-ui, sans-serif; cursor: pointer; vertical-align: middle; padding: 0; margin-left: 4px; }
+  .hjalp-knapp:hover { border-color: var(--ink); color: var(--ink); }
+  .hjalp-bakgrund { position: fixed; inset: 0; background: rgba(0, 0, 0, .25); z-index: 50; }
+  .hjalp-panel { position: fixed; z-index: 51; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; margin: 0; box-shadow: 0 10px 40px rgba(0, 0, 0, .25); }
+  @media print { .hjalp-knapp, .hjalp-panel, .hjalp-bakgrund { display: none !important; } }
   .lank-text { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--lank); cursor: pointer; text-align: left; }
   .info-falt { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; width: 100%; max-width: 30em; }
   .nyckeltal { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 10px 0; }
@@ -310,6 +315,13 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.21', datum: '2026-11-21',
+    nyheter: [
+      'Frågetecken vid de viktigaste rubrikerna förklarar vad något är, varför man gör det och hur man gör i appen, med länkar till Bokföringsnämnden, Skatteverket och Riksidrottsförbundet. De kan döljas under Om appen.',
+      'Kassörens årshjul och en guide för revisorn under Om appen. Guiden finns också i revisionspaketet och visas för den som har rollen revisor.'
+    ]
+  },
   {
     version: '1.20', datum: '2026-11-21',
     nyheter: [
@@ -5352,7 +5364,7 @@ var VERSIONER = [
     var msg = ovningsBanner() + revisionBanner() + skrivrattBanner() + konfliktBanner() + regKonfliktBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
     if (!ar) {
       nav.innerHTML = '';
-      main.innerHTML = msg + (vy === 'om' ? '<p><button class="btn btn-secondary btn-small" data-vy="inlasning">Tillbaka</button></p>' + vyOm() : vyStart());
+      main.innerHTML = msg + (vy === 'om' ? '<p><button class="btn btn-secondary btn-small" data-vy="inlasning">Tillbaka</button></p>' + vyOm() : vyStart()) + hjalpPanel();
       ritaQr();
       return;
     }
@@ -5380,7 +5392,7 @@ var VERSIONER = [
       arkiv: vyArkiv,
       om: vyOm
     }[vy](ar);
-    main.innerHTML = msg + (vy !== 'medlemmar' && vy !== 'bokslut' ? grovkopiaRuta(ar) : '') + html;
+    main.innerHTML = msg + (vy !== 'medlemmar' && vy !== 'bokslut' ? grovkopiaRuta(ar) : '') + html + hjalpPanel();
     ritaQr();
     skalaForhandsvisningar();
     uppdateraPdfKnappar();
@@ -5477,7 +5489,7 @@ var VERSIONER = [
     var kompletta = forslag.filter(function (x) { return x.f.komplett; }).length;
     var oppnaU = K.oppnaUnderlag(ar);
     html += '<datalist id="kontolista">' + ar.kontoplan.map(function (k) { return '<option value="' + k.nr + '">' + esc(k.namn) + '</option>'; }).join('') + '</datalist>';
-    html += '<div class="row" style="justify-content:space-between"><h2>Banktransaktioner att bokföra (' + rader.length + ')</h2>' +
+    html += '<div class="row" style="justify-content:space-between"><h2>Banktransaktioner att bokföra (' + rader.length + ')' + hjalp('bokforing') + '</h2>' +
       (kompletta ? '<button class="btn" data-action="bokfor-alla">Bokför alla med förslag (' + kompletta + ')</button>' : '') + '</div>';
     if (!rader.length) html += '<p class="muted">Inga obokförda banktransaktioner. Läs in ett kontoutdrag för att komma igång.</p>';
     forslag.forEach(function (x) {
@@ -5522,7 +5534,7 @@ var VERSIONER = [
         '<button class="btn btn-secondary btn-small" data-action="redigera-rad" data-id="' + esc(r.id) + '">Dela upp eller ändra…</button></div></div>';
     });
 
-    html += '<h2>Underlag som väntar på betalning (' + oppnaU.length + ')</h2>';
+    html += '<h2>Underlag som väntar på betalning (' + oppnaU.length + ')' + hjalp('underlag') + '</h2>';
     if (!oppnaU.length) html += '<p class="muted">Inga. Fakturor och kvitton kopplas automatiskt när betalningen syns på banken.</p>';
     else {
       html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Datum</th><th>Underlag</th><th class="num">Belopp</th><th>Konto</th><th></th></tr></thead><tbody>';
@@ -5542,10 +5554,10 @@ var VERSIONER = [
 
     var avst = K.bankavstamning(ar);
     if (avst) {
-      html += '<h2>Avstämning mot banken</h2><div class="card">Banken ' + esc(avst.datum) + ': <strong>' + kr(avst.bankSaldo) + '</strong> · Bokfört: <strong>' + kr(avst.bokfortSaldo) + '</strong> · ' +
+      html += '<h2>Avstämning mot banken' + hjalp('bankavstamning') + '</h2><div class="card">Banken ' + esc(avst.datum) + ': <strong>' + kr(avst.bankSaldo) + '</strong> · Bokfört: <strong>' + kr(avst.bokfortSaldo) + '</strong> · ' +
         (avst.skillnad === 0 ? '<span class="ok">stämmer</span>' : '<span class="fel">skillnad ' + kr(avst.skillnad) + '</span>' + (avst.obokforda ? ' <span class="faint">(' + antal(avst.obokforda, 'transaktion är', 'transaktioner är') + ' inte bokförda ännu)</span>' : ''));
       if (avst.ingaendeEnligtBank != null && avst.ingaendeEnligtBank !== avst.ingaendeBokfort && !ar.lastTom) {
-        html += '<p class="fel">Ingående balans på ' + avst.konto + ' är ' + kr(avst.ingaendeBokfort) + ' kr, men enligt banken fanns ' + kr(avst.ingaendeEnligtBank) + ' kr före årets första transaktion.</p>' +
+        html += '<p class="fel">' + hjalp('ingaendebalans') + ' Ingående balans på ' + avst.konto + ' är ' + kr(avst.ingaendeBokfort) + ' kr, men enligt banken fanns ' + kr(avst.ingaendeEnligtBank) + ' kr före årets första transaktion.</p>' +
           (foregaende(ar) && !foregaende(ar).grovkopia ? '<p class="faint">Ingående balans kommer från föregående år. Kontrollera bokföringen där.</p>'
             : '<button class="btn btn-secondary btn-small" data-action="ib-fran-bank" data-belopp="' + avst.ingaendeEnligtBank + '">Sätt ingående balans till ' + kr(avst.ingaendeEnligtBank) + ' kr (mot 2067 Balanserad vinst eller förlust)</button>');
       }
@@ -5608,19 +5620,19 @@ var VERSIONER = [
     if (kvitton.length) html += '<p class="faint">Kvitto: ' + kvitton.map(function (d) { return '<button class="tag knapp-tag" data-action="visa-dok" data-id="' + esc(d.id) + '">' + esc(d.nummer) + '</button>'; }).join(' ') + '</p>';
     var inbetalning = v.rattar == null && !rattning && v.rader.some(function (r) { return Number(r.konto) >= 1900 && Number(r.konto) <= 1999 && r.belopp > 0; });
     if (inbetalning) html += '<button class="btn btn-secondary btn-small ej-utskrift" data-action="kvitto-fran-ver" data-nr="' + v.nr + '">Skriv kvitto</button> ';
-    if (kanRattas) html += '<button class="btn btn-secondary btn-small ej-utskrift" data-action="ratta" data-nr="' + v.nr + '">Rätta (bokför omvänd verifikation)</button>';
+    if (kanRattas) html += '<button class="btn btn-secondary btn-small ej-utskrift" data-action="ratta" data-nr="' + v.nr + '">Rätta (bokför omvänd verifikation)</button>' + hjalp('rattelse');
     return html + '</td></tr>';
   }
 
   function vyNy(ar) {
     if (!utkast.datum) utkast.datum = standardDatum(ar);
-    var html = '<h2>Ny verifikation</h2><div class="card">' + kopplingsInfo(ar) +
+    var html = '<h2>Ny verifikation' + hjalp('verifikation') + '</h2><div class="card">' + kopplingsInfo(ar) +
       (ar.lastTom ? '<p class="faint" style="margin-top:0">Perioden till och med ' + esc(ar.lastTom) + ' är låst. Den kan låsas upp under År och arkiv.</p>' : '') +
       '<div class="grid2"><div><label for="uDatum">Datum</label><input id="uDatum" type="date" data-u="datum" value="' + esc(utkast.datum) + '" min="' + ar.start + '" max="' + ar.slut + '"></div>' +
       '<div><label for="uText">Text</label><input id="uText" data-u="text" value="' + esc(utkast.text) + '" placeholder="t.ex. Lokalhyra oktober"></div>' +
       '<div><label for="uUnderlag">Underlag (filnamn, separera med komma)</label><input id="uUnderlag" data-u="underlag" value="' + esc(utkast.underlag) + '"></div>' +
       '<div><label for="uKommentar">Eller: varför inget underlag behövs</label><input id="uKommentar" data-u="underlagKommentar" value="' + esc(utkast.underlagKommentar) + '" placeholder="t.ex. Swish, syns i bankutdraget"></div></div>' +
-      '<h3>Rader</h3><div class="scroll"><table class="rader-tabell"><thead><tr><th>Konto</th><th class="num">Debet</th><th class="num">Kredit</th><th></th></tr></thead><tbody>';
+      '<h3>Rader' + hjalp('debetkredit') + '</h3><div class="scroll"><table class="rader-tabell"><thead><tr><th>Konto</th><th class="num">Debet</th><th class="num">Kredit</th><th></th></tr></thead><tbody>';
     utkast.rader.forEach(function (r, i) {
       html += '<tr><td><input list="kontolista" data-rad="' + i + '" data-f="konto" value="' + esc(r.konto) + '" placeholder="Konto" aria-label="Konto rad ' + (i + 1) + '"><div class="faint" id="kontonamn-' + i + '"></div></td>' +
         '<td><input class="num" inputmode="decimal" data-rad="' + i + '" data-f="debet" value="' + esc(r.debet) + '" aria-label="Debet rad ' + (i + 1) + '"></td>' +
@@ -5737,7 +5749,7 @@ var VERSIONER = [
     var rr = K.resultatrakning(ar, { foregaende: fg });
     var jmf = !!fg;
     var kol = function (r, f) { return jmf ? '<td class="num">' + kr(r[f]) + '</td>' : ''; };
-    var html = '<h2 style="margin-top:0">Resultaträkning</h2><div class="scroll"><table><thead><tr><th>Konto</th><th class="num">' + esc(K.arNamn(ar)) + '</th>' +
+    var html = '<h2 style="margin-top:0">Resultaträkning' + hjalp('resultatrakning') + '</h2><div class="scroll"><table><thead><tr><th>Konto</th><th class="num">' + esc(K.arNamn(ar)) + '</th>' +
       (jmf ? '<th class="num">' + esc(K.arNamn(fg)) + '</th>' : '') + '</tr></thead><tbody>';
     rr.grupper.forEach(function (g) {
       html += '<tr><td colspan="3"><h3>' + esc(g.namn) + '</h3></td></tr>';
@@ -5750,7 +5762,7 @@ var VERSIONER = [
 
   function rapportBR(ar) {
     var br = K.balansrakning(ar);
-    var html = '<h2 style="margin-top:0">Balansräkning</h2><div class="scroll"><table><thead><tr><th>Konto</th><th class="num">Ingående</th><th class="num">Utgående</th></tr></thead><tbody>';
+    var html = '<h2 style="margin-top:0">Balansräkning' + hjalp('balansrakning') + '</h2><div class="scroll"><table><thead><tr><th>Konto</th><th class="num">Ingående</th><th class="num">Utgående</th></tr></thead><tbody>';
     var del = function (titel, d) {
       html += '<tr><td colspan="3"><h2>' + titel + '</h2></td></tr>';
       d.grupper.forEach(function (g) {
@@ -5842,7 +5854,7 @@ var VERSIONER = [
       resultat: '<button class="btn btn-small" data-action="bokfor-resultat">Bokför årets resultat</button>',
       last: '<button class="btn btn-small" data-action="las-aret">Lås året</button>'
     };
-    var html = '<h2>Bokslut ' + esc(namn) + '</h2><div class="card"><p style="margin-top:0" class="muted">Gå igenom stegen uppifrån och ner. Gröna steg är klara.</p><ol class="checklista">';
+    var html = '<h2>Bokslut ' + esc(namn) + hjalp('bokslut') + '</h2><div class="card"><p style="margin-top:0" class="muted">Gå igenom stegen uppifrån och ner. Gröna steg är klara.</p><ol class="checklista">';
     lista.forEach(function (x) {
       html += '<li class="' + (x.klar ? 'klar' : x.varning ? 'varning' : 'kvar') + '"><span class="bock" aria-hidden="true">' + (x.klar ? '✓' : x.varning ? '!' : '○') + '</span>' +
         '<div><div>' + esc(x.text) + '</div>' + (!x.klar && !lasLage() && steg[x.id] ? '<div class="row" style="margin-top:6px">' + steg[x.id] + '</div>' : '') + '</div></li>';
@@ -5943,7 +5955,7 @@ var VERSIONER = [
   }
 
   function vyKontoplan(ar) {
-    var html = '<h2>Kontoplan</h2><div class="card"><div class="grid2"><div><label for="nyttNr">Kontonummer</label><input id="nyttNr" inputmode="numeric" maxlength="4"></div>' +
+    var html = '<h2>Kontoplan' + hjalp('kontoplan') + '</h2><div class="card"><div class="grid2"><div><label for="nyttNr">Kontonummer</label><input id="nyttNr" inputmode="numeric" maxlength="4"></div>' +
       '<div><label for="nyttNamn">Namn</label><input id="nyttNamn"></div></div>' +
       '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="nytt-konto">Lägg till konto</button></div></div>' +
       '<div class="scroll"><table><thead><tr><th>Nr</th><th>Namn</th><th></th></tr></thead><tbody>';
@@ -6195,6 +6207,9 @@ var VERSIONER = [
       '<p>Ett enkelt bokföringsverktyg för små ideella föreningar. Läs in fakturor, kvitton och kontoutdrag, låt appen föreslå verifikationerna och ta fram resultaträkning, balansräkning och underlag till årsmötet.</p>' +
       '<p class="faint">' + (odAnslutet() ? 'Bokföringen och underlagen sparas i föreningens OneDrive-mapp.' : 'Bokföringen sparas i den här webbläsaren tills appen kopplas till OneDrive under År och arkiv.') + '</p>' +
       '<p class="faint">Källkoden finns på <a href="https://github.com/KarmaDonkey/forening-bokforing" target="_blank" rel="noopener">GitHub</a>.</p></div>';
+    html += '<h2>Kassörens årshjul</h2><div class="card">' + hjalpInnehall(HJALP.arshjul) + '</div>';
+    html += '<h2>För revisorn</h2><div class="card">' + hjalpInnehall(HJALP.revisorn) + '</div>';
+    html += '<h2>Förklaringar</h2><div class="card"><label style="font-weight:normal;display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="visaHjalp" style="width:auto"' + (visaHjalp() ? ' checked' : '') + '> Visa frågetecken med förklaringar vid rubrikerna</label></div>';
     html += '<h2>Vad som är nytt</h2>';
     VERSIONER.forEach(function (v) {
       html += '<div class="card"><h3 style="margin-top:0">Version ' + esc(v.version) + ' <span class="faint">· ' + esc(v.datum) + '</span></h3><ul>' +
@@ -6213,7 +6228,7 @@ var VERSIONER = [
     html += '<h2>Kontroller</h2><div class="card">' + (varningar.length
       ? '<ul>' + varningar.map(function (w) { return '<li>' + esc(w.meddelande) + '</li>'; }).join('') + '</ul>'
       : '<p class="ok">Inga anmärkningar.</p>') + '</div>';
-    html += '<h2>Låsning och årsskifte</h2><div class="card">' +
+    html += '<h2>Låsning och årsskifte' + hjalp('lasning') + '</h2><div class="card">' +
       '<p>' + (ar.lastTom ? 'Låst till och med ' + esc(ar.lastTom) + '.' : 'Inget är låst ännu.') + ' Låsta perioder kan inte ändras; fel rättas med en ny verifikation.</p>' +
       (arLast ? '' : '<div class="row"><input type="date" id="lasDatum" style="width:auto" min="' + ar.start + '" max="' + ar.slut + '" value="' + esc(forslagLasDatum(ar)) + '"><button class="btn btn-secondary" data-action="las">Lås till och med datumet</button></div>') +
       (ar.lastTom ? '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="las-upp">Lås upp…</button></div>' : '') +
@@ -6253,6 +6268,193 @@ var VERSIONER = [
     return html;
   }
 
+
+  // ---------- Förklaringar ----------
+  // Korta förklaringar bakom frågetecknen: vad det är, varför man gör det och hur man gör i appen.
+  // Länkarna går till startsidor hos officiella källor, med sökord, så att de inte slutar fungera.
+
+  var KALLOR = {
+    bfn: ['Bokföringsnämnden (bfn.se): sök på "förenklat årsbokslut" och "Vägledningen Bokföring"', 'https://www.bfn.se/'],
+    skv: ['Skatteverket (skatteverket.se): sök på "ideella föreningar"', 'https://www.skatteverket.se/'],
+    rf: ['Riksidrottsförbundet (rf.se): stöd om föreningens ekonomi, stadgar och revision', 'https://www.rf.se/']
+  };
+
+  var HJALP = {
+    bokforing: {
+      rubrik: 'Bokföring av banktransaktioner',
+      vad: 'Varje pengarörelse på föreningens konto blir en verifikation: en anteckning om vad som hände, när, hur mycket och på vilka konton.',
+      varfor: 'Bokföringen är föreningens minne. Den visar medlemmarna, styrelsen och revisorn vart pengarna tog vägen, och den är grunden för resultat- och balansräkningen till årsmötet.',
+      gor: 'Läs in kontoutdraget. Appen föreslår konto för varje rad; kontrollera förslaget, koppla underlag om det finns, och tryck Bokför. Det du väljer lär sig appen till nästa gång.',
+      las: ['bfn', 'rf']
+    },
+    underlag: {
+      rubrik: 'Underlag',
+      vad: 'Underlaget är beviset för en verifikation: en faktura, ett kvitto, ett avtal eller ett kontoutdrag.',
+      varfor: 'Med underlag kan vem som helst i efterhand se att en utbetalning var riktig. Det är det revisorn främst tittar på vid stickproven.',
+      gor: 'Läs in PDF:er eller foton av kvitton under Läs in. Appen kopplar dem till rätt banktransaktion när betalningen syns. Inbetalningar via Swish och bankavgifter behöver inget eget underlag, kontoutdraget räcker.',
+      las: ['bfn']
+    },
+    verifikation: {
+      rubrik: 'Verifikation',
+      vad: 'En verifikation har datum, en text, minst två rader med konton och belopp, och ett underlag. Den får ett löpnummer som aldrig ändras.',
+      varfor: 'Verifikationerna är själva bokföringen. Att de inte kan ändras eller tas bort gör bokföringen pålitlig: fel rättas med en ny verifikation, så att det syns vad som hänt.',
+      gor: 'De flesta verifikationer skapas automatiskt från kontoutdraget. Här skriver du en egen, till exempel för kontanter eller en rättelse.',
+      las: ['bfn']
+    },
+    debetkredit: {
+      rubrik: 'Debet och kredit',
+      vad: 'Varje verifikation påverkar minst två konton. Det som ökar en tillgång eller en kostnad är debet; det som ökar en skuld, eget kapital eller en intäkt är kredit. Summan av debet ska vara lika med summan av kredit.',
+      varfor: 'Dubbel bokföring gör att allt går ihop: pengarna på banken förklaras alltid av intäkter, kostnader, skulder och eget kapital. Går det inte ihop är något fel.',
+      gor: 'Exempel: lokalhyra 1 000 kr betald från banken. Debet 5010 Lokalhyra 1 000, kredit 1930 Företagskonto 1 000. Appen visar om raderna går ihop innan du kan bokföra.',
+      las: ['bfn']
+    },
+    kontoplan: {
+      rubrik: 'Kontoplan',
+      vad: 'Kontoplanen är listan över konton. Appen använder BAS-kontoplanen, som de flesta i Sverige följer: 1 = tillgångar, 2 = eget kapital och skulder, 3 = intäkter, 4–7 = kostnader.',
+      varfor: 'Samma konton varje år gör det lätt att jämföra åren och att läsa resultatet. Använd hellre få konton än många.',
+      gor: 'Lägg till ett konto bara när det behövs, till exempel ett eget konto för bidrag eller för ett läger som ska redovisas för sig.',
+      las: ['bfn']
+    },
+    bankavstamning: {
+      rubrik: 'Bankavstämning',
+      vad: 'Bokfört saldo på bankkontot jämförs med bankens saldo, månad för månad.',
+      varfor: 'Det är det viktigaste beviset på att bokföringen är fullständig: stämmer banken har ingen transaktion glömts eller bokförts två gånger. Revisorn börjar ofta här.',
+      gor: 'Läs in kontoutdragen och bokför alla rader. Skiljer det sig: titta på obokförda rader, dubbletter och ingående balans.',
+      las: ['rf']
+    },
+    ingaendebalans: {
+      rubrik: 'Ingående balans',
+      vad: 'Saldona på tillgångar, skulder och eget kapital den första dagen i räkenskapsåret.',
+      varfor: 'Ingående balans ska vara exakt samma som förra årets utgående balans. Annars hänger åren inte ihop, och bankavstämningen stämmer inte från början.',
+      gor: 'Appen tar den från förra årets bokslut. Första året i appen kan den sättas från bankens saldo före årets första transaktion.',
+      las: ['bfn']
+    },
+    rattelse: {
+      rubrik: 'Rättelse',
+      vad: 'En bokförd verifikation tas aldrig bort. Den rättas med en ny verifikation med omvända belopp, och sedan bokförs det rätta.',
+      varfor: 'Så syns både felet och rättelsen, och ingen kan i efterhand ändra bokföringen utan att det märks. Det är ett krav i bokföringslagen och det revisorn förväntar sig.',
+      gor: 'Tryck Rätta på verifikationen. Bokför sedan den riktiga verifikationen, gärna med samma underlag. Vill du prova först kan du använda Övningsläget.',
+      las: ['bfn']
+    },
+    resultatrakning: {
+      rubrik: 'Resultaträkning',
+      vad: 'Årets intäkter minus årets kostnader. Resultatet är överskottet eller underskottet.',
+      varfor: 'Den visar årsmötet hur föreningen har använt pengarna och om verksamheten går ihop. Jämförelsen med förra året visar förändringar.',
+      gor: 'Den räknas fram automatiskt från verifikationerna. Ta ut den som PDF till styrelsen och årsmötet.',
+      las: ['bfn', 'rf']
+    },
+    balansrakning: {
+      rubrik: 'Balansräkning',
+      vad: 'Föreningens tillgångar (till exempel pengar på banken) och hur de är finansierade (eget kapital och skulder) vid årets slut.',
+      varfor: 'Den visar föreningens ställning: hur mycket pengar som finns och vad föreningen är skyldig. Tillgångarna och eget kapital med skulder ska alltid vara lika stora.',
+      gor: 'Den räknas fram automatiskt. Kontrollera att bankkontot i balansräkningen är samma som bankens saldo på årets sista dag.',
+      las: ['bfn']
+    },
+    bokslut: {
+      rubrik: 'Bokslut',
+      vad: 'Årets avslutning: allt bokförs, banken stäms av, årets resultat förs till eget kapital och året låses.',
+      varfor: 'Bokslutet är underlaget till årsmötet och revisorn. Efter bokslutet ska ingenting ändras i året, så att det som årsmötet godkänner också är det som finns kvar.',
+      gor: 'Följ stegen i listan uppifrån och ner. Resultatdispositionen är förslaget till årsmötet om vad som ska hända med årets resultat; i en ideell förening förs det oftast bara vidare i ny räkning.',
+      las: ['bfn', 'rf']
+    },
+    lasning: {
+      rubrik: 'Låsning',
+      vad: 'En låst period kan inte ändras. Appen låser hela året vid bokslutet, men du kan också låsa till exempel varje månad.',
+      varfor: 'Det som är avstämt och redovisat ska inte ändras av misstag. Låsning gör bokföringen tillförlitlig, och varje upplåsning sparas i en logg.',
+      gor: 'Lås till och med ett datum när en månad är avstämd. Hittar du ett fel efteråt: rätta i en öppen period i stället för att låsa upp.',
+      las: ['bfn']
+    },
+    arkivkopia: {
+      rubrik: 'Arkivkopia',
+      vad: 'Ett tidigare år inläst från Excel, så att allt finns samlat. Det kan inte ändras.',
+      varfor: 'Året är redan fastställt av årsmötet. Excel-filen med underlagen är fortfarande det formella arkivet; kopian gör det lätt att jämföra och söka.',
+      gor: 'Hittar du ett fel: skriv en anteckning på arkivkopian, och rätta i det år som är öppet nu om felet påverkar saldona i dag.',
+      las: ['bfn']
+    },
+    avgifter: {
+      rubrik: 'Medlemsavgift och terminsavgift',
+      vad: 'Medlemsavgiften (årsavgiften) betalas för att vara medlem i föreningen. Terminsavgiften betalas för att träna en termin.',
+      varfor: 'Avgifterna bokförs på olika konton så att årsmötet ser hur mycket som är medlemsavgifter och hur mycket som är avgifter för verksamheten. Stadgarna avgör vem som är medlem.',
+      gor: 'Ange avgifterna och kontona här. När en inbetalning bokförs föreslår appen fördelningen.',
+      las: ['rf']
+    },
+    avforande: {
+      rubrik: 'Avförande',
+      vad: 'En medlem tas bort ur medlemsförteckningen vid utträde, eller enligt stadgarna när medlemsavgiften inte betalats på en tid.',
+      varfor: 'Föreningen ska bara spara personuppgifter så länge de behövs (GDPR). Medlemsförteckningen ska också stämma med stadgarna, till exempel inför röstlängden på årsmötet.',
+      gor: 'Granska listan, ta fram kvitton om någon behöver dem, och avför. Namnet och telefonnumren tas bort; statistiken finns kvar utan namn.',
+      las: ['rf']
+    },
+    skrivratt: {
+      rubrik: 'Roller och skrivrätt',
+      vad: 'Rollerna avgör vem som får läsa och ändra. Bara en person i taget har skrivrätten.',
+      varfor: 'När flera kan bokföra är det lätt att det blir dubbelt eller att ändringar krockar. Med en skrivrätt i taget är det alltid tydligt vem som ansvarar.',
+      gor: 'Kassören lämnar över skrivrätten till bokföraren när det behövs och tar tillbaka den. Revisorn och styrelsen läser bara.',
+      las: []
+    },
+    revisorn: {
+      rubrik: 'Revisorns uppgift',
+      vad: 'Revisorn granskar på medlemmarnas uppdrag att räkenskaperna är i ordning och att styrelsen har skött föreningen enligt stadgarna och årsmötets beslut. I en ideell förening är revisorn oftast en lekmannarevisor, en medlem utan revisorsutbildning.',
+      varfor: 'Medlemmarna ska kunna lita på att pengarna hanterats rätt. Revisorn gör inte om kassörens arbete och behöver inte kontrollera varje kvitto, utan bildar sig en uppfattning med hjälp av kontroller och stickprov.',
+      lista: [
+        'Ingående balans: är den samma som förra årets utgående balans? (Rapporter, Balansräkning)',
+        'Banken: stämmer bankkontot med bankens saldo på årets sista dag? (Rapporter, Bankavstämning)',
+        'Stickprov: välj några verifikationer, särskilt stora och ovanliga, och kontrollera att underlaget finns och att utgiften hör till föreningen. (Verifikationer)',
+        'Beslut: har större utgifter och arvoden stöd i styrelsens eller årsmötets beslut?',
+        'Rapporterna: stämmer resultat- och balansräkningen med bokföringen, och är förslaget till resultatdisposition rimligt? (Bokslut)',
+        'Revisionsberättelsen: skriv vad du har granskat, om du har anmärkningar, och om du tillstyrker att årsmötet fastställer resultat- och balansräkningen och beviljar styrelsen ansvarsfrihet.'
+      ],
+      gor: 'Ansvarsfrihet betyder att årsmötet godkänner styrelsens förvaltning för året. Har du frågor: fråga kassören tidigt, så kan det mesta redas ut före årsmötet.',
+      las: ['rf', 'bfn']
+    },
+    arshjul: {
+      rubrik: 'Kassörens årshjul',
+      vad: 'Kassörens arbete under året, i ordning.',
+      varfor: 'Lite arbete ofta är mycket lättare än allt på en gång före årsmötet, och det är lättare att minnas vad en betalning gällde när den är färsk.',
+      lista: [
+        'Löpande, gärna varje vecka: läs in fakturor och kvitton när de kommer, och betala i tid.',
+        'Varje månad: läs in kontoutdraget, bokför alla rader, kontrollera att bankavstämningen stämmer, och lås månaden.',
+        'Varje termin: koppla terminsavgifterna till medlemmarna och se vilka som inte har betalat.',
+        'Efter årets slut: gör bokslutet (stegen under Bokslut), ta fram årsmöteshandlingarna och skicka revisionspaketet eller dela bokföringen med revisorn.',
+        'Inför årsmötet: revisionsberättelsen från revisorn, resultat- och balansräkning, förslag till resultatdisposition och budget.',
+        'Efter årsmötet: skapa nästa räkenskapsår om det inte redan finns, och avför medlemmar som enligt stadgarna har lämnat föreningen.'
+      ],
+      gor: 'Appen påminner dig i bokslutslistan om det som saknas.',
+      las: ['rf', 'skv', 'bfn']
+    }
+  };
+
+  var HJALP_NYCKEL = 'forening-bokforing:visa-hjalp';
+  var hjalpOppen = null;
+  function visaHjalp() { try { return localStorage.getItem(HJALP_NYCKEL) !== '0'; } catch (e) { return true; } }
+
+  // Ett litet frågetecken bredvid en rubrik. Syns inte om förklaringarna är avstängda.
+  function hjalp(nyckel) {
+    if (!visaHjalp() || !HJALP[nyckel]) return '';
+    return ' <button type="button" class="hjalp-knapp ej-utskrift" data-action="hjalp" data-nyckel="' + nyckel + '" aria-label="Förklaring: ' + esc(HJALP[nyckel].rubrik) + '">?</button>';
+  }
+
+  function hjalpInnehall(h) {
+    return '<p><strong>Vad:</strong> ' + esc(h.vad) + '</p><p><strong>Varför:</strong> ' + esc(h.varfor) + '</p>' +
+      (h.lista ? '<ul>' + h.lista.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '') +
+      (h.gor ? '<p><strong>' + (h.lista ? 'Bra att veta' : 'Så gör du') + ':</strong> ' + esc(h.gor) + '</p>' : '') +
+      (h.las && h.las.length ? '<p class="faint" style="margin-bottom:0">Läs mer: ' + h.las.map(function (k) { return '<a href="' + KALLOR[k][1] + '" target="_blank" rel="noopener">' + esc(KALLOR[k][0]) + '</a>'; }).join(' · ') + '</p>' : '');
+  }
+
+  function hjalpPanel() {
+    var h = hjalpOppen && HJALP[hjalpOppen];
+    if (!h) return '';
+    return '<div class="hjalp-bakgrund" data-action="stang-hjalp"></div><div class="hjalp-panel card" role="dialog" aria-label="' + esc(h.rubrik) + '">' +
+      '<div class="row" style="justify-content:space-between"><h2 style="margin:0">' + esc(h.rubrik) + '</h2><button class="btn btn-secondary btn-small" data-action="stang-hjalp" aria-label="Stäng">Stäng</button></div>' +
+      hjalpInnehall(h) +
+      '<p class="faint" style="margin:10px 0 0"><button class="lank-text" style="font-weight:normal" data-action="hjalp-av">Dölj alla frågetecken</button> · de kan slås på igen under Om appen.</p></div>';
+  }
+
+  // Textversion av revisorns guide, för Läs mig-filen i revisionspaketet.
+  function revisorsguideText() {
+    var h = HJALP.revisorn;
+    return [h.rubrik.toUpperCase(), '', h.vad, '', h.varfor, '', 'Att gå igenom:'].concat(h.lista.map(function (x) { return '- ' + x; })).concat(['', h.gor, '', 'Läs mer: ' + h.las.map(function (k) { return KALLOR[k][1]; }).join(', ')]).join('\r\n');
+  }
 
   // ---------- Roller och skrivrätt i OneDrive ----------
 
@@ -6355,6 +6557,9 @@ var VERSIONER = [
   function rollnamn(r) { var x = K.ROLLER.find(function (y) { return y[0] === r; }); return x ? x[1] : r; }
 
   function skrivrattBanner() {
+    if (odAnslutet() && odNu.roller && K.harRoll(odNu.roller, mig(), 'revisor') && !K.kanFaSkrivratt(odNu.roller, mig())) {
+      return '<div class="card" style="border-left:4px solid var(--guld)">Du läser bokföringen som <strong>revisor</strong>. <button class="tag knapp-tag" data-action="hjalp" data-nyckel="revisorn">Guide för revisorn</button></div>';
+    }
     if (!odAnslutet() || !odNu.roller || kanSkriva() || od.lage === 'lasare') return '';
     var f = odNu.roller;
     return '<div class="card" style="border-left:4px solid var(--guld)"><strong>Läsläge.</strong> ' + esc(f.skrivratt || 'Ingen') + ' har skrivrätten just nu. ' +
@@ -6365,7 +6570,7 @@ var VERSIONER = [
     if (!odAnslutet() || !odNu.roller) return '';
     var f = odNu.roller, jag = mig();
     var mina = K.rollerFor(f, jag);
-    var html = '<h2 id="roller">Roller och skrivrätt</h2><div class="card">';
+    var html = '<h2 id="roller">Roller och skrivrätt' + hjalp('skrivratt') + '</h2><div class="card">';
     html += '<p style="margin-top:0">Du är inloggad som <strong>' + esc(jag) + '</strong>' + (mina.length ? ' med rollen ' + esc(mina.map(rollnamn).join(' och ')) : '') + '. ' +
       'Skrivrätten har <strong>' + esc(f.skrivratt || 'ingen') + '</strong>. Bara den som har skrivrätten kan ändra något; alla andra ser bokföringen i läsläge.</p>';
     var mottagare = f.personer.filter(function (p) { return p.epost !== f.skrivratt && K.kanFaSkrivratt(f, p.epost); });
@@ -6472,7 +6677,9 @@ var VERSIONER = [
       '',
       'Rapporterna finns också som PDF i mappen Rapporter, och underlagen i mappen Underlag.',
       ar.grovkopia ? '' : 'Filen med ändelsen .se är bokföringen i SIE-format, för den som har ett eget redovisningsprogram.',
-      saknas.length ? '\nUnderlag som saknas i paketet: ' + saknas.join(', ') : ''
+      saknas.length ? '\nUnderlag som saknas i paketet: ' + saknas.join(', ') : '',
+      '',
+      revisorsguideText()
     ].join('\r\n'));
     steg('Packar…');
     var blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
@@ -6481,7 +6688,7 @@ var VERSIONER = [
   }
 
   function vyRevisionspaket(ar) {
-    var html = '<h2 id="revisionspaket">Revisionspaket</h2><div class="card"><p style="margin-top:0">Allt revisorn behöver för ' + esc(K.arNamn(ar)) + ' i en zip-fil: verifikationer, underlag, rapporter som PDF' + (ar.grovkopia ? '' : ' och SIE-fil') + '. ' +
+    var html = '<h2 id="revisionspaket">Revisionspaket' + hjalp('revisorn') + '</h2><div class="card"><p style="margin-top:0">Allt revisorn behöver för ' + esc(K.arNamn(ar)) + ' i en zip-fil: verifikationer, underlag, rapporter som PDF' + (ar.grovkopia ? '' : ' och SIE-fil') + '. ' +
       'Revisorn behöver inget konto: paketet öppnas i appen på ' + esc(omdirigering()) + ' med knappen Öppna revisionspaket, och inget sparas där. Medlemsregistret följer inte med.</p>';
     if (odNu.paket && odNu.paket.arId === store.aktivt) {
       html += '<div class="row">' + pdfKnappar(odNu.paket.nyckel, 'ladda-ner-pdf') + '</div>' +
@@ -6496,13 +6703,14 @@ var VERSIONER = [
   function vyRevisionInfo() {
     return '<div class="card"><h2 style="margin-top:0">Revisionspaket</h2><p>Du läser ett revisionspaket för <strong>' + esc(store.forening.namn || '') + '</strong>, skapat ' + esc(revision.skapad) + '. ' +
       'Allt är endast läsning, och inget sparas i den här webbläsaren. Stänger du sidan behöver du öppna zip-filen igen.</p>' +
-      '<div class="row"><button class="btn btn-secondary" data-action="stang-paket">Stäng paketet</button></div></div>';
+      '<div class="row"><button class="btn btn-secondary" data-action="stang-paket">Stäng paketet</button></div></div>' +
+      '<h2>Guide för revisorn</h2><div class="card">' + hjalpInnehall(HJALP.revisorn) + '</div>';
   }
 
   function revisionBanner() {
     if (!revision) return '';
     return '<div class="card" style="border-left:4px solid var(--guld)"><strong>Revisionspaket</strong> · ' + esc(store.forening.namn || '') + ' · skapat ' + esc(revision.skapad) +
-      '. Endast läsning, inget sparas. <button class="tag knapp-tag" data-action="stang-paket">Stäng paketet</button></div>';
+      '. Endast läsning, inget sparas. <button class="tag knapp-tag" data-action="hjalp" data-nyckel="revisorn">Guide för revisorn</button> <button class="tag knapp-tag" data-action="stang-paket">Stäng paketet</button></div>';
   }
 
   function oppnaPaket() {
@@ -6621,7 +6829,7 @@ var VERSIONER = [
 
   function vyGrovkopia(ar) {
     var g = ar.grovkopia;
-    var html = '<h2>Arkivkopia av ' + esc(K.arNamn(ar)) + '</h2><div class="card"><p style="margin-top:0">Inläst från <strong>' + esc(g.fil || '') + '</strong>' + (g.inlast ? ' den ' + esc(g.inlast) : '') + '. ' +
+    var html = '<h2>Arkivkopia av ' + esc(K.arNamn(ar)) + hjalp('arkivkopia') + '</h2><div class="card"><p style="margin-top:0">Inläst från <strong>' + esc(g.fil || '') + '</strong>' + (g.inlast ? ' den ' + esc(g.inlast) : '') + '. ' +
       'Bokslutet för året gjordes i Excel och fastställdes där. Arkivkopian ändras inte. Hittar du ett fel: skriv en anteckning här, och rätta det i det år som är öppet nu om det påverkar saldona i dag.</p></div>';
     html += '<h2>Avvikelser (' + g.avvikelser.length + ')</h2><div class="card">' + (g.avvikelser.length ? '<ul>' + g.avvikelser.map(function (a) { return '<li>' + esc(a) + '</li>'; }).join('') + '</ul>' : '<p class="ok">Inga. Alla verifikationer går ihop.</p>') + '</div>';
     html += '<h2>Anteckningar</h2><div class="card">' + (g.anteckningar.length ? '<ul>' + g.anteckningar.map(function (a, i) {
@@ -6992,7 +7200,7 @@ var VERSIONER = [
       '<p class="faint">Medlemsregistret sparas för sig, skilt från bokföringen. Läs mer under Personuppgifter.</p></div>';
     var avforas = K.attAvfora(r, idag(), store.ar);
     if (avforas.length) {
-      html += '<div class="card"><h2 style="margin-top:0">Ska avföras enligt stadgarna (' + avforas.length + ')</h2>' +
+      html += '<div class="card"><h2 style="margin-top:0">Ska avföras enligt stadgarna (' + avforas.length + ')' + hjalp('avforande') + '</h2>' +
         '<p class="faint" style="margin-top:0">Har inte betalat årsavgift ' + esc(avforas[0].ar.join(' eller ')) + '. Enligt stadgarna anses en medlem som inte betalat medlemsavgift ' +
         (r.avforEfterAr === 2 ? 'två' : r.avforEfterAr) + ' verksamhetsår i följd ha begärt sitt utträde, och avförs från medlemsförteckningen. ' +
         'När en medlem avförs tas namnet och kopplingen till betalarens nummer bort. Ta fram kvitton först om någon behöver dem.</p>' +
@@ -7069,7 +7277,7 @@ var VERSIONER = [
       '<div class="grid2">' + kontoFalt('medlemsavgift', 'Medlemsavgifter (årsavgiften)', 'Medlemsavgifter') + kontoFalt('terminsavgift', 'Terminsavgifter', 'Terminsavgifter') + '</div>' +
       (kontonSaknas() ? '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="avgiftskonton-forslag">Använd förslagen</button></div>' : '') +
       '<p class="faint">Finns kontot inte i kontoplanen läggs det till i alla år som inte är låsta.</p></div>';
-    html += '<div class="card"><h2 style="margin-top:0">Årsavgift</h2><p class="faint" style="margin-top:0">Tas ut första gången under kalenderåret som en medlem betalar terminsavgift.</p><div class="grid2">' +
+    html += '<div class="card"><h2 style="margin-top:0">Årsavgift' + hjalp('avgifter') + '</h2><p class="faint" style="margin-top:0">Tas ut första gången under kalenderåret som en medlem betalar terminsavgift.</p><div class="grid2">' +
       '<div><label>Aktiv medlem</label><input class="num" inputmode="decimal" data-mars="vanlig" value="' + (r.arsavgift.vanlig ? kr(r.arsavgift.vanlig) : '') + '" placeholder="0,00"></div>' +
       '<div><label>Funktionär, tränare eller stödmedlem</label><input class="num" inputmode="decimal" data-mars="funktionar" value="' + (r.arsavgift.funktionar ? kr(r.arsavgift.funktionar) : '') + '" placeholder="0,00"></div></div></div>';
     var kats = K.KATEGORIER.filter(function (k) { return k[0] !== 'funktionar'; });
@@ -7245,7 +7453,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport]');
@@ -7300,6 +7508,7 @@ var VERSIONER = [
     if (e.target.id === 'valjAr') { store.aktivt = e.target.value; spara(); meddelande = null; utkast = nyttUtkast(); render(); }
     if (e.target.id === 'hbKonto') { valtKonto = e.target.value; render(); }
     if (e.target.id === 'mTermin') { valdTermin = e.target.value; render(); }
+    if (e.target.id === 'visaHjalp') { try { localStorage.setItem(HJALP_NYCKEL, e.target.checked ? '1' : '0'); } catch (x) { /* tomt */ } render(); }
     var t = e.target;
     if (t.dataset.inkorg === 'konto') render();
     if (dokUtkast && t.dataset.dok) { dokUtkast[t.dataset.dok] = t.value; uppdateraDokStatus(); }
@@ -7554,6 +7763,9 @@ var VERSIONER = [
       }).catch(function (err) { paketStatus = null; visa('Revisionspaketet kunde inte skapas: ' + err.message, true); });
     },
     'oppna-paket': function () { oppnaPaket(); },
+    'hjalp': function (t) { hjalpOppen = t.dataset.nyckel; render(); },
+    'stang-hjalp': function () { hjalpOppen = null; render(); },
+    'hjalp-av': function () { try { localStorage.setItem(HJALP_NYCKEL, '0'); } catch (e) { /* tomt */ } hjalpOppen = null; visa('Frågetecknen är dolda. Du kan slå på dem igen under Om appen.'); },
     'skrivratt-lamna': function () {
       var till = varde('skrivrattTill');
       if (!window.confirm('Lämna över skrivrätten till ' + till + '? Du kan sedan bara läsa tills den lämnas tillbaka.')) return;
@@ -8410,6 +8622,7 @@ var VERSIONER = [
     if (document.visibilityState !== 'visible' || !odAnslutet() || Date.now() - odNu.senastHamtat < 60000) return;
     hamtaFranOneDrive().then(render, function () { render(); });
   });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && hjalpOppen) { hjalpOppen = null; render(); } });
   window.addEventListener('beforeunload', function (e) {
     if (odAnslutet() && od.smutsig && !lasLage()) { e.preventDefault(); e.returnValue = ''; }
   });

@@ -87,6 +87,10 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - En kopia av bokföringen och medlemsregistret i webbläsaren (adressen slutar på `?ovning`). Allt går att prova; inget sparas i OneDrive och allt raderas när övningen avslutas.
 
+## Förklaringar (från version 1.21)
+
+- Frågetecken vid rubrikerna med vad, varför och hur, och länkar till Bokföringsnämnden, Skatteverket och Riksidrottsförbundet. Kassörens årshjul och en guide för revisorn under Om appen, i revisionspaketet och för rollen revisor.
+
 ## Integritet
 
 - Koden kan vara publik. Bokföringsdata, medlemsnamn och underlag ligger bara i OneDrive.
