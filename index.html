@@ -345,6 +345,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.32', datum: '2026-11-21',
+    nyheter: [
+      'När appen är kopplad till OneDrive sparas kopian av testdatat i mappen Testdata i OneDrive innan något tas bort, i stället för att laddas ner. Det fungerar också på telefonen, och appen lämnas aldrig.',
+      'Övningsläget kan öppnas med en kopia som ligger i OneDrive.'
+    ]
+  },
+  {
     version: '1.31', datum: '2026-11-21',
     nyheter: [
       'Börja om med riktig bokföring (Inställningar, År och arkiv): testdatat tas bort, och du väljer vad som ska finnas kvar, till exempel föreningens uppgifter, kontoplanen, medlemmarna utan betalningar, förtroendeuppdragen och arkivkopiorna. Roller och behörigheter finns alltid kvar.',
@@ -8819,8 +8826,21 @@ var VERSIONER = [
       bokforing: bokforingsdata(), medlemsregister: store.medlemsregister, styrelsen: sty.styr.data, uppdrag: sty.upp.data };
   }
   function laddaNerHelkopia(prefix) {
-    // Namn utan å, ä och ö, som appens andra säkerhetskopior.
-    laddaNer((prefix || 'helkopia') + '-foreningsbokforing-' + idag() + '.json', JSON.stringify(helkopia()), 'application/json');
+    laddaNer(helkopiaNamn(prefix), JSON.stringify(helkopia()), 'application/json');
+  }
+  // Namn utan å, ä och ö, som appens andra säkerhetskopior.
+  function helkopiaNamn(prefix) { return (prefix || 'helkopia') + '-foreningsbokforing-' + idag() + '.json'; }
+
+  // Kopior i OneDrive: json-filer i mapparna Testdata i den samlade mappen.
+  async function kopiorIOneDrive() {
+    var bas = od.rot || od.mapp, ut = [];
+    var mappar = (await allaBarn(bas.driveId, bas.id)).filter(function (x) { return x.folder && /^Testdata/i.test(x.name); });
+    for (var i = 0; i < mappar.length; i++) {
+      (await allaBarn(bas.driveId, mappar[i].id)).forEach(function (f) {
+        if (!f.folder && /\.json$/i.test(f.name)) ut.push({ namn: f.name, mapp: mappar[i].name, id: f.id, driveId: bas.driveId });
+      });
+    }
+    return ut.sort(function (a, b) { return a.namn < b.namn ? 1 : -1; });
   }
   // Lägger en helkopia (eller en vanlig säkerhetskopia av bokföringen) i övningsläget.
   function helkopiaTillOvning(d) {
@@ -8848,7 +8868,11 @@ var VERSIONER = [
       'Claude används på riktigt när du läser in PDF:er och bilder.</p>' +
       '<div class="row"><button class="btn btn-secondary" data-action="ovning-starta">Öppna övningsläge med en kopia</button>' +
       '<button class="btn btn-secondary btn-small" data-action="ovning-starta-tom">… eller med en tom förening</button>' +
-      '<button class="btn btn-secondary btn-small" data-action="ovning-fran-fil">… eller med en sparad kopia</button></div>' +
+      '<button class="btn btn-secondary btn-small" data-action="ovning-fran-fil">… eller med en sparad kopia</button>' +
+      (odAnslutet() ? '<button class="btn btn-secondary btn-small" data-action="ovning-fran-od">… eller med en kopia från OneDrive</button>' : '') + '</div>' +
+      (odNu.kopior ? (odNu.kopior.length ? '<div style="margin-top:8px">' + odNu.kopior.map(function (k, i) {
+        return '<div class="row" style="margin:4px 0;align-items:center"><span>' + esc(k.namn) + ' <span class="faint">' + esc(k.mapp) + '</span></span><button class="btn btn-small" data-action="ovning-od-valj" data-i="' + i + '">Öppna i övningsläget</button></div>';
+      }).join('') + '</div>' : '<p class="faint">Inga kopior i mapparna Testdata i OneDrive.</p>') : '') +
       '<p class="faint" style="margin-bottom:0">En sparad kopia är en fil som appen laddat ner, till exempel när du började om. Med den kan du ta fram en testmiljö igen, även på en annan dator. Underlag som ligger i OneDrive kan inte visas i övningen.</p></div>' + vyBorjaOm();
   }
 
@@ -8883,8 +8907,8 @@ var VERSIONER = [
       ruta('boArkiv', 'Arkivkopiorna från Excel' + (arkiv ? ' (' + Object.keys(store.ar).filter(function (id) { return store.ar[id].grovkopia; }).sort().join(', ') + ')' : ''), true) +
       (arkiv ? ruta('boNyttAr', 'Skapa räkenskapsåret ' + esc(nastaStart.slice(0, 4)) + ' med ingående balans från arkivkopian ' + esc(arkiv), true) : '') +
       '<p class="faint">Roller och behörigheter finns kvar, liksom mapparna och delningarna i OneDrive. Bokföringen (alla vanliga år, verifikationer, fakturor och kvitton) och styrelsens protokoll, beslut, uppgifter och ärenden tas bort.</p>' +
-      '<p class="faint">Innan något tas bort laddar appen ner en kopia av allt och lägger den i övningsläget, så att testmiljön finns kvar. ' +
-      (odAnslutet() ? 'Filerna som appen laddat upp under testerna (underlag, kvitton, inskannade protokoll) flyttas till en mapp Testdata i ' + esc(od.rot ? od.rot.namn : od.mapp.namn) + '. Protokoll och handlingar som sparats i mötesmapparna (ÅM, SM) rörs inte; titta själv efter testfiler där. ' : '') +
+      '<p class="faint">Innan något tas bort ' + (odAnslutet() ? 'sparar appen en kopia av allt i en mapp Testdata i ' + esc(od.rot ? od.rot.namn : od.mapp.namn) + ' i OneDrive' : 'laddar appen ner en kopia av allt') + ' och lägger den i övningsläget, så att testmiljön finns kvar. ' +
+      (odAnslutet() ? 'Filerna som appen laddat upp under testerna (underlag, kvitton, inskannade protokoll) flyttas till samma mapp. Protokoll och handlingar som sparats i mötesmapparna (ÅM, SM) rörs inte; titta själv efter testfiler där. ' : '') +
       'Andra enheter och personer får den nya versionen nästa gång de öppnar appen.</p>' +
       '<div class="row"><button class="btn" data-action="borja-om">Börja om…</button></div></details></div>';
   }
@@ -8897,13 +8921,20 @@ var VERSIONER = [
       if (od.smutsig || od.regSmutsig || odNu.konflikt) throw new Error('Allt kunde inte sparas i OneDrive. Försök igen.');
     }
     var kopia = helkopia();
+    var bas = od.rot || od.mapp, mapp = null, kopiaNamn = null;
+    if (odAnslutet()) {
+      // Kopian sparas i OneDrive innan något tas bort. Går det inte avbryts allt.
+      sattStatus('Sparar en kopia av testdatat i OneDrive…');
+      mapp = await sakerstallUndermapp(bas.driveId, bas.id, 'Testdata (borttaget ' + idag() + ')');
+      var sparad = await graf('/drives/' + bas.driveId + '/items/' + mapp.id + ':/' + enc(helkopiaNamn('testdata')) + ':/content?@microsoft.graph.conflictBehavior=rename',
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(kopia) });
+      kopiaNamn = (od.rot ? od.rot.namn : bas.namn) + '/' + mapp.name + '/' + sparad.name;
+    }
     helkopiaTillOvning(kopia);
     var res = K.borjaOm({ bokforing: kopia.bokforing, register: kopia.medlemsregister, styrelse: kopia.styrelsen, uppdrag: kopia.uppdrag }, val);
     var flyttade = 0;
     if (odAnslutet() && res.filer.length) {
       sattStatus('Flyttar testfilerna…');
-      var bas = od.rot || od.mapp;
-      var mapp = await sakerstallUndermapp(bas.driveId, bas.id, 'Testdata (borttaget ' + idag() + ')');
       var namn = [];
       for (var i = 0; i < res.filer.length; i++) {
         var f = res.filer[i];
@@ -8927,7 +8958,7 @@ var VERSIONER = [
     if (nyttAr) laggTillAr(nyttAr); else spara();
     if (odAnslutet()) { await synkaUpp(); await synkaStyrelsen().catch(function () { /* nästa gång */ }); }
     sattStatus(odAnslutet() ? 'Synkad med OneDrive' : '');
-    return { flyttade: flyttade, nyttAr: nyttAr ? K.arNamn(nyttAr) : null, nyttArFel: res.nyttArFel || null };
+    return { flyttade: flyttade, kopia: kopiaNamn, nyttAr: nyttAr ? K.arNamn(nyttAr) : null, nyttArFel: res.nyttArFel || null };
   }
 
   // ---------- Revisionspaket och delning med revisorn ----------
@@ -10333,6 +10364,19 @@ var VERSIONER = [
       };
       input.click();
     },
+    'ovning-fran-od': function () {
+      sattStatus('Letar efter kopior i OneDrive…');
+      kopiorIOneDrive().then(function (lista) { odNu.kopior = lista; sattStatus('Synkad med OneDrive'); render(); }, function (err) { visa(err.message, true); });
+    },
+    'ovning-od-valj': function (t) {
+      var k = odNu.kopior[Number(t.dataset.i)];
+      sattStatus('Hämtar kopian…');
+      graf('/drives/' + k.driveId + '/items/' + k.id + '/content', { ra: true }).then(function (r) { return r.json(); }).then(function (d) {
+        helkopiaTillOvning(d);
+        // Samma flik: ett nytt fönster efter en hämtning stoppas ofta, särskilt på telefonen.
+        location.href = ovningsAdress();
+      }).catch(function (err) { visa(err.message, true); });
+    },
     'borja-om': function () {
       var bock = function (id) { return !!(document.getElementById(id) || {}).checked; };
       var val = { forening: bock('boForening'), kontoplan: bock('boKontoplan'), regler: bock('boRegler'), avgifter: bock('boAvgifter'), uppdrag: bock('boUppdrag'), arkivkopior: bock('boArkiv'),
@@ -10341,12 +10385,13 @@ var VERSIONER = [
       var svar = window.prompt('Bokföringen och styrelsens material tas bort (en kopia laddas ner och läggs i övningsläget först). Skriv BÖRJA OM för att fortsätta.');
       if (svar == null) return;
       if (svar.trim().toUpperCase() !== 'BÖRJA OM') throw new Error('Inget är borttaget. Skriv BÖRJA OM för att bekräfta.');
-      // Kopian laddas ner direkt, medan webbläsaren räknar det som en följd av klicket (annars tappas filnamnet).
-      laddaNerHelkopia('testdata');
+      // Utan OneDrive laddas kopian ner direkt, medan webbläsaren räknar det som en följd av klicket.
+      // Med OneDrive sparas den där i stället (på telefonen öppnar en nedladdning en förhandsvisning och appen kan pausas).
+      if (!odAnslutet()) laddaNerHelkopia('testdata');
       borjaOmNu(val, arkivId).then(function (res) {
         vy = res.nyttAr ? 'oversikt' : 'arkiv';
         render();
-        visa('Klart. Testdatat är borttaget, och en kopia finns i övningsläget och som fil.' + (res.flyttade ? ' ' + antal(res.flyttade, 'fil', 'filer') + ' från testerna ligger i mappen Testdata i OneDrive.' : '') +
+        visa('Klart. Testdatat är borttaget, och en kopia finns i övningsläget och ' + (res.kopia ? 'i OneDrive: ' + res.kopia + '.' : 'som fil.') + (res.flyttade ? ' ' + antal(res.flyttade, 'fil', 'filer') + ' från testerna ligger i samma mapp.' : '') +
           (res.nyttAr ? ' Räkenskapsåret ' + res.nyttAr + ' är skapat med ingående balans från arkivkopian; kontrollera den i balansräkningen under Bokföring, Rapporter.' : '') +
           (res.nyttArFel ? ' Nästa räkenskapsår kunde inte skapas från arkivkopian: ' + res.nyttArFel : ''), !!res.nyttArFel);
       }).catch(function (err) { sattStatus(''); visa('Inget är borttaget: ' + err.message, true); });
