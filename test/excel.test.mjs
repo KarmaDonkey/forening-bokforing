@@ -140,3 +140,25 @@ test('medlemsbetalningar från ett års Excel-fil kan tas bort', () => {
   const igen = K.lasInHistorik(utan, K.tolkaArsbok(arbetsbok(), 'x.xlsm'), {});
   eq(igen.antal.betalningar, 3);
 });
+
+test('rubrik på flera rader och ingående balanser i grundboken räknas en gång', () => {
+  const bok = arbetsbok();
+  const gb = bok.flikar.Grundbok;
+  gb[6] = gb[6].map((c) => (c === 'Verifikationsnummer' ? 'Verifika\ntions\nnummer' : c));
+  // Verifikation 0: samma ingående balanser som i fliken IngåendeBalanser
+  gb.splice(7, 0,
+    [null, null, 0, '2029-01-01', null, 'Ingående Balans, Bankkonto', 'Företagskonto', 1930, 5000, null, null, null],
+    [null, null, 0, '2029-01-01', null, 'Ingående Balans, Eget kapital', null, null, null, 'Eget kapital', 2010, 5000]);
+  const t = K.tolkaArsbok(bok, '2030.xlsm');
+  eq(t.saknas, []);
+  assert.equal(t.verifikationer.length, 4);
+  assert.ok(!t.verifikationer.some((v) => v.nr === 0));
+  eq(t.ingaendeBalans, { 1930: kr(5000), 2010: kr(-5000) });
+  const ub = K.saldon(K.grovkopiaAr(t, {}));
+  assert.equal(ub['1930'], kr(5000 + 1300 - 800.5 - 90 - 10));
+  // Utan fliken IngåendeBalanser tas balanserna från grundboken.
+  delete bok.flikar.IngåendeBalanser;
+  const t2 = K.tolkaArsbok(bok, '2030.xlsm');
+  eq(t2.saknas, []);
+  eq(t2.ingaendeBalans, { 1930: kr(5000), 2010: kr(-5000) });
+});
