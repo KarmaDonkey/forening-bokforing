@@ -345,6 +345,12 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.30', datum: '2026-11-21',
+    nyheter: [
+      'Menyn Medlemmar heter nu Medlemsregister, med flikarna Statistik, Att koppla, Medlemmar, Betalare, Avgifter och Personuppgifter i undermenyn.'
+    ]
+  },
+  {
     version: '1.29', datum: '2026-11-21',
     nyheter: [
       'Menyn Föreningen heter nu Styrelsen, med flikarna Möten och protokoll, Beslut, Uppgifter, Förtroendeuppdrag, Ärenden, Årsmötet och Stockholms stad.',
@@ -2458,7 +2464,7 @@ var VERSIONER = [
     if (summaPoster(poster) !== belopp) throw BokforingsFel('Avgifterna (' + formatBelopp(summaPoster(poster)) + ' kr) stämmer inte med beloppet ' + formatBelopp(belopp) + ' kr.');
     var termin = 0, ars = 0;
     poster.forEach(function (p) { if (p.typ === 'arsavgift') ars += p.belopp; else termin += p.belopp; });
-    if ((termin && !reg.konton.terminsavgift) || (ars && !reg.konton.medlemsavgift)) throw BokforingsFel('Välj konton för terminsavgift och medlemsavgift under Medlemmar, Avgifter.');
+    if ((termin && !reg.konton.terminsavgift) || (ars && !reg.konton.medlemsavgift)) throw BokforingsFel('Välj konton för terminsavgift och medlemsavgift under Medlemsregister, Avgifter.');
     var rader = [{ konto: bankkonto, belopp: belopp }];
     if (termin) rader.push({ konto: reg.konton.terminsavgift, belopp: -termin });
     if (ars) rader.push({ konto: reg.konton.medlemsavgift, belopp: -ars });
@@ -6507,7 +6513,12 @@ var VERSIONER = [
     ['verifikationer', 'Verifikationer'],
     ['ny', 'Ny verifikation'],
     ['dokument', 'Fakturor och kvitton'],
-    ['medlemmar', 'Medlemmar'],
+    ['m-statistik', 'Statistik'],
+    ['m-koppla', 'Att koppla'],
+    ['m-lista', 'Medlemmar'],
+    ['m-betalare', 'Betalare'],
+    ['m-avgifter', 'Avgifter'],
+    ['m-personuppgifter', 'Personuppgifter'],
     ['huvudbok', 'Huvudbok'],
     ['rapporter', 'Rapporter'],
     ['bokslut', 'Bokslut'],
@@ -6527,7 +6538,7 @@ var VERSIONER = [
   var GRUPPER = [
     ['oversikt', 'Översikt', ['oversikt']],
     ['bokforing', 'Bokföring', ['inlasning', 'verifikationer', 'ny', 'dokument', 'huvudbok', 'rapporter', 'bokslut', 'kontoplan']],
-    ['medlemmar', 'Medlemmar', ['medlemmar']],
+    ['medlemmar', 'Medlemsregister', ['m-statistik', 'm-koppla', 'm-lista', 'm-betalare', 'm-avgifter', 'm-personuppgifter']],
     ['styrelsen', 'Styrelsen', ['st-moten', 'st-beslut', 'st-uppgifter', 'st-uppdrag', 'st-arenden', 'arsmote', 'staden']],
     ['installningar', 'Inställningar', ['arkiv', 'om']]
   ];
@@ -6556,11 +6567,11 @@ var VERSIONER = [
     }
     if (lasLage() && (vy === 'inlasning' || vy === 'ny')) vy = 'verifikationer';
     var regSynligt = !lasLage() || (odNu.regLas && K.registerHarData(reg()));
-    if (!regSynligt && vy === 'medlemmar') vy = 'rapporter';
+    if (!regSynligt && vy.indexOf('m-') === 0) vy = 'rapporter';
     if (ar.grovkopia && (vy === 'inlasning' || vy === 'ny')) vy = 'rapporter';
     var tillaten = function (v) {
       if (ar.grovkopia && (v === 'inlasning' || v === 'ny')) return false;
-      if (v === 'medlemmar') return regSynligt;
+      if (v.indexOf('m-') === 0) return regSynligt;
       if (v === 'st-uppdrag') return !!styrBeh('upp');
       if (v.indexOf('st-') === 0) return !!styrBeh('styr');
       return !lasLage() || (v !== 'inlasning' && v !== 'ny');
@@ -6577,7 +6588,7 @@ var VERSIONER = [
     }).join('');
     var flikar = GRUPPER.find(function (g) { return g[0] === grupp; })[2].filter(tillaten);
     document.getElementById('undernav').innerHTML = flikar.length > 1 ? flikar.map(function (v) {
-      var namn = (VYER.find(function (x) { return x[0] === v; }) || [v, v])[1];
+      var namn = (VYER.find(function (x) { return x[0] === v; }) || [v, v])[1] + flikTillagg(v, ar);
       return '<button type="button" data-vy="' + v + '"' + (vy === v ? ' aria-current="page"' : '') + '>' + (ar.grovkopia && v === 'bokslut' ? 'Arkivkopia' : namn) + '</button>';
     }).join('') : '';
     var html = {
@@ -6589,7 +6600,7 @@ var VERSIONER = [
       verifikationer: vyVerifikationer,
       ny: vyNy,
       dokument: vyDokument,
-      medlemmar: vyMedlemmar,
+      'm-statistik': vyMedlemmar, 'm-koppla': vyMedlemmar, 'm-lista': vyMedlemmar, 'm-betalare': vyMedlemmar, 'm-avgifter': vyMedlemmar, 'm-personuppgifter': vyMedlemmar,
       huvudbok: vyHuvudbok,
       rapporter: vyRapporter,
       bokslut: vyBokslut,
@@ -6597,13 +6608,20 @@ var VERSIONER = [
       arkiv: vyArkiv,
       om: vyOm
     }[vy](ar);
-    main.innerHTML = msg + (vy !== 'medlemmar' && vy !== 'bokslut' ? grovkopiaRuta(ar) : '') + html + hjalpPanel();
+    main.innerHTML = msg + (vy.indexOf('m-') !== 0 && vy !== 'bokslut' ? grovkopiaRuta(ar) : '') + html + hjalpPanel();
     ritaQr();
     skalaForhandsvisningar();
     uppdateraPdfKnappar();
     visaValdFlik();
     if (vy === 'ny') uppdateraUtkastStatus();
     if (vy === 'dokument' && dokUtkast) uppdateraDokStatus();
+  }
+
+  // Antal i flikarna under Medlemsregister.
+  function flikTillagg(v, ar) {
+    if (v === 'm-koppla') { var n = K.okoppladeInbetalningar(reg(), ar, store.aktivt).length; return n ? ' (' + n + ')' : ''; }
+    if (v === 'm-lista') { var a = K.attAvfora(reg(), idag(), store.ar).length; return a ? ' (' + a + ' att avföra)' : ''; }
+    return '';
   }
 
   // På smala skärmar är menyn en rad som scrollar i sidled; se till att vald flik syns.
@@ -8912,7 +8930,7 @@ var VERSIONER = [
               sorteradeMedlemmar().map(function (m) { return '<option value="' + esc(m.id) + '"' + (m.id === samma ? ' selected' : '') + '>Samma som ' + esc(K.visaNamn(m)) + '</option>'; }).join('') + '</select></td>' +
               '<td data-etikett="Kategori"><select data-excel="kategori" data-i="' + i + '" data-nyckel="' + esc(n.nyckel) + '" aria-label="Kategori"' + (samma ? ' disabled' : '') + '>' +
               K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '"' + (k[0] === vald ? ' selected' : '') + '>' + esc(K.KATEGORI_KORT[k[0]]) + '</option>'; }).join('') + '</select></td></tr>';
-          }).join('') + '</tbody></table></div><p class="faint">Kategorin gissas från beloppet och avgifterna under Medlemmar, Avgifter. Samma person med namnet skrivet på olika sätt (t.ex. "EFTERNAMN, FÖRNAMN") känns igen.</p></details>';
+          }).join('') + '</tbody></table></div><p class="faint">Kategorin gissas från beloppet och avgifterna under Medlemsregister, Avgifter. Samma person med namnet skrivet på olika sätt (t.ex. "EFTERNAMN, FÖRNAMN") känns igen.</p></details>';
         }
         html += '</div>';
       });
@@ -9192,7 +9210,6 @@ var VERSIONER = [
     return poster;
   }
 
-  var MEDLEMVYER = [['statistik', 'Statistik'], ['koppla', 'Att koppla'], ['lista', 'Medlemmar'], ['betalare', 'Betalare'], ['avgifter', 'Avgifter'], ['personuppgifter', 'Personuppgifter']];
   var kvittoUtkast = null;
   var valdMedlem = null;
   var fordelning = null;
@@ -9200,11 +9217,10 @@ var VERSIONER = [
   function vyMedlemmar(ar) {
     var r = reg();
     var okopplade = K.okoppladeInbetalningar(r, ar, store.aktivt);
-    var avforas = K.attAvfora(r, idag(), store.ar);
-    var html = '<div class="row" style="margin-top:12px">' + MEDLEMVYER.map(function (v) {
-      var n = v[0] === 'koppla' && okopplade.length ? ' (' + okopplade.length + ')' : v[0] === 'lista' && avforas.length ? ' (' + avforas.length + ' att avföra)' : '';
-      return '<button class="btn ' + (medlemVy === v[0] ? '' : 'btn-secondary') + ' btn-small" data-action="medl-vy" data-mvy="' + v[0] + '">' + v[1] + n + '</button>';
-    }).join('') + '</div>';
+    // Flikarna ligger i undermenyn (m-statistik, m-lista …). En enskild medlem och kvittot hör till fliken Medlemmar.
+    var flik = vy.slice(2);
+    if (!(flik === 'lista' && (medlemVy === 'medlem' || medlemVy === 'kvitto'))) medlemVy = flik;
+    var html = '';
     if (medlemVy === 'koppla') return html + vyMedlemKoppla(ar, okopplade);
     if (medlemVy === 'lista') return html + vyMedlemLista();
     if (medlemVy === 'betalare') return html + vyBetalare();
@@ -10230,7 +10246,7 @@ var VERSIONER = [
       setAktivt(Object.assign({}, a, { grovkopia: Object.assign({}, a.grovkopia, { anteckningar: lista }) }));
       render();
     },
-    'medl-vy': function (t) { vy = 'medlemmar'; medlemVy = t.dataset.mvy; meddelande = null; render(); },
+    'medl-vy': function (t) { vy = 'm-' + t.dataset.mvy; medlemVy = t.dataset.mvy; meddelande = null; render(); },
     'avg-oppna': function (t) {
       var rad = aktivt().bankrader.find(function (r) { return r.id === t.dataset.id; });
       inkorgVal[rad.id] = Object.assign({}, inkorgVal[rad.id], { ejAvgift: false });
@@ -10274,7 +10290,7 @@ var VERSIONER = [
       sparaReg(res.reg);
       visa(K.visaNamn(res.medlem) + ' är tillagd.');
     },
-    'medlem-visa': function (t) { valdMedlem = t.dataset.id; fordelning = null; medlemVy = 'medlem'; meddelande = null; render(); window.scrollTo(0, 0); },
+    'medlem-visa': function (t) { valdMedlem = t.dataset.id; fordelning = null; vy = 'm-lista'; medlemVy = 'medlem'; meddelande = null; render(); window.scrollTo(0, 0); },
     'medlem-sla-ihop': function (t) {
       var till = document.getElementById('slaIhopMed').value;
       if (!till) throw new Error('Välj vilken medlem som ska finnas kvar.');
@@ -10329,7 +10345,7 @@ var VERSIONER = [
       sparaReg(K.avforMedlem(reg(), m.id, idag(), 'utträde'));
       visa(m.namn + ' är avförd.');
     },
-    'kvitto-ny': function (t) { nyttKvitto(t.dataset.id); medlemVy = 'kvitto'; meddelande = null; render(); },
+    'kvitto-ny': function (t) { nyttKvitto(t.dataset.id); vy = 'm-lista'; medlemVy = 'kvitto'; meddelande = null; render(); },
     'kvitto-stang': function () { var id = kvittoUtkast && kvittoUtkast.medlem; kvittoUtkast = null; medlemVy = valdMedlem === id && medlemAv(id) ? 'medlem' : 'lista'; render(); },
     'kvitto-andra': function () { kvittoUtkast.skapat = null; render(); },
     'kvitto-skapa': function () {
