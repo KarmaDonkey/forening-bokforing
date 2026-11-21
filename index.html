@@ -111,6 +111,8 @@
   .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
   .avatar.skrivratt { box-shadow: 0 0 0 2px var(--guld); }
   .avatar.fler { background: var(--surface-2); color: var(--ink); }
+  .avatar.jag { opacity: 0.7; margin-right: 8px; }
+  .avatar.jag:hover, .avatar.jag:focus, .avatar.jag.oppen { opacity: 1; }
   .avatar-info { display: none; position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 60; min-width: 190px; max-width: 80vw;
     background: var(--surface); color: var(--ink); border: 1px solid var(--hairline); border-radius: 10px; padding: 9px 11px; box-shadow: var(--skugga), 0 6px 18px rgba(0, 0, 0, 0.12);
     font: 400 12.5px/1.45 "Roboto Flex", system-ui, sans-serif; text-align: left; white-space: normal; }
@@ -335,6 +337,14 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.27', datum: '2026-11-21',
+    nyheter: [
+      'Rättelse: appen föreslog fel plats för den samlade mappen när bokföringen kopplats i en äldre version. Nu läser appen den verkliga platsen från OneDrive.',
+      'Den samlade mappen kan flyttas till rätt plats. En mapp Styrelsearbete och ett äldre Medlemsregister som ligger där slås ihop med den samlade mappen, utan att något skrivs över.',
+      'Din egen cirkel visas först bland cirklarna överst, lite nedtonad, med dina roller och hur många andra som har appen öppen.'
+    ]
+  },
   {
     version: '1.26', datum: '2026-11-21',
     nyheter: [
@@ -3140,6 +3150,24 @@ var VERSIONER = [
     return null;
   }
 
+  // Sökvägen från OneDrive-roten, ur parentReference.path ("/drive/root:/Kimmy/Capoeira") och namnet.
+  function sokvagFranGraf(path, namn) {
+    var i = String(path || '').indexOf('root:');
+    var bas = i < 0 ? '' : String(path).slice(i + 5);
+    try { bas = decodeURIComponent(bas); } catch (e) { /* redan avkodad */ }
+    var delar = bas.split('/').filter(Boolean);
+    if (namn) delar.push(namn);
+    return delar.join('/');
+  }
+
+  // Ett namn som inte krockar med de som redan finns i mappen: "Protokoll.pdf" blir "Protokoll (2).pdf".
+  function ledigtNamn(befintliga, namn) {
+    var finns = (befintliga || []).map(function (x) { return String(x).toLowerCase(); });
+    if (finns.indexOf(namn.toLowerCase()) < 0) return namn;
+    var m = namn.match(/^(.*?)(\.[^.\s]{1,5})?$/), bas = m[1], ext = m[2] || '';
+    for (var n = 2; ; n++) { var f = bas + ' (' + n + ')' + ext; if (finns.indexOf(f.toLowerCase()) < 0) return f; }
+  }
+
   // Handlingar som hör till årsmötet, och ord som känner igen dem i filnamnen i ÅM-mappen.
   var ARSMOTESHANDLINGAR = [
     ['kallelse', 'Kallelse', /kallelse/i],
@@ -3837,6 +3865,8 @@ var VERSIONER = [
     uppdragSomGarUt: uppdragSomGarUt,
     slaIhopPoster: slaIhopPoster,
     motesmapp: motesmapp,
+    sokvagFranGraf: sokvagFranGraf,
+    ledigtNamn: ledigtNamn,
     motesfilnamn: motesfilnamn,
     tolkaMotesmapp: tolkaMotesmapp,
     ARSMOTESHANDLINGAR: ARSMOTESHANDLINGAR,
@@ -5084,6 +5114,32 @@ var VERSIONER = [
     }).catch(function () { /* frivilligt */ });
   }
 
+  // Den verkliga platsen i OneDrive. Äldre versioner sparade ibland bara mappens namn som sökväg.
+  async function uppdateraSokvagar() {
+    if (!odAnslutet() || od.lage !== 'agare') return;
+    var bas = od.rot || od.mapp;
+    var meta = await graf('/drives/' + bas.driveId + '/items/' + bas.id + '?$select=id,name,parentReference');
+    var sok = K.sokvagFranGraf(meta.parentReference && meta.parentReference.path, meta.name);
+    if (od.rot) { od.rot.sokvag = sok; od.rot.namn = meta.name; od.mapp.sokvag = sok + '/' + od.mapp.namn; }
+    else od.mapp.sokvag = sok;
+    sparaOd();
+    // Finns föreningens Styrelsearbete kvar utanför den samlade mappen? Då föreslås att mappen flyttas dit.
+    odNu.syskonForslag = null;
+    if (od.rot && od.styrRot) {
+      var tr = await graf("/me/drive/root/search(q='" + encodeURIComponent(STYRARBETE) + "')?$select=id,name,folder", { tillat: [400, 403, 404] });
+      var traffar = (tr && tr.value || []).filter(function (x) { return x.folder && x.name === STYRARBETE && x.id !== od.styrRot.id; });
+      for (var i = 0; i < traffar.length && !odNu.syskonForslag; i++) {
+        var t = await graf('/drives/' + bas.driveId + '/items/' + traffar[i].id + '?$select=id,name,parentReference', { tillat: [403, 404] });
+        if (typeof t === 'number') continue;
+        var foralder = K.sokvagFranGraf(t.parentReference && t.parentReference.path, '');
+        var rotForalder = sok.split('/').slice(0, -1).join('/');
+        if (foralder !== rotForalder) {
+          odNu.syskonForslag = { styrelsearbete: foralder ? foralder + '/' + STYRARBETE : STYRARBETE, sokvag: (foralder ? foralder + '/' : '') + od.rot.namn };
+        }
+      }
+    }
+  }
+
   function forslagAdministration() {
     var bas = od.rot ? od.rot.sokvag : (od.mapp.sokvag || '');
     var foralder = bas.indexOf('/') >= 0 ? bas.slice(0, bas.lastIndexOf('/')) : '';
@@ -5165,6 +5221,81 @@ var VERSIONER = [
     }
     sattStatus('Synkad med OneDrive');
     return { gjort: gjort, delat: delat };
+  }
+
+  // Flyttar allt innehåll i en mapp till en annan. Undermappar med samma namn slås ihop; filer som krockar får ett nytt namn.
+  async function slaIhopMapp(d, franId, tillId) {
+    var fran = await allaBarn(d, franId), till = await allaBarn(d, tillId), antal0 = 0;
+    var namn = till.map(function (x) { return x.name; });
+    for (var i = 0; i < fran.length; i++) {
+      var c = fran[i];
+      var finns = till.find(function (x) { return x.name.toLowerCase() === c.name.toLowerCase(); });
+      if (finns && finns.folder && c.folder) { antal0 += await slaIhopMapp(d, c.id, finns.id); await taBortOmTom(d, c.id); continue; }
+      var nytt = K.ledigtNamn(namn, c.name);
+      namn.push(nytt);
+      await flyttaMapp(d, c.id, tillId, nytt);
+      antal0++;
+    }
+    return antal0;
+  }
+  async function taBortOmTom(d, id) {
+    if ((await allaBarn(d, id)).length) return false;
+    await graf('/drives/' + d + '/items/' + id, { method: 'DELETE', tillat: [404] });
+    return true;
+  }
+
+  // Flyttar den samlade mappen till en ny plats, och slår ihop Styrelsearbete och ett äldre Medlemsregister som ligger där.
+  async function flyttaSamladMapp(sokvag, opt) {
+    sokvag = String(sokvag || '').replace(/^\/+|\/+$/g, '');
+    if (!od.rot || !od.styrRot) throw new Error('Samla mapparna först.');
+    if (od.lage !== 'agare') throw new Error('Bara den som äger mapparna kan flytta dem.');
+    if (!sokvag) throw new Error('Skriv vart mappen ska flyttas, t.ex. Föreningen/' + ADMMAPP + '.');
+    if (sokvag === od.rot.sokvag) throw new Error('Mappen ligger redan i ' + sokvag + '.');
+    if (sokvag.indexOf(od.rot.sokvag + '/') === 0) throw new Error('Mappen kan inte flyttas in i sig själv.');
+    sattStatus('Sparar innan flytten…');
+    await synkaUpp();
+    await synkaStyrelsen().catch(function () { /* sparas igen efteråt */ });
+    sattStatus('Flyttar…');
+    var d = od.rot.driveId;
+    var namn = sokvag.split('/').pop(), foralderSok = sokvag.split('/').slice(0, -1).join('/');
+    var foralder = foralderSok ? await skapaSokvag(foralderSok) : await graf('/me/drive/root');
+    var krock = await barnMedNamn(d, foralder.id, namn);
+    if (krock && krock.id !== od.rot.id) throw new Error('Det finns redan en mapp ' + namn + ' i ' + (foralderSok || 'roten') + '.');
+    var gjort = [];
+    await flyttaMapp(d, od.rot.id, foralder.id, namn);
+    gjort.push((od.rot.sokvag || od.rot.namn) + ' → ' + sokvag);
+    if (opt.styrelsearbete) {
+      var sa = await barnMedNamn(d, foralder.id, STYRARBETE);
+      if (sa && sa.folder && sa.id !== od.styrRot.id) {
+        var n = await slaIhopMapp(d, sa.id, od.styrRot.id);
+        var borta = await taBortOmTom(d, sa.id);
+        gjort.push(antal(n, 'sak', 'saker') + ' från ' + (foralderSok ? foralderSok + '/' : '') + STYRARBETE + ' → ' + sokvag + '/' + STYRARBETE + (borta ? ' (den tomma mappen är borttagen)' : ''));
+      }
+    }
+    if (opt.aldre && od.regMapp) {
+      var gml = await barnMedNamn(d, foralder.id, REGMAPP);
+      if (gml && gml.folder && gml.id !== od.regMapp.id) {
+        var regBarn = (await allaBarn(d, od.regMapp.id)).map(function (x) { return x.name; });
+        var nyttNamn = K.ledigtNamn(regBarn, 'Äldre medlemsregister');
+        await flyttaMapp(d, gml.id, od.regMapp.id, nyttNamn);
+        gjort.push(REGMAPP + ' → ' + sokvag + '/' + REGMAPP + '/' + nyttNamn);
+      }
+    }
+    od.rot = Object.assign({}, od.rot, { namn: namn, sokvag: sokvag });
+    od.mapp = Object.assign({}, od.mapp, { sokvag: sokvag + '/' + od.mapp.namn });
+    od.regMapp = Object.assign({}, od.regMapp, { namn: namn + '/' + REGMAPP });
+    od.styrMapp = Object.assign({}, od.styrMapp, { namn: namn + '/' + STYRARBETE + '/' + APPFILER });
+    od.styrRot = Object.assign({}, od.styrRot, { namn: namn + '/' + STYRARBETE });
+    odNu.mappar = {}; odNu.motesHistorik = null; odNu.amHandlingar = {}; odNu.syskonForslag = null;
+    sparaOd();
+    await sparaAppinstallningar({ mapp: od.mapp, rot: od.rot, lage: 'agare', regMapp: od.regMapp }).catch(function () { /* frivilligt */ });
+    if (odNu.roller) {
+      await hamtaRoller();
+      var ref = function (x) { return { driveId: x.driveId, id: x.id, namn: x.namn }; };
+      await sparaRoller(Object.assign({}, odNu.roller, { regMapp: ref(od.regMapp), styrMapp: ref(od.styrMapp), styrRot: ref(od.styrRot) }));
+    }
+    sattStatus('Synkad med OneDrive');
+    return { gjort: gjort };
   }
 
   // ---------- Mötesmappar ----------
@@ -7234,6 +7365,12 @@ var VERSIONER = [
         '<label style="display:flex;gap:8px;font-weight:normal"><input type="checkbox" id="odFlyttaAldre" style="width:auto" checked><span>Flytta en äldre mapp ' + esc(REGMAPP) + ' som ligger bredvid (om den finns) till ' + esc(REGMAPP) + '/Äldre medlemsregister.</span></label>' +
         '<p class="faint">Inget tas bort. Mapparna flyttas inom OneDrive, så delningar och inbjudningar fortsätter att fungera. En säkerhetskopia av bokföringen och styrelsens material laddas ner först.</p>' +
         '<div class="row"><input id="odNyMapp" value="' + esc(forslagAdministration()) + '" style="max-width:420px" aria-label="Den nya mappen"><button class="btn btn-small" data-action="od-flytta">Samla mapparna</button></div></details>' : '') +
+      (!lasLage() && od.lage === 'agare' && od.rot && od.styrRot ? '<details style="margin:8px 0"' + (odNu.syskonForslag ? ' open' : '') + '><summary>' + (odNu.syskonForslag ? '<strong>Flytta den samlade mappen till rätt plats</strong>' : 'Flytta den samlade mappen') + '</summary>' +
+        '<p class="faint">Mappen ligger i <strong>' + esc(od.rot.sokvag) + '</strong>.' + (odNu.syskonForslag ? ' Mappen <strong>' + esc(odNu.syskonForslag.styrelsearbete) + '</strong> ligger utanför den samlade mappen; flytta dit och slå ihop?' : '') + '</p>' +
+        '<label style="display:flex;gap:8px;font-weight:normal"><input type="checkbox" id="odFlyttaSA" style="width:auto" checked><span>Slå ihop en mapp ' + esc(STYRARBETE) + ' som ligger på den nya platsen med den samlade: innehållet flyttas in (mötesmapparna till ' + esc(MOTEN) + '), och den tomma mappen tas bort.</span></label>' +
+        '<label style="display:flex;gap:8px;font-weight:normal"><input type="checkbox" id="odFlyttaAldre" style="width:auto" checked><span>Flytta en äldre mapp ' + esc(REGMAPP) + ' på den nya platsen till ' + esc(REGMAPP) + '/Äldre medlemsregister.</span></label>' +
+        '<p class="faint">Inget skrivs över: krockar får ett tillägg i namnet, till exempel (2). Delningar och inbjudningar fortsätter att fungera.</p>' +
+        '<div class="row"><input id="odFlyttaRot" value="' + esc(odNu.syskonForslag ? odNu.syskonForslag.sokvag : '') + '" placeholder="t.ex. Föreningen/' + esc(ADMMAPP) + '" style="max-width:420px" aria-label="Ny plats"><button class="btn btn-small" data-action="od-flytta-rot">Flytta</button></div></details>' : '') +
       (odNu.regFel ? '<p class="fel">' + esc(odNu.regFel) + '</p>' : '') +
       '<div class="row"><button class="btn btn-small" data-action="od-synka">' + (lasLage() ? 'Hämta senaste' : 'Synka nu') + '</button>' +
       '<button class="btn btn-secondary btn-small" data-action="od-byt-mapp">Byt mapp</button>' +
@@ -7560,6 +7697,7 @@ var VERSIONER = [
 
   async function efterBokforing() {
     await hamtaRoller().catch(function (err) { odNu.rollFel = 'Rollerna: ' + err.message; });
+    await uppdateraSokvagar().catch(function () { /* frivilligt */ });
     await hamtaRegister().catch(function (err) { odNu.regFel = 'Medlemsregistret: ' + err.message; });
     await synkaStyrelsen().catch(function (err) { odNu.styrFel = 'Styrelsen: ' + err.message; });
   }
@@ -7804,7 +7942,13 @@ var VERSIONER = [
     if (!odAnslutet()) { el.innerHTML = ''; return; }
     var f = odNu.roller, s = odNu.senastSparat, inne = inneNu();
     var visa0 = inne.slice(0, 5);
-    el.innerHTML = visa0.map(function (x) {
+    // Den egna cirkeln först, lite nedtonad, så att det syns att närvaron fungerar.
+    var jagP = f && f.personer.find(function (y) { return y.epost === mig(); });
+    var jagInfo = '<strong>Du</strong>' + esc(jagP && jagP.apelido ? jagP.apelido + ' · ' + mig() : mig()) + '<br>' +
+      (jagP ? esc(jagP.roller.map(rollnamn).join(', ')) + '<br>' : '') + (kanSkriva() && f ? 'Har skrivrätten<br>' : '') +
+      (inne.length ? antal(inne.length, 'annan har', 'andra har') + ' appen öppen' : 'Ingen annan har appen öppen just nu');
+    var egen = mig() ? avatar(mig(), minBild(), 'jag' + (kanSkriva() && f ? ' skrivratt' : ''), jagInfo, 'Du' + (inne.length ? ', och ' + antal(inne.length, 'annan', 'andra') + ' har appen öppen' : '')) : '';
+    el.innerHTML = egen + visa0.map(function (x) {
       var p = f && f.personer.find(function (y) { return y.epost === x.vem; });
       var roller = p ? p.roller.map(rollnamn).join(', ') : '';
       var skriv = f ? f.skrivratt === x.vem : x.skrivratt;
@@ -10568,6 +10712,15 @@ var VERSIONER = [
         render();
         visa('Klart. Appens mappar ligger nu i ' + sokvag + '. ' + (res.gjort.length ? 'Flyttat: ' + res.gjort.join('; ') + '. ' : '') + (res.delat ? 'Styrelsearbete är delat med ' + antal(res.delat, 'person', 'personer') + '.' : ''));
       }).catch(function (err) { sattStatus('Flytten avbröts', true); visa('Flytten avbröts: ' + err.message + ' Inget är borttaget. Det som redan flyttats ligger i den nya mappen; försök igen så fortsätter appen.', true); });
+    },
+    'od-flytta-rot': function () {
+      var sokvag = varde('odFlyttaRot');
+      var opt = { styrelsearbete: (document.getElementById('odFlyttaSA') || {}).checked, aldre: (document.getElementById('odFlyttaAldre') || {}).checked };
+      if (!window.confirm('Flytta den samlade mappen till ' + sokvag + '? Inget tas bort förutom tomma mappar som slagits ihop.')) return;
+      flyttaSamladMapp(sokvag, opt).then(function (res) {
+        render();
+        visa('Klart. Den samlade mappen ligger nu i ' + sokvag + '. ' + res.gjort.join('; ') + '.');
+      }).catch(function (err) { sattStatus('Flytten avbröts', true); visa('Flytten avbröts: ' + err.message + ' Inget är borttaget; försök igen så fortsätter appen.', true); });
     },
     'od-valj-mapp': function () {
       var sokvag = varde('odSokvag');

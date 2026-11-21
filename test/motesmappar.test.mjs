@@ -39,3 +39,17 @@ test('årsmötets handlingar känns igen i filnamnen och bockas av i checklistan
   assert.deepEqual(json(klara), ['Kallelsens text', 'Valberedningens förslag', 'Balans- och resultaträkning', 'Revisionsberättelse']);
   assert.equal(K.bockaAvHandlingar(efter, 'arsmote-2027-03-15', st), efter, 'oförändrat när inget nytt finns');
 });
+
+test('sökvägen läses ut ur svaret från OneDrive', () => {
+  assert.equal(K.sokvagFranGraf('/drive/root:/Kimmy/Capoeira', 'Föreningsadministration'), 'Kimmy/Capoeira/Föreningsadministration');
+  assert.equal(K.sokvagFranGraf('/drive/root:', 'Föreningsadministration'), 'Föreningsadministration');
+  assert.equal(K.sokvagFranGraf('/drives/abc/root:/Kimmy/Capoeira%20Arte', ''), 'Kimmy/Capoeira Arte');
+  assert.equal(K.sokvagFranGraf(undefined, 'X'), 'X');
+});
+
+test('lediga namn när mappar slås ihop', () => {
+  assert.equal(K.ledigtNamn(['a.pdf'], 'b.pdf'), 'b.pdf');
+  assert.equal(K.ledigtNamn(['Protokoll.pdf'], 'protokoll.pdf'), 'protokoll (2).pdf');
+  assert.equal(K.ledigtNamn(['Protokoll.pdf', 'Protokoll (2).pdf'], 'Protokoll.pdf'), 'Protokoll (3).pdf');
+  assert.equal(K.ledigtNamn(['ÅM 2026'], 'ÅM 2026'), 'ÅM 2026 (2)');
+});
