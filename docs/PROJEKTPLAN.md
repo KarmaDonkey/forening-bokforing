@@ -106,7 +106,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 ## Struktur (från version 1.23)
 
-- Startsidan Översikt (att göra, medlemmar, på gång) och huvuddelarna Bokföring (med Fakturor och kvitton), Medlemmar, Styrelsen (Möten och protokoll, Beslut, Uppgifter, Förtroendeuppdrag, Ärenden, Årsmötet, Stockholms stad; från 1.29) och Inställningar.
+- Startsidan Översikt (att göra, medlemmar, på gång) och huvuddelarna Bokföring (med Fakturor och kvitton), Medlemsregister (Statistik, Att koppla, Medlemmar, Betalare, Avgifter, Personuppgifter; från 1.30), Styrelsen (Möten och protokoll, Beslut, Uppgifter, Förtroendeuppdrag, Ärenden, Årsmötet, Stockholms stad; från 1.29) och Inställningar.
 
 ## Styrelsen (från version 1.24)
 
