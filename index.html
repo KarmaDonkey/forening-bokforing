@@ -127,6 +127,20 @@
   .bankrad .belopp { font-weight: 600; white-space: nowrap; font-size: 16px; }
   .knapp-tag { background: none; cursor: pointer; font: inherit; font-size: 11px; }
   .tag.ok { color: var(--good); border-color: var(--good); }
+  .checklista { list-style: none; padding: 0; margin: 0; }
+  .checklista li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--hairline); }
+  .checklista li:last-child { border-bottom: 0; }
+  .checklista .bock { flex: 0 0 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; border: 2px solid var(--ink-faint); color: var(--ink-faint); }
+  .checklista .klar .bock { background: var(--good); border-color: var(--good); color: #fff; }
+  .checklista .varning .bock { border-color: var(--guld); color: var(--guld); }
+  .arsmote-form textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; }
+  .dok-rapport { min-height: 0; }
+  .dok-rapport p { margin: 0 0 6px; }
+  .dok-rubrik { color: #373F51; font-size: 12pt; text-transform: none; letter-spacing: 0; margin: 18px 0 6px; border-bottom: 1.5px solid #373F51; padding-bottom: 3px; }
+  .dok-summa-rad td { border-top: 1px solid #999; font-weight: 600; }
+  .dok-total-rad td { border-top: 1.5px solid #1a1a1a; font-weight: 700; }
+  .dok-underskrifter { display: grid; grid-template-columns: 1fr 1fr; gap: 26px 32px; margin-top: 30px; }
+  .dok-linje { border-bottom: 1px solid #1a1a1a; height: 34px; margin-bottom: 4px; }
   .trolig { background: var(--surface-2); border-radius: 8px; padding: 6px 10px; justify-content: space-between; }
   .logg { margin: 8px 0; padding-left: 18px; font-size: 14px; }
   a { color: var(--lank); }
@@ -174,6 +188,10 @@
     body.skriver-dokument .wrap, body.skriver-dokument .topp, body.skriver-dokument footer { display: none !important; }
     body.skriver-dokument #utskrift { display: block !important; }
     body.skriver-dokument .dok { width: auto; min-height: 265mm; padding: 0; }
+    body.skriver-dokument .dok-rapport { min-height: 0; }
+    .dok-rubrik { break-after: avoid; }
+    .dok-rader tr { break-inside: avoid; }
+    .dok-hela { break-inside: avoid; }
     @page { size: A4; margin: 15mm; }
   }
 </style>
@@ -205,6 +223,15 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.4', datum: '2026-11-21',
+    nyheter: [
+      'Ny flik "Bokslut" med en checklista: alla banktransaktioner bokförda, banken avstämd, underlag, balansräkningen, årets resultat, låsning och nästa år.',
+      'Knappar för att bokföra årets resultat mot eget kapital, låsa året och skapa nästa år.',
+      'Efter årsmötet kan resultatet balanseras i ny räkning (2069 → 2067) med en knapp.',
+      'Handlingar till årsmötet: ekonomisk berättelse (med ett utkast utifrån siffrorna), resultat- och balansräkning med jämförelse mot föregående år, förslag till resultatdisposition, redovisningsprinciper och underskrifter. Skrivs ut eller sparas som PDF.'
+    ]
+  },
   {
     version: '1.3', datum: '2026-11-21',
     nyheter: [
@@ -815,6 +842,73 @@ var VERSIONER = [
       // Obetalda fakturor och outlösta kvitton följer med till nästa år.
       underlag: oppnaUnderlag(ar)
     });
+  }
+
+  // ---------- Bokslut och årsmöte ----------
+
+  // Verifikation som för över årets resultat till eget kapital (8999 mot 2069) på årets sista dag.
+  function aretsResultatUtkast(ar) {
+    var s = saldon(ar);
+    if ((s['8999'] || 0) !== 0) throw BokforingsFel('Årets resultat är redan bokfört.');
+    var r = aretsResultat(ar);
+    if (r === 0) return null;
+    return {
+      datum: ar.slut, text: 'Årets resultat', underlagKommentar: 'Bokslut',
+      rader: [{ konto: '8999', belopp: r }, { konto: '2069', belopp: -r }]
+    };
+  }
+
+  // Efter årsmötet: förra årets resultat (ingående balans på 2069) balanseras i ny räkning på 2067.
+  function resultatdispositionUtkast(ar, datum) {
+    var v = (ar.ingaendeBalans['2069'] || 0);
+    var nu = saldon(ar)['2069'] || 0;
+    if (v === 0 || nu !== v) return null;
+    return {
+      datum: datum, text: 'Resultatdisposition enligt årsmötets beslut', underlagKommentar: 'Årsmötesprotokoll',
+      rader: [{ konto: '2069', belopp: -v }, { konto: '2067', belopp: v }]
+    };
+  }
+
+  function bokslutsKontroller(ar) {
+    var obokforda = oppnaBankrader(ar).length;
+    var avst = bankavstamning(ar);
+    var utanUnderlag = kontroller(ar).filter(function (w) { return w.typ === 'saknarUnderlag'; }).length;
+    var s = saldon(ar);
+    var resultat = aretsResultat(ar);
+    var lista = [
+      { id: 'bank', klar: obokforda === 0, text: obokforda ? antalText(obokforda, 'banktransaktion är inte bokförd.', 'banktransaktioner är inte bokförda.') : 'Alla inlästa banktransaktioner är bokförda.' },
+      { id: 'avstamning', klar: !!avst && avst.skillnad === 0 && avst.obokforda === 0,
+        text: !avst ? 'Inget kontoutdrag med saldo är inläst, så banken kan inte stämmas av.'
+          : avst.skillnad === 0 ? 'Bokfört saldo stämmer med banken ' + avst.datum + '.' + (avst.datum < laggTillDagar(ar.slut, -31) ? ' Kontoutdraget slutar dock mer än en månad före årets slut.' : '')
+          : 'Bokfört saldo skiljer ' + formatBelopp(avst.skillnad) + ' kr från banken ' + avst.datum + '.' },
+      { id: 'underlag', klar: utanUnderlag === 0, varning: true, text: utanUnderlag ? antalText(utanUnderlag, 'verifikation saknar', 'verifikationer saknar') + ' underlag.' : 'Alla verifikationer har underlag.' },
+      { id: 'balans', klar: balansrakning(ar).balanserar, text: balansrakning(ar).balanserar ? 'Balansräkningen går ihop.' : 'Balansräkningen går inte ihop.' },
+      { id: 'resultat', klar: (s['8999'] || 0) !== 0 || resultat === 0,
+        text: (s['8999'] || 0) !== 0 ? 'Årets resultat är bokfört mot eget kapital.' : resultat === 0 ? 'Årets resultat är noll.' : 'Årets resultat (' + formatBelopp(resultat) + ' kr) är inte bokfört mot eget kapital än.' },
+      { id: 'last', klar: ar.lastTom === ar.slut, text: ar.lastTom === ar.slut ? 'Året är låst.' : 'Året är inte låst.' }
+    ];
+    return lista;
+  }
+
+  function antalText(n, en, flera) { return n + ' ' + (n === 1 ? en : flera); }
+
+  function ekonomiskSammanfattning(ar) {
+    var rr = resultatrakning(ar);
+    var br = balansrakning(ar);
+    var intakter = rr.grupper.filter(function (g) { return g.namn === 'Verksamhetens intäkter'; }).reduce(function (x, g) { return x + g.summa; }, 0);
+    var kassa = br.tillgangar.grupper.filter(function (g) { return g.namn === 'Kassa och bank'; }).reduce(function (x, g) { return x + g.summa; }, 0);
+    var ek = br.egetKapitalOchSkulder.grupper.filter(function (g) { return g.namn === 'Eget kapital'; }).reduce(function (x, g) { return x + g.summa; }, 0);
+    return { ar: arNamn(ar), intakter: intakter, kostnader: intakter - rr.aretsResultat, resultat: rr.aretsResultat, kassaBank: kassa, egetKapital: ek };
+  }
+
+  // Ett första utkast till ekonomisk berättelse. Kassören redigerar texten innan den används.
+  function berattelseUtkast(nu, fore) {
+    var kr = function (o) { return formatBelopp(Math.abs(o)).replace(/,00$/, '') + ' kr'; };
+    var t = 'Under räkenskapsåret ' + nu.ar + ' hade föreningen intäkter på ' + kr(nu.intakter) + ' och kostnader på ' + kr(nu.kostnader) + '. ';
+    t += nu.resultat === 0 ? 'Årets resultat blev noll' : 'Årets resultat blev ett ' + (nu.resultat > 0 ? 'överskott' : 'underskott') + ' på ' + kr(nu.resultat);
+    if (fore) t += ' (föregående år ' + (fore.resultat === 0 ? 'noll' : (fore.resultat > 0 ? 'ett överskott' : 'ett underskott') + ' på ' + kr(fore.resultat)) + ')';
+    t += '. Vid årets slut hade föreningen ' + kr(nu.kassaBank) + ' i kassa och bank, och föreningens egna kapital uppgick till ' + (nu.egetKapital < 0 ? '−' : '') + kr(nu.egetKapital) + '.';
+    return t;
   }
 
   // ---------- Kontroller ----------
@@ -1780,6 +1874,11 @@ var VERSIONER = [
     valideraAr: valideraAr,
     kontroller: kontroller,
     sieExport: sieExport,
+    aretsResultatUtkast: aretsResultatUtkast,
+    resultatdispositionUtkast: resultatdispositionUtkast,
+    bokslutsKontroller: bokslutsKontroller,
+    ekonomiskSammanfattning: ekonomiskSammanfattning,
+    berattelseUtkast: berattelseUtkast,
     tillCp437: tillCp437,
     tolkaDatum: tolkaDatum,
     tolkaBankbelopp: tolkaBankbelopp,
@@ -2903,6 +3002,7 @@ var VERSIONER = [
     ['dokument', 'Fakturor och kvitton'],
     ['huvudbok', 'Huvudbok'],
     ['rapporter', 'Rapporter'],
+    ['bokslut', 'Bokslut'],
     ['kontoplan', 'Kontoplan'],
     ['arkiv', 'År och arkiv'],
     ['om', 'Om appen']
@@ -2937,6 +3037,7 @@ var VERSIONER = [
       dokument: vyDokument,
       huvudbok: vyHuvudbok,
       rapporter: vyRapporter,
+      bokslut: vyBokslut,
       kontoplan: vyKontoplan,
       arkiv: vyArkiv,
       om: vyOm
@@ -3355,6 +3456,119 @@ var VERSIONER = [
     return html;
   }
 
+  function nastaArFor(ar) {
+    var dagenEfter = K.laggTillDagar(ar.slut, 1);
+    var id = Object.keys(store.ar).find(function (k) { return store.ar[k].start === dagenEfter; });
+    return id || null;
+  }
+
+  function vyBokslut(ar) {
+    var namn = K.arNamn(ar);
+    var lista = K.bokslutsKontroller(ar);
+    var steg = {
+      bank: '<button class="btn btn-secondary btn-small" data-vy="inlasning">Gå till Läs in</button>',
+      avstamning: '<button class="btn btn-secondary btn-small" data-action="till-bankavstamning">Visa bankavstämning</button>',
+      underlag: '<button class="btn btn-secondary btn-small" data-vy="verifikationer">Visa verifikationer</button>',
+      balans: '',
+      resultat: '<button class="btn btn-small" data-action="bokfor-resultat">Bokför årets resultat</button>',
+      last: '<button class="btn btn-small" data-action="las-aret">Lås året</button>'
+    };
+    var html = '<h2>Bokslut ' + esc(namn) + '</h2><div class="card"><p style="margin-top:0" class="muted">Gå igenom stegen uppifrån och ner. Gröna steg är klara.</p><ol class="checklista">';
+    lista.forEach(function (x) {
+      html += '<li class="' + (x.klar ? 'klar' : x.varning ? 'varning' : 'kvar') + '"><span class="bock" aria-hidden="true">' + (x.klar ? '✓' : x.varning ? '!' : '○') + '</span>' +
+        '<div><div>' + esc(x.text) + '</div>' + (!x.klar && !lasLage() && steg[x.id] ? '<div class="row" style="margin-top:6px">' + steg[x.id] + '</div>' : '') + '</div></li>';
+    });
+    var nasta = nastaArFor(ar);
+    html += '<li class="' + (nasta ? 'klar' : 'kvar') + '"><span class="bock" aria-hidden="true">' + (nasta ? '✓' : '○') + '</span><div><div>' +
+      (nasta ? 'Nästa räkenskapsår (' + esc(nasta) + ') är skapat med ingående balanser.' : 'Nästa räkenskapsår är inte skapat än.') + '</div>' +
+      (!nasta && !lasLage() ? '<div class="row" style="margin-top:6px"><button class="btn btn-small" data-action="nasta-ar">Skapa nästa räkenskapsår</button></div>' : '') + '</div></li>';
+    if (nasta) {
+      var disp = K.resultatdispositionUtkast(store.ar[nasta], store.ar[nasta].start);
+      var gjord = !disp;
+      html += '<li class="' + (gjord ? 'klar' : 'kvar') + '"><span class="bock" aria-hidden="true">' + (gjord ? '✓' : '○') + '</span><div><div>' +
+        (gjord ? 'Resultatet är balanserat i ny räkning i ' + esc(nasta) + '.' : 'Efter årsmötet: för över årets resultat till balanserat resultat (2069 → 2067) i ' + esc(nasta) + '.') + '</div>' +
+        (!gjord && !lasLage() ? '<div class="row" style="margin-top:6px"><input type="date" id="dispDatum" style="width:auto" value="' + esc(standardDatum(store.ar[nasta])) + '">' +
+          '<button class="btn btn-small" data-action="bokfor-disposition" data-ar="' + esc(nasta) + '">Bokför resultatdisposition</button></div>' : '') + '</div></li>';
+    }
+    html += '</ol></div>';
+    html += vyArsmote(ar);
+    return html;
+  }
+
+  function arsmoteData(ar) {
+    return Object.assign({ berattelse: '', principer: 'Föreningen tillämpar bokföringslagen och god redovisningssed för ideella föreningar.', forslag: '', ort: '', datum: '', underskrifter: '' }, ar.arsmote || {});
+  }
+
+  function vyArsmote(ar) {
+    var a = arsmoteData(ar);
+    var res = K.aretsResultat(ar);
+    var forslagStandard = 'Styrelsen föreslår att årets resultat, ' + (res < 0 ? 'underskott ' : 'överskott ') + kr(Math.abs(res)) + ' kr, balanseras i ny räkning.';
+    var lasbar = lasLage() ? ' readonly' : '';
+    var html = '<h2>Handlingar till årsmötet</h2><div class="card arsmote-form">' +
+      '<p class="muted" style="margin-top:0">Ekonomisk redovisning med berättelse, resultat- och balansräkning med jämförelse mot föregående år, förslag till resultatdisposition och plats för underskrifter.</p>' +
+      '<label for="amBerattelse">Ekonomisk berättelse</label><textarea id="amBerattelse" data-arsmote="berattelse" rows="6"' + lasbar + '>' + esc(a.berattelse) + '</textarea>' +
+      (lasLage() ? '' : '<div class="row" style="margin-top:6px"><button class="btn btn-secondary btn-small" data-action="berattelse-utkast">Fyll i ett utkast utifrån siffrorna</button></div>') +
+      '<label for="amForslag">Förslag till resultatdisposition</label><textarea id="amForslag" data-arsmote="forslag" rows="2" placeholder="' + esc(forslagStandard) + '"' + lasbar + '>' + esc(a.forslag) + '</textarea>' +
+      '<label for="amPrinciper">Redovisningsprinciper</label><textarea id="amPrinciper" data-arsmote="principer" rows="2"' + lasbar + '>' + esc(a.principer) + '</textarea>' +
+      '<div class="grid2"><div><label for="amOrt">Ort</label><input id="amOrt" data-arsmote="ort" value="' + esc(a.ort) + '"' + lasbar + '></div>' +
+      '<div><label for="amDatum">Datum för underskrift</label><input id="amDatum" type="date" data-arsmote="datum" value="' + esc(a.datum) + '"' + lasbar + '></div></div>' +
+      '<label for="amUnderskrifter">Styrelsen (ett namn per rad, gärna med roll)</label><textarea id="amUnderskrifter" data-arsmote="underskrifter" rows="4" placeholder="Förnamn Efternamn, ordförande"' + lasbar + '>' + esc(a.underskrifter) + '</textarea>' +
+      '<div class="row" style="margin-top:12px"><button class="btn" data-action="skriv-ut-arsmote">Förhandsgranska och skriv ut</button></div></div>';
+    if (odNu.visaArsmote) {
+      html += '<div class="card"><div class="row" style="justify-content:space-between"><strong>Förhandsvisning</strong><div class="row">' +
+        '<button class="btn btn-small" data-action="skriv-ut-arsmote-nu">Skriv ut / spara som PDF</button><button class="btn btn-secondary btn-small" data-action="stang-arsmote">Stäng</button></div></div>' +
+        '<div class="forhandsvisning" style="margin-top:8px">' + arsmoteInnehall(ar) + '</div></div>';
+    }
+    return html;
+  }
+
+  function arsmoteInnehall(ar) {
+    var a = arsmoteData(ar);
+    var f = store.forening;
+    var fg = foregaende(ar);
+    var rr = K.resultatrakning(ar, { foregaende: fg });
+    var br = K.balansrakning(ar);
+    var namnNu = K.arNamn(ar), namnFg = fg ? K.arNamn(fg) : 'Föregående år';
+    var res = rr.aretsResultat;
+    var forslag = a.forslag || ('Styrelsen föreslår att årets resultat, ' + (res < 0 ? 'underskott ' : 'överskott ') + kr(Math.abs(res)) + ' kr, balanseras i ny räkning.');
+    var stycken = function (t) { return rader(t).map(function (r) { return '<p>' + esc(r) + '</p>'; }).join(''); };
+    var tabell = function (rubriker, kropp) {
+      return '<table class="dok-rader"><thead><tr>' + rubriker.map(function (r, i) { return '<th' + (i ? ' class="num"' : '') + '>' + r + '</th>'; }).join('') + '</tr></thead><tbody>' + kropp + '</tbody></table>';
+    };
+    var html = '<div class="dok dok-rapport">' +
+      '<div class="dok-huvud"><div>' + (logoUrl ? '<img class="dok-logo" src="' + esc(logoUrl) + '" alt="">' : '') +
+      '<div class="dok-forening">' + esc(f.namn || '') + '</div>' + (f.orgnr ? '<div>Org.nr ' + esc(f.orgnr) + '</div>' : '') + '</div>' +
+      '<div><div class="dok-titel">Ekonomisk redovisning</div><div style="text-align:right">Räkenskapsåret ' + esc(ar.start) + ' – ' + esc(ar.slut) + '</div></div></div>';
+    html += '<h3 class="dok-rubrik">Ekonomisk berättelse</h3>' + (a.berattelse ? stycken(a.berattelse) : '<p class="faint">(Ingen berättelse ifylld.)</p>');
+    html += '<h3 class="dok-rubrik">Resultaträkning</h3>';
+    var kropp = '';
+    rr.grupper.forEach(function (g) {
+      kropp += '<tr><td colspan="3"><strong>' + esc(g.namn) + '</strong></td></tr>';
+      g.konton.forEach(function (r) { kropp += '<tr><td>' + esc(r.namn) + '</td><td class="num">' + kr(r.belopp) + '</td><td class="num">' + (fg ? kr(r.jamforelse) : '') + '</td></tr>'; });
+      kropp += '<tr class="dok-summa-rad"><td>Summa ' + esc(g.namn.toLowerCase()) + '</td><td class="num">' + kr(g.summa) + '</td><td class="num">' + (fg ? kr(g.jamforelse) : '') + '</td></tr>';
+    });
+    kropp += '<tr class="dok-total-rad"><td>Årets resultat</td><td class="num">' + kr(res) + '</td><td class="num">' + (fg ? kr(rr.jamforelseResultat) : '') + '</td></tr>';
+    html += tabell(['', esc(namnNu), fg ? esc(namnFg) : ''], kropp);
+    html += '<h3 class="dok-rubrik">Balansräkning</h3>';
+    kropp = '';
+    [['Tillgångar', br.tillgangar], ['Eget kapital och skulder', br.egetKapitalOchSkulder]].forEach(function (d) {
+      d[1].grupper.forEach(function (g) {
+        kropp += '<tr><td colspan="3"><strong>' + esc(g.namn) + '</strong></td></tr>';
+        g.konton.forEach(function (r) { kropp += '<tr><td>' + esc(r.namn) + '</td><td class="num">' + kr(r.belopp) + '</td><td class="num">' + kr(r.jamforelse) + '</td></tr>'; });
+      });
+      kropp += '<tr class="dok-total-rad"><td>Summa ' + d[0].toLowerCase() + '</td><td class="num">' + kr(d[1].summa) + '</td><td class="num">' + kr(d[1].ingaende) + '</td></tr>';
+    });
+    html += tabell(['', esc(ar.slut), esc(K.laggTillDagar(ar.start, -1))], kropp);
+    html += '<h3 class="dok-rubrik">Förslag till resultatdisposition</h3>' + stycken(forslag);
+    html += '<h3 class="dok-rubrik">Redovisningsprinciper</h3>' + stycken(a.principer);
+    var namnLista = rader(a.underskrifter);
+    html += '<div class="dok-hela"><h3 class="dok-rubrik">Underskrifter</h3><p>' + esc([a.ort, a.datum].filter(Boolean).join(' ') || 'Ort och datum: ______________________') + '</p>' +
+      '<div class="dok-underskrifter">' + (namnLista.length ? namnLista : ['', '', '']).map(function (n) {
+        return '<div><div class="dok-linje"></div>' + esc(n) + '</div>';
+      }).join('') + '</div></div>';
+    return html + '</div>';
+  }
+
   function vyKontoplan(ar) {
     var html = '<h2>Kontoplan</h2><div class="card"><div class="grid2"><div><label for="nyttNr">Kontonummer</label><input id="nyttNr" inputmode="numeric" maxlength="4"></div>' +
       '<div><label for="nyttNamn">Namn</label><input id="nyttNamn"></div></div>' +
@@ -3643,7 +3857,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning'];
+  var LASBARA = ['skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport]');
@@ -3697,7 +3911,14 @@ var VERSIONER = [
       }
       render();
     }
-    if (lasLage() && (t.dataset.forening || t.dataset.lista || t.dataset.underlag)) { visa('Endast läsning.', true); return; }
+    if (lasLage() && (t.dataset.forening || t.dataset.lista || t.dataset.underlag || t.dataset.arsmote)) { visa('Endast läsning.', true); return; }
+    if (t.dataset.arsmote) {
+      var arA = aktivt();
+      var am = arsmoteData(arA);
+      am[t.dataset.arsmote] = t.value;
+      setAktivt(Object.assign({}, arA, { arsmote: am }));
+      if (odNu.visaArsmote) render();
+    }
     if (t.dataset.forening) {
       store.forening[t.dataset.forening] = t.value.trim();
       spara();
@@ -3878,6 +4099,49 @@ var VERSIONER = [
       setAktivt(K.sattIngaendeSaldo(aktivt(), '1930', Number(t.dataset.belopp)));
       visa('Ingående balans på 1930 är satt till ' + kr(Number(t.dataset.belopp)) + ' kr.');
     },
+    'bokfor-resultat': function () {
+      var ar = aktivt();
+      var u = K.aretsResultatUtkast(ar);
+      if (!u) { visa('Årets resultat är noll, så inget behöver bokföras.'); return; }
+      if (!window.confirm('Bokföra årets resultat, ' + kr(u.rader[0].belopp) + ' kr, mot konto 2069 den ' + u.datum + '?')) return;
+      var res = K.bokfor(ar, Object.assign({}, u, { registrerad: new Date().toISOString() }));
+      setAktivt(res.ar);
+      visa('Årets resultat är bokfört som verifikation ' + res.verifikation.nr + '.');
+    },
+    'las-aret': function () {
+      var ar = aktivt();
+      if (!window.confirm('Lås hela räkenskapsåret ' + K.arNamn(ar) + '? Därefter kan inget bokföras med datum i året. (En upplåsning går att göra men loggas.)')) return;
+      setAktivt(K.lasPeriod(ar, ar.slut, new Date().toISOString()));
+      visa('Räkenskapsåret ' + K.arNamn(ar) + ' är låst.');
+    },
+    'bokfor-disposition': function (t) {
+      var id = t.dataset.ar;
+      var u = K.resultatdispositionUtkast(store.ar[id], varde('dispDatum'));
+      if (!u) return;
+      var res = K.bokfor(store.ar[id], Object.assign({}, u, { registrerad: new Date().toISOString() }));
+      store.ar[id] = res.ar;
+      spara();
+      visa('Resultatdispositionen är bokförd i ' + id + ' som verifikation ' + res.verifikation.nr + '.');
+    },
+    'berattelse-utkast': function () {
+      var ar = aktivt();
+      var fg = foregaende(ar);
+      var a = arsmoteData(ar);
+      if (a.berattelse && !window.confirm('Ersätta texten i ekonomisk berättelse med ett nytt utkast?')) return;
+      a.berattelse = K.berattelseUtkast(K.ekonomiskSammanfattning(ar), fg ? K.ekonomiskSammanfattning(fg) : null);
+      setAktivt(Object.assign({}, ar, { arsmote: a }));
+      render();
+    },
+    'skriv-ut-arsmote': function () { odNu.visaArsmote = true; render(); },
+    'stang-arsmote': function () { odNu.visaArsmote = false; render(); },
+    'skriv-ut-arsmote-nu': function () {
+      document.getElementById('utskrift').innerHTML = arsmoteInnehall(aktivt());
+      document.body.classList.add('skriver-dokument');
+      var klar = function () { document.body.classList.remove('skriver-dokument'); window.removeEventListener('afterprint', klar); };
+      window.addEventListener('afterprint', klar);
+      window.print();
+      setTimeout(klar, 1000);
+    },
     'oppna-ver': function (t) { vy = 'verifikationer'; oppenVer = Number(t.dataset.nr); meddelande = null; render(); },
     'till-bankavstamning': function () { vy = 'rapporter'; rapportVy = 'bank'; meddelande = null; render(); },
     'koppla-trolig': function (t) {
@@ -3995,8 +4259,16 @@ var VERSIONER = [
       visa('Perioden är upplåst. Upplåsningen är sparad i loggen.');
     },
     'nasta-ar': function () {
+      var fran = store.aktivt;
       var nytt = K.nastaAr(aktivt());
       laggTillAr(nytt);
+      if (vy === 'bokslut') {
+        // Stanna kvar i bokslutet för året som stängs.
+        store.aktivt = fran;
+        sparaLokalt();
+        visa('Räkenskapsåret ' + K.arNamn(nytt) + ' är skapat med ingående balanser. Du kan byta år överst på sidan.');
+        return;
+      }
       vy = 'verifikationer';
       visa('Räkenskapsåret ' + K.arNamn(nytt) + ' är skapat med ingående balanser.');
     },
