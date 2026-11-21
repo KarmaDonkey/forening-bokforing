@@ -110,6 +110,10 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Underskrift per protokoll: elektroniskt (Microsoft-inloggning, tid och SHA-256-kontrollsumma, signatursida i PDF:en, kontroll i appen) eller papper (PDF med underskriftsrader, inskannat original laddas upp). Den som saknar konto i appen kan bara skriva under på papper.
 - Att utreda: om Stockholms stad och banken godtar enkel elektronisk underskrift.
 
+## Närvaro (från version 1.25)
+
+- De som har appen öppen visas som cirklar överst (initialer från apelido eller e-post, eller en egen bild), med apelido, roller, skrivrätt och senaste aktivitet när man håller muspekaren över eller trycker. Närvaron skrivs i `narvaro.json` i bokföringsmappen, eller i mappen Styrelsen för styrelsen som bara läser bokföringen. Revisorn syns inte. Den egna bilden förminskas till 96 punkter och sparas i användarens egen appmapp.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
