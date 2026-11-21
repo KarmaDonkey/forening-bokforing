@@ -303,6 +303,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.9', datum: '2026-11-21',
+    nyheter: [
+      'Dela skickar nu bara PDF-filen, utan titel och text, så att Mail, Messenger och WhatsApp tar emot den som en bilaga.',
+      'På iPhone och iPad finns en knapp, "Dela, spara eller skriv ut", som öppnar delningsmenyn. Där finns även Spara i Filer.',
+      'Om delningen inte går visar appen varför, i stället för att öppna filen i ett visningsläge som bara kan dela en ogiltig länk.'
+    ]
+  },
+  {
     version: '1.8', datum: '2026-11-21',
     nyheter: [
       'Fakturor, kvitton och handlingar till årsmötet blir riktiga PDF-filer i A4, med text som går att markera och söka i.',
@@ -3399,23 +3407,39 @@ var VERSIONER = [
     try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.pdf', { type: 'application/pdf' })] })); } catch (e) { return false; }
   }
   function arIosHemskarm() { return window.navigator.standalone === true; }
+  function arIos() { return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
 
   function pdfKnappar(nyckel, utskriftsAction, id) {
-    return (kanDela() ? '<button class="btn btn-small" data-action="dela-pdf" data-pdf="' + esc(nyckel) + '" disabled>Dela / skicka</button>' : '') +
-      '<button class="btn ' + (kanDela() ? 'btn-secondary ' : '') + 'btn-small" data-action="ladda-ner-pdf" data-pdf="' + esc(nyckel) + '" disabled>Ladda ner PDF</button>' +
-      (arIosHemskarm() ? '' : '<button class="btn btn-secondary btn-small" data-action="' + utskriftsAction + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>Skriv ut</button>') +
-      '<span data-pdf-status="' + esc(nyckel) + '" class="faint">Skapar PDF…</span>';
+    var html = '';
+    if (arIos()) {
+      // På iPhone och iPad går allt via delningsmenyn: skicka, Spara i Filer eller Skriv ut.
+      html += kanDela()
+        ? '<button class="btn btn-small" data-action="dela-pdf" data-pdf="' + esc(nyckel) + '" disabled>Dela, spara eller skriv ut</button>'
+        : '<span class="fel">Den här webbläsaren kan inte dela filer. Öppna appen i Safari och försök igen.</span>';
+    } else {
+      if (kanDela()) html += '<button class="btn btn-small" data-action="dela-pdf" data-pdf="' + esc(nyckel) + '" disabled>Dela / skicka</button>';
+      html += '<button class="btn ' + (kanDela() ? 'btn-secondary ' : '') + 'btn-small" data-action="ladda-ner-pdf" data-pdf="' + esc(nyckel) + '" disabled>Ladda ner PDF</button>';
+    }
+    if (!arIosHemskarm()) html += '<button class="btn btn-secondary btn-small" data-action="' + utskriftsAction + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>Skriv ut</button>';
+    return html + '<span data-pdf-status="' + esc(nyckel) + '" class="faint">Skapar PDF…</span>';
   }
 
   function delaEllerLaddaNer(nyckel, dela) {
     var c = pdfCache[nyckel];
     if (!c || c.status !== 'klar') return;
     var namn = nyckel.split('|')[1];
-    if (dela && kanDela()) {
-      var fil = new File([c.blob], namn, { type: 'application/pdf' });
-      navigator.share({ files: [fil], title: namn.replace(/\.pdf$/, '') }).catch(function (err) {
+    if (dela) {
+      // Bara filen, utan titel eller text: då tar Mail, Messenger och WhatsApp emot den som en bilaga.
+      var fil = new File([c.blob], namn, { type: 'application/pdf', lastModified: Date.now() });
+      if (!navigator.canShare || !navigator.canShare({ files: [fil] })) {
+        visa('Den här webbläsaren kan inte dela PDF-filer.' + (arIos() ? ' Öppna appen i Safari och försök igen.' : ' Använd Ladda ner PDF.'), true);
+        return;
+      }
+      navigator.share({ files: [fil] }).catch(function (err) {
         if (err && err.name === 'AbortError') return;
-        laddaNer(namn, c.blob, 'application/pdf');
+        // Ingen tyst reservväg: visa varför delningen inte gick.
+        visa('PDF:en kunde inte delas (' + ((err && (err.name + ': ' + err.message)) || 'okänt fel') + ').' +
+          (arIosHemskarm() ? ' Prova att öppna appen i Safari i stället för från hemskärmen.' : ''), true);
       });
       return;
     }
