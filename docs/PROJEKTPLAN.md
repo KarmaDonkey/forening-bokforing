@@ -97,7 +97,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 ## Börja om (från version 1.31)
 
 - Testdatat tas bort och det som valts behålls: föreningens uppgifter, kontoplanen, avgifterna, medlemmarna (med eller utan betalningar), förtroendeuppdragen och arkivkopiorna. Roller, mappar och delningar finns alltid kvar.
-- Först laddas en helkopia ner och läggs i övningsläget, och appens testfiler i OneDrive flyttas till en mapp Testdata.
+- Först sparas en helkopia (i OneDrive under Testdata, eller som nedladdad fil utan OneDrive) och läggs i övningsläget, och appens testfiler i OneDrive flyttas till en mapp Testdata.
 - Nästa räkenskapsår kan skapas från en arkivkopia (utgående saldon blir ingående balans, resultatet på 2069).
 
 ## Förklaringar (från version 1.21)
