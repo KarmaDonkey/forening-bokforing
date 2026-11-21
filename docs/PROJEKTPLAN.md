@@ -50,7 +50,7 @@ Lagen kräver troligen inte formellt att vi bokför, eftersom en ideell förenin
 | **0. Uppstart** | Repo, åtkomst till OneDrive-mappen, den här planen | Jag kan läsa Excel-filerna och några fakturor |
 | **1. Analys av historiken** (2025 klart, se [krav-fran-2025.md](krav-fran-2025.md)) | Gå igenom Excel 2012–idag och fakturorna: använda konton, typer av händelser, volym per år, egna lösningar och avvikelser | En behovsrapport och en kontoplan som vi enats om |
 | **2. Kärnan** (klar) | Datamodell, verifikationer, kontoplan, IB/UB, låsning av perioder, rapportberäkningar, automatiska tester | Testerna går igenom och RR/BR stämmer på testdata |
-| **3. Historikimport** (grovkopior från 1.14) | Föra över varje år från Excel till verifikationer och koppla underlagen | UB per år stämmer exakt mot Excel för alla år |
+| **3. Historikimport** (arkivkopior från 1.14) | Föra över varje år från Excel till verifikationer och koppla underlagen | UB per år stämmer exakt mot Excel för alla år |
 | **4. Inläsning av underlag** (klar, 0.2–1.2) | Släpp in PDF/bild, Claude föreslår, jag godkänner, regler lärs in | Ett nytt kvitto bokförs med två klick |
 | **5. Bankavstämning** (klar, 1.3) | Import av bankens CSV, matchning mot verifikationer, lista över omatchade rader | Bankkontot stämmer mot banken månad för månad |
 | **6. Bokslut och årsmöte** (klar, 1.4) | Årsbokslut, resultatdisposition, nytt år, PDF-rapporter, budget | Årsmöteshandlingarna för 2026 kommer ur verktyget |
@@ -63,13 +63,13 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - ~~Spara bokföring och underlag i föreningens OneDrive~~ (klart i version 1.0).
 - Prova inläsningen på riktiga kontoutdrag från Swedbank och riktiga fakturor, och justera efter det.
-- Fas 3: tidigare år läses in som låsta grovkopior från Excel-arbetsböckerna (version 1.14), med avgifterna i medlemsregistret. Nästa steg är att kunna föra över ett år helt, med underlag kopplade till verifikationerna, ett år i taget.
-- Fel som hittas i gamla år: grovkopian ändras inte. Felet antecknas på grovkopian och rättas i det öppna året om det påverkar saldona i dag.
+- Fas 3: tidigare år läses in som låsta arkivkopior från Excel-arbetsböckerna (version 1.14), med avgifterna i medlemsregistret. Nästa steg är att kunna föra över ett år helt, med underlag kopplade till verifikationerna, ett år i taget.
+- Fel som hittas i gamla år: arkivkopian ändras inte. Felet antecknas på arkivkopian och rättas i det öppna året om det påverkar saldona i dag.
 
 ## Mappar i OneDrive (från version 1.14)
 
 - Appens mapp, t.ex. `Föreningen/Föreningsbokföring`, med undermapparna `Bokföring och underlag` (bokföringen, logotypen och årsmappar med underlag; kan delas med revisorn) och `Medlemsregister` (delas inte).
-- Föreningens Excel-filer ligger kvar där de är och läses in i appen som grovkopior.
+- Föreningens Excel-filer ligger kvar där de är och läses in i appen som arkivkopior.
 
 ## Revisorn (från version 1.15)
 

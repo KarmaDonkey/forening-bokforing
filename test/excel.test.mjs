@@ -86,7 +86,7 @@ test('grovkopian är ett låst år som får avvika', () => {
   eq(K.valideraAr(ar), []);
   assert.equal(ar.lastTom, '2030-12-31');
   assert.equal(ar.grovkopia.fil, '2030.xlsm');
-  assert.throws(() => K.lasUpp(ar), /grovkopia/);
+  assert.throws(() => K.lasUpp(ar), /arkivkopia/);
   assert.throws(() => K.bokfor(ar, { datum: '2030-05-01', text: 'x', rader: [{ konto: '1930', belopp: 100 }, { konto: '3000', belopp: -100 }] }), /låst/);
   const rr = K.resultatrakning(ar);
   assert.ok(rr.grupper.length > 0);
@@ -120,4 +120,23 @@ test('arbetsbok utan de flikar som behövs', () => {
   const t = K.tolkaArsbok({ flikar: { Blad1: [['x']] } }, '2019.xlsx');
   eq(t.saknas, ['Kontoplan_lookup', 'Grundbok', 'IngåendeBalanser', 'Bankkonto']);
   assert.equal(t.ar, '2019');
+});
+
+test('medlemsbetalningar från ett års Excel-fil kan tas bort', () => {
+  let reg = K.tomtRegister();
+  reg = K.lasInHistorik(reg, K.tolkaArsbok(arbetsbok(), 'x.xlsm'), {}).reg;
+  reg = K.laggTillMedlem(reg, { namn: 'Manuell Medlem', kategori: 'vuxen' }).reg;
+  reg = K.registreraBetalning(reg, { datum: '2031-02-01', belopp: kr(1300), termin: 'VT-31', poster: [{ medlem: 'm1', typ: 'termin', belopp: kr(1300) }] });
+  const h = K.historikFranAr(reg, '2030');
+  assert.equal(h.betalningar, 3);
+  eq(h.medlemmarUtanBetalning.map((m) => m.namn), ['Vuxen Exempel']);
+  eq(K.historikFranAr(reg, '2029'), { betalningar: 0, medlemmarUtanBetalning: [] });
+  const utan = K.taBortHistorikFranAr(reg, '2030', { medlemmar: true });
+  assert.equal(utan.betalningar.length, 1);
+  eq(utan.medlemmar.map((m) => m.namn), ['Ett Påhittad', 'Manuell Medlem']);
+  assert.ok(!utan.betalare.some((b) => b.medlemmar.includes('m2')));
+  assert.equal(K.taBortHistorikFranAr(reg, '2030').medlemmar.length, 3, 'utan val tas inga medlemmar bort');
+  // Inläst igen efteråt: allt kommer tillbaka.
+  const igen = K.lasInHistorik(utan, K.tolkaArsbok(arbetsbok(), 'x.xlsm'), {});
+  eq(igen.antal.betalningar, 3);
 });
