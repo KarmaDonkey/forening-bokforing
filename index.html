@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#2B2A27" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bokföring">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Föreningsbokföring</title>
 <link rel="icon" id="ikon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23373F51'/%3E%3Cpath d='M20 22h24M20 32h24M20 42h16' stroke='%23E5AE1F' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -69,15 +75,21 @@
   * { box-sizing: border-box; }
   body {
     margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
     background: var(--bg);
     color: var(--ink);
     font: 15.5px/1.55 "Roboto Flex", system-ui, sans-serif;
     font-variant-numeric: tabular-nums;
   }
-  .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
-  .topp { background: var(--surface); border-bottom: 1px solid var(--hairline); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 16px max(16px, env(safe-area-inset-right)) 16px max(16px, env(safe-area-inset-left)); }
+  .nowrap { white-space: nowrap; }
+  .wrap { flex: 1 0 auto; width: 100%; }
+  .topp { background: var(--surface); padding-top: env(safe-area-inset-top); }
   header { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 16px 10px; text-align: center; }
   .logo-bricka { background: #fff; border-radius: 50%; padding: 6px; display: inline-flex; }
+  .logo-bricka[hidden] { display: none; }
   #logo { height: 84px; width: auto; display: block; border-radius: 50%; }
   h1 { font: 700 26px/1.2 "Roboto Flex", system-ui, sans-serif; letter-spacing: -0.01em; margin: 0; color: var(--ink); }
   h2 { font: 500 21px/1.3 "Roboto Flex", system-ui, sans-serif; margin: 24px 0 10px; color: var(--ink); }
@@ -86,7 +98,8 @@
   #arvaljare select { padding: 3px 8px; font-size: 13px; border-radius: 999px; }
   #synkstatus { font-size: 12px; color: var(--ink-faint); min-height: 1em; }
   #synkstatus.fel { color: var(--over); }
-  nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 18px; padding: 6px 16px 0; max-width: 1000px; margin: 0 auto; }
+  nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 18px; padding: 6px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+    position: sticky; top: 0; z-index: 20; background: var(--surface); border-bottom: 1px solid var(--hairline); }
   nav button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--ink); padding: 10px 2px 8px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
   nav button:hover { border-bottom-color: var(--hairline); }
   nav button[aria-current="page"] { border-bottom-color: var(--guld); }
@@ -144,7 +157,7 @@
   .trolig { background: var(--surface-2); border-radius: 8px; padding: 6px 10px; justify-content: space-between; }
   .logg { margin: 8px 0; padding-left: 18px; font-size: 14px; }
   a { color: var(--lank); }
-  footer { margin-top: 40px; background: var(--kol); color: var(--kol-text); text-align: center; padding: 22px 16px; font-size: 13px; }
+  footer { margin-top: 40px; background: var(--kol); color: var(--kol-text); text-align: center; padding: 22px 16px calc(22px + env(safe-area-inset-bottom)); font-size: 13px; }
   .lank-knapp { background: none; border: 0; color: var(--kol-text); font: inherit; cursor: pointer; text-decoration: underline; opacity: .8; }
   .dropzon { border: 2px dashed rgba(55, 63, 81, 0.3); border-radius: 12px; }
   .listpost { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) auto; gap: 6px; align-items: end; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
@@ -181,6 +194,69 @@
   .dok-kvittoinfo { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 18px; }
   .dok-fot { margin-top: auto; padding-top: 10px; border-top: 1px solid #bbb; display: flex; gap: 18px; font-size: 9pt; color: #333; }
   .dok-fot > div { flex: 1; }
+  .bara-touch { display: none; }
+  @media (hover: none) and (pointer: coarse) {
+    .bara-mus { display: none; }
+    .bara-touch { display: inline; }
+    .btn { min-height: 42px; }
+    .btn-small { min-height: 36px; }
+    nav button { padding: 12px 2px 10px; }
+    .knapp-tag { padding: 4px 8px; font-size: 12px; }
+  }
+  /* Telefon */
+  @media (max-width: 700px) {
+    header { padding: 12px 16px 6px; gap: 4px; }
+    #logo { height: 50px; }
+    h1 { font-size: 19px; line-height: 1.25; }
+    h2 { font-size: 19px; margin: 18px 0 8px; }
+    nav { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; gap: 0 18px; padding-top: 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; scroll-padding: 0 16px; }
+    nav::-webkit-scrollbar { display: none; }
+    nav { -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); mask-image: linear-gradient(to right, #000 85%, transparent); }
+    nav.i-slutet { -webkit-mask-image: none; mask-image: none; }
+    nav button { white-space: nowrap; flex: 0 0 auto; }
+    .wrap { padding-top: 10px; }
+    /* 16 px förhindrar att iPhone zoomar in när man trycker i ett fält. */
+    input, select, textarea, .arsmote-form textarea, .listpost textarea, .dok-form textarea { font-size: 16px; }
+    .card { padding: 14px; border-radius: 10px; }
+    th, td { padding: 6px 5px; }
+    .forhandsvisning { padding: 6px; }
+    .forhandsvisning .dok { zoom: 0.48; }
+    /* Tabeller med många kolumner visas som kort. */
+    table.kortlista thead { display: none; }
+    table.kortlista tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--hairline); }
+    table.kortlista td { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border: 0; padding: 3px 0; text-align: right; }
+    table.kortlista td > * { text-align: right; }
+    table.kortlista td[data-etikett]::before { content: attr(data-etikett); color: var(--ink-soft); font-size: 13px; text-align: left; flex: 0 0 auto; }
+    table.kortlista td:not([data-etikett]) { display: block; text-align: left; }
+    table.kortlista input { width: 140px !important; }
+    table.kortlista tr.total td { border-top: 0; }
+    /* Fakturarader: en rad per fält. */
+    table.dokrader thead { display: none; }
+    table.dokrader tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; padding: 10px 0; border-bottom: 1px solid var(--hairline); }
+    table.dokrader td { display: block; padding: 0; }
+    table.dokrader td[data-etikett]::before { content: attr(data-etikett); display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 2px; }
+    table.dokrader td.hel { grid-column: 1 / -1; }
+    table.dokrader input, table.dokrader select { width: 100% !important; min-width: 0 !important; }
+    .checklista li { gap: 10px; }
+    /* Knappar i tabellceller får radbrytas i stället för att klippas av. */
+    td[style*="nowrap"] { white-space: normal !important; }
+    td[style*="nowrap"] .btn { margin: 2px 0; }
+  }
+  @media (max-width: 380px) {
+    .forhandsvisning .dok { zoom: 0.42; }
+  }
+  /* Stora skärmar */
+  @media (min-width: 1600px) {
+    body { font-size: 16.5px; }
+    .wrap { max-width: 1180px; }
+    #logo { height: 96px; }
+    h1 { font-size: 30px; }
+  }
+  @media (min-width: 2200px) {
+    body { font-size: 18px; }
+    .wrap { max-width: 1400px; }
+    nav button { font-size: 15.5px; }
+  }
   @media print {
     .topp, nav, footer, .ej-utskrift { display: none !important; }
     body { background: #fff; color: #000; }
@@ -204,8 +280,8 @@
     <div class="row" id="arvaljare"></div>
     <div id="synkstatus" role="status"></div>
   </header>
-  <nav id="nav" aria-label="Huvudmeny"></nav>
 </div>
+<nav id="nav" aria-label="Huvudmeny"></nav>
 <div class="wrap">
   <main id="main"></main>
 </div>
@@ -223,6 +299,16 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.5', datum: '2026-11-21',
+    nyheter: [
+      'Bättre på telefon (iPhone och Android): kompakt sidhuvud, menyn är en rad som man sveper i sidled och som stannar kvar överst när man scrollar.',
+      'Fält med 16 px text så att iPhone inte zoomar in, större tryckytor och hänsyn till skärmens kanter och notch.',
+      'Tabeller med många kolumner (underlag, huvudbok, fakturor och fakturarader) visas som kort på smala skärmar, och fakturor förhandsvisas förminskade.',
+      'På stora skärmar blir innehållet bredare och texten större, och sidfoten ligger alltid längst ner.',
+      'Appen kan läggas på hemskärmen med föreningens namn och färger.'
+    ]
+  },
   {
     version: '1.4', datum: '2026-11-21',
     nyheter: [
@@ -3044,8 +3130,24 @@ var VERSIONER = [
     }[vy](ar);
     main.innerHTML = msg + html;
     ritaQr();
+    visaValdFlik();
     if (vy === 'ny') uppdateraUtkastStatus();
     if (vy === 'dokument' && dokUtkast) uppdateraDokStatus();
+  }
+
+  // På smala skärmar är menyn en rad som scrollar i sidled; se till att vald flik syns.
+  function visaValdFlik() {
+    var nav = document.getElementById('nav');
+    var vald = nav.querySelector('[aria-current="page"]');
+    if (vald && nav.scrollWidth > nav.clientWidth) {
+      var mitt = vald.offsetLeft - (nav.clientWidth - vald.offsetWidth) / 2;
+      nav.scrollLeft = Math.max(0, mitt);
+    }
+    markeraNavSlut();
+  }
+  function markeraNavSlut() {
+    var nav = document.getElementById('nav');
+    nav.classList.toggle('i-slutet', nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 4);
   }
 
   function renderArvaljare() {
@@ -3094,8 +3196,9 @@ var VERSIONER = [
   function vyInlasning(ar) {
     var harNyckel = !!lasNyckel();
     var html = '<div class="card dropzon" id="dropzon">' +
-      '<p style="margin-top:0"><strong>Släpp fakturor, kvitton eller kontoutdrag här</strong></p>' +
-      '<p class="faint">PDF:er och bilder tolkas av Claude. Kontoutdrag som CSV läses direkt. Du kan också klistra in rader från Excel, eller en skärmbild, med Ctrl+V.</p>' +
+      '<p style="margin-top:0"><strong class="bara-mus">Släpp fakturor, kvitton eller kontoutdrag här</strong><strong class="bara-touch">Läs in fakturor, kvitton eller kontoutdrag</strong></p>' +
+      '<p class="faint"><span class="bara-mus">PDF:er och bilder tolkas av Claude. Kontoutdrag som CSV läses direkt. Du kan också klistra in rader från Excel, eller en skärmbild, med Ctrl+V.</span>' +
+      '<span class="bara-touch">Välj en PDF, ett foto av kvittot eller ett kontoutdrag (CSV). Du kan också ta en bild direkt med kameran.</span></p>' +
       '<div class="row"><button class="btn" data-action="valj-filer">Välj filer</button></div>' +
       (harNyckel ? '' : '<p class="fel">Claude är inte inställt ännu. Lägg in en API-nyckel under "År och arkiv" för att kunna läsa PDF:er och bilder.</p>') +
       '</div>';
@@ -3157,15 +3260,15 @@ var VERSIONER = [
     html += '<h2>Underlag som väntar på betalning (' + oppnaU.length + ')</h2>';
     if (!oppnaU.length) html += '<p class="muted">Inga. Fakturor och kvitton kopplas automatiskt när betalningen syns på banken.</p>';
     else {
-      html += '<div class="scroll"><table><thead><tr><th>Datum</th><th>Underlag</th><th class="num">Belopp</th><th>Konto</th><th></th></tr></thead><tbody>';
+      html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Datum</th><th>Underlag</th><th class="num">Belopp</th><th>Konto</th><th></th></tr></thead><tbody>';
       oppnaU.forEach(function (u) {
-        html += '<tr><td>' + esc(u.datum || '') + (u.forfallodatum ? '<div class="faint">förfaller ' + esc(u.forfallodatum) + '</div>' : '') + '</td>' +
-          '<td>' + esc(u.motpart) + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') + underlagChip(u) +
-          (u.valuta ? '<div class="faint">' + esc(u.valuta) + ' ' + (u.originalbelopp != null ? kr(u.originalbelopp) : '') + '</div>' : '') + '</td>' +
-          '<td class="num"><input class="num" style="width:110px" data-underlag="belopp" data-id="' + esc(u.id) + '" value="' + (u.belopp ? kr(u.belopp) : '') + '" aria-label="Belopp i kronor">' +
-          '<div class="faint">' + (u.riktning === 'intakt' ? 'intäkt' : 'utgift') + '</div></td>' +
-          '<td><input list="kontolista" style="width:90px" data-underlag="foreslagetKonto" data-id="' + esc(u.id) + '" value="' + esc(u.foreslagetKonto || '') + '" aria-label="Konto">' +
-          '<div class="faint">' + esc(u.foreslagetKonto ? K.kontonamn(ar, u.foreslagetKonto) : 'inget förslag') + (kontoKallaText(u) ? '<br>' + esc(kontoKallaText(u)) : '') + '</div></td>' +
+        html += '<tr><td class="nowrap" data-etikett="Datum">' + esc(u.datum || '') + (u.forfallodatum ? '<div class="faint">förfaller ' + esc(u.forfallodatum) + '</div>' : '') + '</td>' +
+          '<td data-etikett="Underlag"><div>' + esc(u.motpart) + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') + underlagChip(u) +
+          (u.valuta ? '<div class="faint">' + esc(u.valuta) + ' ' + (u.originalbelopp != null ? kr(u.originalbelopp) : '') + '</div>' : '') + '</div></td>' +
+          '<td class="num" data-etikett="Belopp"><div><input class="num" style="width:110px" data-underlag="belopp" data-id="' + esc(u.id) + '" value="' + (u.belopp ? kr(u.belopp) : '') + '" aria-label="Belopp i kronor">' +
+          '<div class="faint">' + (u.riktning === 'intakt' ? 'intäkt' : 'utgift') + '</div></div></td>' +
+          '<td data-etikett="Konto"><div><input list="kontolista" style="width:90px" data-underlag="foreslagetKonto" data-id="' + esc(u.id) + '" value="' + esc(u.foreslagetKonto || '') + '" aria-label="Konto">' +
+          '<div class="faint">' + esc(u.foreslagetKonto ? K.kontonamn(ar, u.foreslagetKonto) : 'inget förslag') + (kontoKallaText(u) ? '<br>' + esc(kontoKallaText(u)) : '') + '</div></div></td>' +
           '<td style="white-space:nowrap"><button class="btn btn-secondary btn-small" data-action="bokfor-underlag" data-id="' + esc(u.id) + '">Bokför utan bank…</button> ' +
           '<button class="btn btn-secondary btn-small" data-action="ta-bort-underlag" data-id="' + esc(u.id) + '" aria-label="Ta bort underlag">×</button></td></tr>';
       });
@@ -3206,7 +3309,7 @@ var VERSIONER = [
       var rattning = K.rattadAv(ar, v.nr);
       if (rattning) taggar += '<span class="tag">rättad av ' + rattning.nr + '</span>';
       if (utanUnderlag[v.nr]) taggar += '<span class="tag varning">underlag saknas</span>';
-      html += '<tr class="klickbar" data-ver="' + v.nr + '"><td>' + v.nr + '</td><td>' + esc(v.datum) + '</td><td>' + esc(v.text) + taggar + '</td><td class="num">' + kr(verSumma(v)) + '</td></tr>';
+      html += '<tr class="klickbar" data-ver="' + v.nr + '"><td>' + v.nr + '</td><td class="nowrap">' + esc(v.datum) + '</td><td>' + esc(v.text) + taggar + '</td><td class="num">' + kr(verSumma(v)) + '</td></tr>';
       if (oppenVer === v.nr) html += detaljRad(ar, v, rattning);
     });
     return html + '</tbody></table></div>';
@@ -3338,13 +3441,13 @@ var VERSIONER = [
       ar.kontoplan.map(function (k) {
         return '<option value="' + k.nr + '"' + (k.nr === valtKonto ? ' selected' : '') + '>' + k.nr + ' ' + esc(k.namn) + (K.kontoAnvands(ar, k.nr) ? '' : ' (oanvänt)') + '</option>';
       }).join('') + '</select>';
-    html += '<div class="scroll"><table style="margin-top:12px"><thead><tr><th>Datum</th><th>Ver</th><th>Text</th><th class="num">Debet</th><th class="num">Kredit</th><th class="num">Saldo</th></tr></thead><tbody>' +
-      '<tr><td>' + esc(ar.start) + '</td><td></td><td>Ingående balans</td><td></td><td></td><td class="num">' + kr(hb.ib) + '</td></tr>';
+    html += '<div class="scroll"><table class="kortlista" style="margin-top:12px"><thead><tr><th>Datum</th><th>Ver</th><th>Text</th><th class="num">Debet</th><th class="num">Kredit</th><th class="num">Saldo</th></tr></thead><tbody>' +
+      '<tr><td class="nowrap" data-etikett="Datum">' + esc(ar.start) + '</td><td></td><td><strong>Ingående balans</strong></td><td></td><td></td><td class="num" data-etikett="Saldo">' + kr(hb.ib) + '</td></tr>';
     hb.rader.forEach(function (r) {
-      html += '<tr><td>' + esc(r.datum) + '</td><td>' + r.nr + '</td><td>' + esc(r.text) + '</td>' +
-        '<td class="num">' + (r.belopp > 0 ? kr(r.belopp) : '') + '</td><td class="num">' + (r.belopp < 0 ? kr(-r.belopp) : '') + '</td><td class="num">' + kr(r.saldo) + '</td></tr>';
+      html += '<tr><td class="nowrap" data-etikett="Datum">' + esc(r.datum) + '</td><td data-etikett="Verifikation">' + r.nr + '</td><td>' + esc(r.text) + '</td>' +
+        '<td class="num"' + (r.belopp > 0 ? ' data-etikett="Debet">' + kr(r.belopp) : '>') + '</td><td class="num"' + (r.belopp < 0 ? ' data-etikett="Kredit">' + kr(-r.belopp) : '>') + '</td><td class="num" data-etikett="Saldo">' + kr(r.saldo) + '</td></tr>';
     });
-    html += '<tr class="total"><td colspan="5">Utgående balans</td><td class="num">' + kr(hb.ub) + '</td></tr></tbody></table></div>';
+    html += '<tr class="total"><td colspan="5"><strong>Utgående balans</strong></td><td class="num" data-etikett="Saldo">' + kr(hb.ub) + '</td></tr></tbody></table></div>';
     return html;
   }
 
@@ -3414,7 +3517,7 @@ var VERSIONER = [
   function rapportGB(ar) {
     var html = '<h2 style="margin-top:0">Grundbok</h2><div class="scroll"><table><thead><tr><th>Datum</th><th>Ver</th><th>Konto</th><th class="num">Debet</th><th class="num">Kredit</th></tr></thead><tbody>';
     K.grundbok(ar).forEach(function (v) {
-      html += '<tr><td>' + esc(v.datum) + '</td><td>' + v.nr + '</td><td colspan="3"><strong>' + esc(v.text) + '</strong></td></tr>';
+      html += '<tr><td class="nowrap">' + esc(v.datum) + '</td><td>' + v.nr + '</td><td colspan="3"><strong>' + esc(v.text) + '</strong></td></tr>';
       v.rader.forEach(function (r) {
         html += '<tr><td></td><td></td><td>' + r.konto + ' ' + esc(K.kontonamn(ar, r.konto)) + '</td><td class="num">' + (r.belopp > 0 ? kr(r.belopp) : '') + '</td><td class="num">' + (r.belopp < 0 ? kr(-r.belopp) : '') + '</td></tr>';
       });
@@ -3602,12 +3705,12 @@ var VERSIONER = [
     }
     var lista = store.dokument.slice().sort(function (a, b) { return a.skapad < b.skapad ? 1 : -1; });
     if (!lista.length) return html + '<p class="muted">Inga fakturor eller kvitton ännu.</p>';
-    html += '<div class="scroll"><table><thead><tr><th>Nummer</th><th>Datum</th><th>Mottagare</th><th class="num">Belopp</th><th>Status</th><th></th></tr></thead><tbody>';
+    html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Nummer</th><th>Datum</th><th>Mottagare</th><th class="num">Belopp</th><th>Status</th><th></th></tr></thead><tbody>';
     lista.forEach(function (d) {
       var st = dokStatus(d);
-      html += '<tr><td>' + (d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + esc(d.nummer) + '</td><td>' + esc(d.datum) + '</td><td>' + esc(d.mottagare.namn) +
-        (d.mottagare.foretag ? '<div class="faint">' + esc(d.mottagare.foretag) + '</div>' : '') + '</td><td class="num">' + kr(K.dokumentSumma(d)) + '</td>' +
-        '<td class="' + st.klass + '">' + esc(st.text) + '</td><td style="white-space:nowrap"><button class="btn btn-secondary btn-small" data-action="visa-dok" data-id="' + esc(d.id) + '">Visa</button> ' +
+      html += '<tr><td><strong>' + (d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + esc(d.nummer) + '</strong></td><td class="nowrap" data-etikett="Datum">' + esc(d.datum) + '</td><td data-etikett="Mottagare"><div>' + esc(d.mottagare.namn) +
+        (d.mottagare.foretag ? '<div class="faint">' + esc(d.mottagare.foretag) + '</div>' : '') + '</div></td><td class="num" data-etikett="Belopp">' + kr(K.dokumentSumma(d)) + '</td>' +
+        '<td class="' + st.klass + '" data-etikett="Status">' + esc(st.text) + '</td><td style="white-space:nowrap"><button class="btn btn-secondary btn-small" data-action="visa-dok" data-id="' + esc(d.id) + '">Visa</button> ' +
         (!d.makulerad && st.text.indexOf('Betald') < 0 ? '<button class="btn btn-secondary btn-small" data-action="makulera-dok" data-id="' + esc(d.id) + '">Makulera</button>' : '') + '</td></tr>';
     });
     return html + '</tbody></table></div>';
@@ -3639,16 +3742,16 @@ var VERSIONER = [
         return '<div><label>' + f[1] + '</label><input data-dokm="' + f[0] + '" value="' + esc(u.mottagare[f[0]]) + '"></div>';
       }).join('') +
       '<div><label>Adress (en rad per rad)</label><textarea data-dokm="adress">' + esc(u.mottagare.adress) + '</textarea></div></div>';
-    html += '<h3>Rader</h3><div class="scroll"><table class="rader-tabell"><thead><tr><th>Artikel</th><th class="num">Antal</th><th>Beskrivning</th><th class="num">á pris</th>' +
+    html += '<h3>Rader</h3><div class="scroll"><table class="rader-tabell dokrader"><thead><tr><th>Artikel</th><th class="num">Antal</th><th>Beskrivning</th><th class="num">á pris</th>' +
       (arF ? '<th>Konto</th>' : '') + '<th class="num">Total</th><th></th></tr></thead><tbody>';
     u.rader.forEach(function (r, i) {
-      html += '<tr><td><select data-dokrad="' + i + '" data-f="artikelId" style="min-width:120px"><option value="">Välj…</option>' +
+      html += '<tr><td class="hel" data-etikett="Artikel"><select data-dokrad="' + i + '" data-f="artikelId" style="min-width:120px"><option value="">Välj…</option>' +
         opt(store.artiklar, r.artikelId, function (x) { return x.beskrivning + (x.pris ? ' (' + kr(x.pris) + ')' : ''); }) + '</select></td>' +
-        '<td><input class="num" style="width:70px" inputmode="decimal" data-dokrad="' + i + '" data-f="antal" value="' + esc(r.antal) + '"></td>' +
-        '<td><input style="min-width:220px" data-dokrad="' + i + '" data-f="beskrivning" value="' + esc(r.beskrivning) + '"></td>' +
-        '<td><input class="num" style="width:110px" inputmode="decimal" data-dokrad="' + i + '" data-f="pris" value="' + esc(r.pris) + '"></td>' +
-        (arF ? '<td><input list="kontolista" style="width:80px" data-dokrad="' + i + '" data-f="konto" value="' + esc(r.konto) + '"></td>' : '') +
-        '<td class="num" id="dokTotal-' + i + '"></td><td>' + (u.rader.length > 1 ? '<button class="btn btn-secondary btn-small" data-action="dok-ta-bort-rad" data-rad="' + i + '" aria-label="Ta bort rad">×</button>' : '') + '</td></tr>';
+        '<td data-etikett="Antal"><input class="num" style="width:70px" inputmode="decimal" data-dokrad="' + i + '" data-f="antal" value="' + esc(r.antal) + '"></td>' +
+        '<td class="hel" data-etikett="Beskrivning"><input style="min-width:220px" data-dokrad="' + i + '" data-f="beskrivning" value="' + esc(r.beskrivning) + '"></td>' +
+        '<td data-etikett="á pris"><input class="num" style="width:110px" inputmode="decimal" data-dokrad="' + i + '" data-f="pris" value="' + esc(r.pris) + '"></td>' +
+        (arF ? '<td data-etikett="Konto"><input list="kontolista" style="width:80px" data-dokrad="' + i + '" data-f="konto" value="' + esc(r.konto) + '"></td>' : '') +
+        '<td class="num" data-etikett="Total" id="dokTotal-' + i + '"></td><td>' + (u.rader.length > 1 ? '<button class="btn btn-secondary btn-small" data-action="dok-ta-bort-rad" data-rad="' + i + '" aria-label="Ta bort rad">×</button>' : '') + '</td></tr>';
     });
     html += '</tbody></table></div>';
     var ar = aktivt();
@@ -4538,6 +4641,8 @@ var VERSIONER = [
       visa('Den här webbläsaren är redan kopplad till en mapp. Logga ut under År och arkiv → OneDrive och öppna länken igen för att använda inbjudan.', true);
     } else render();
   });
+
+  document.getElementById('nav').addEventListener('scroll', markeraNavSlut, { passive: true });
 
   // Hämta igen när appen kommer tillbaka i fokus, så att ändringar från en annan enhet syns.
   document.addEventListener('visibilitychange', function () {

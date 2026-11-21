@@ -6,13 +6,15 @@ Verktyget är en webbapp i en enda HTML-fil (`index.html`) utan byggsteg. All bo
 
 ## Status
 
-Version 1.0: bokföringen och underlagen sparas i föreningens OneDrive. Se fliken "Om appen" för vad som är nytt i varje version, och [docs/PROJEKTPLAN.md](docs/PROJEKTPLAN.md) för helheten.
+Version 1.5: bokföring, underlag, fakturor och kvitton, bankavstämning och bokslut, sparat i föreningens OneDrive och anpassat för telefon och dator. Se fliken "Om appen" för vad som är nytt i varje version, och [docs/PROJEKTPLAN.md](docs/PROJEKTPLAN.md) för helheten.
 
 Det som fungerar:
 - **OneDrive:** inloggning med Microsoft-konto direkt från webbläsaren. Bokföringen sparas i `Föreningsbokföring.json` i föreningens mapp. Underlagen ligger i årsmapparna (`<år>/Bokföringsunderlag/Osorterat`, `Verifikationer`, `Kontoutdrag`) och fakturor och kvitton i `<år>/Fakturor och kvitton`. Samma bokföring kan användas på flera enheter, med krockkontroll, och en revisor kan läsa en delad mapp.
 - **Läs in underlag:** PDF-fakturor, kvitton och kontoutdrag. Claude tolkar och föreslår konto, och appen lär sig konton per motpart och banktext.
 - **Bank:** CSV eller inklistrade rader, automatisk koppling till underlag och avstämning av saldot.
 - **Fakturor och kvitton** i föreningens stil, som PDF via utskrift. Skickade fakturor kopplas till inbetalningen.
+- **Bokslut och årsmöte:** checklista, bokföring av årets resultat, låsning, nytt år, resultatdisposition och handlingar till årsmötet som PDF.
+- **Bankavstämning** månad för månad med lista över avvikelser.
 - **Bokföringen:** verifikationer, rättelser, låsning, kontoplan, huvudbok, grundbok, saldobalans, resultat- och balansräkning, årsskifte, kontroller och export till SIE 4.
 
 ## Använda

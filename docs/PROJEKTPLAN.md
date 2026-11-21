@@ -51,9 +51,9 @@ Lagen kräver troligen inte formellt att vi bokför, eftersom en ideell förenin
 | **1. Analys av historiken** (2025 klart, se [krav-fran-2025.md](krav-fran-2025.md)) | Gå igenom Excel 2012–idag och fakturorna: använda konton, typer av händelser, volym per år, egna lösningar och avvikelser | En behovsrapport och en kontoplan som vi enats om |
 | **2. Kärnan** (klar) | Datamodell, verifikationer, kontoplan, IB/UB, låsning av perioder, rapportberäkningar, automatiska tester | Testerna går igenom och RR/BR stämmer på testdata |
 | **3. Historikimport** | Föra över varje år från Excel till verifikationer och koppla underlagen | UB per år stämmer exakt mot Excel för alla år |
-| **4. Inläsning av underlag** (första version klar) | Släpp in PDF/bild, Claude föreslår, jag godkänner, regler lärs in | Ett nytt kvitto bokförs med två klick |
-| **5. Bankavstämning** (första version klar) | Import av bankens CSV, matchning mot verifikationer, lista över omatchade rader | Bankkontot stämmer mot banken månad för månad |
-| **6. Bokslut och årsmöte** | Årsbokslut, resultatdisposition, nytt år, PDF-rapporter, budget | Årsmöteshandlingarna för 2026 kommer ur verktyget |
+| **4. Inläsning av underlag** (klar, 0.2–1.2) | Släpp in PDF/bild, Claude föreslår, jag godkänner, regler lärs in | Ett nytt kvitto bokförs med två klick |
+| **5. Bankavstämning** (klar, 1.3) | Import av bankens CSV, matchning mot verifikationer, lista över omatchade rader | Bankkontot stämmer mot banken månad för månad |
+| **6. Bokslut och årsmöte** (klar, 1.4) | Årsbokslut, resultatdisposition, nytt år, PDF-rapporter, budget | Årsmöteshandlingarna för 2026 kommer ur verktyget |
 | **7. Delning** | Installationsguide och första-gången-flöde för andra föreningar, inga hårdkodade uppgifter | En annan förening kan komma igång själv |
 
 Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faserna 0–6 till början av 2027.
