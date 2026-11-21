@@ -74,6 +74,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
   - `Styrelsearbete`: `Möten` (ÅM 2026, ÅM 2026 extra, SM 2026, SM 2026 konstituerande, eller årsmappar), `Appens filer` och föreningens egna mappar. Styrelsen ändrar; revisorn läser; filen med förtroendeuppdragen delas för sig med valberedningen.
 - Äldre upplägg (bokföringen direkt i en mapp, eller undermappen `Bokföring och underlag`) fungerar fortfarande. Appen kan samla dem i den nya strukturen genom att flytta hela mappar inom OneDrive, så id, delningar och inbjudningar följer med.
 - Föreningens Excel-filer läses in i appen som arkivkopior.
+- Appen läser den verkliga platsen från OneDrive (från 1.27). Den samlade mappen kan flyttas, och en mapp Styrelsearbete eller ett äldre Medlemsregister på den nya platsen slås ihop utan att något skrivs över.
 - På sikt: Microsoft 365 för ideella föreningar, så att föreningen och inte kassören äger mapparna.
 
 ## Roller (från version 1.20)
