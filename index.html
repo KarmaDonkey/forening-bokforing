@@ -85,6 +85,11 @@
   }
   .wrap { max-width: 960px; margin: 0 auto; padding: 16px max(16px, env(safe-area-inset-right)) 16px max(16px, env(safe-area-inset-left)); }
   .nowrap { white-space: nowrap; }
+  /* Safari på iPhone ger datumfält en egen minsta bredd och centrerad text; håll dem inom rutan. */
+  @supports (-webkit-touch-callout: none) {
+    input[type="date"] { -webkit-appearance: none; appearance: none; min-width: 0; display: block; min-height: 42px; text-align: left; }
+    input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+  }
   .wrap { flex: 1 0 auto; width: 100%; }
   .topp { background: var(--surface); padding-top: env(safe-area-inset-top); }
   header { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 16px 10px; text-align: center; }
@@ -299,6 +304,14 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.7', datum: '2026-11-21',
+    nyheter: [
+      'Enheter som kopplades till OneDrive innan appmappen fanns sparar nu föreningens mapp där automatiskt, så att nya enheter hittar den när de loggar in.',
+      'Är du inloggad men ingen mapp hittas visas mappvalet överst på startsidan.',
+      'Datumfälten går inte längre utanför rutan på iPhone.'
+    ]
+  },
   {
     version: '1.6', datum: '2026-11-21',
     nyheter: [
@@ -3193,11 +3206,15 @@ var VERSIONER = [
         '<div class="row"><button class="btn" data-action="od-logga-in">Logga in med Microsoft</button>' +
         '<button class="btn btn-secondary btn-small" data-action="avbryt-inbjudan">Avbryt</button></div></div>';
     }
-    var snabb = location.protocol !== 'file:' && od.clientId && !od.refreshToken
-      ? '<div class="card"><h2 style="margin-top:0">Använder föreningen redan appen?</h2>' +
+    var snabb = '';
+    if (location.protocol !== 'file:' && od.clientId && !od.refreshToken) {
+      snabb = '<div class="card"><h2 style="margin-top:0">Använder föreningen redan appen?</h2>' +
         '<p>Logga in med ditt Microsoft-konto, så hämtas bokföringen från OneDrive.</p>' +
-        '<button class="btn" data-action="od-logga-in">Logga in med Microsoft</button></div><h2>Ny förening</h2>'
-      : '';
+        '<button class="btn" data-action="od-logga-in">Logga in med Microsoft</button></div><h2>Ny förening</h2>';
+    } else if (location.protocol !== 'file:' && od.refreshToken && !od.mapp) {
+      snabb = '<p class="muted" style="margin-bottom:0">Du är inloggad, men appen hittade ingen sparad mapp för ditt konto. Välj föreningens mapp, så hämtas bokföringen.</p>' +
+        vyOneDrive() + '<h2>Ny förening</h2>';
+    }
     return snabb + '<div class="card"><h2 style="margin-top:0">Kom igång</h2>' +
       '<p>Skapa föreningens första räkenskapsår, eller läs in en säkerhetskopia.</p>' +
       '<div class="grid2">' +
@@ -4649,7 +4666,14 @@ var VERSIONER = [
     if (!od.refreshToken) { odNu.inloggningKravs = true; sattStatus('Inte inloggad i OneDrive', true); return; }
     sattStatus('Hämtar från OneDrive…');
     return hamtaFranOneDrive().then(function () {
-      return lasAppinstallningar().then(synkaNyckel).catch(function () { /* frivilligt */ });
+      return lasAppinstallningar().then(function (inst) {
+        synkaNyckel(inst);
+        // Enheter som kopplades innan appmappen fanns (version 1.0) sparar mappen nu,
+        // så att nya enheter hittar den när de loggar in.
+        if (od.mapp && (!inst.mapp || inst.mapp.id !== od.mapp.id || inst.lage !== od.lage)) {
+          return sparaAppinstallningar({ mapp: od.mapp, lage: od.lage });
+        }
+      }).catch(function () { /* frivilligt */ });
     });
   }).catch(function (err) {
     sattStatus(err.message, true);
