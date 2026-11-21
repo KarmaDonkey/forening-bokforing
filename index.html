@@ -205,6 +205,16 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.1', datum: '2026-11-21',
+    nyheter: [
+      'En ny enhet behöver bara logga in med Microsoft. Appen hittar föreningens mapp själv.',
+      'API-nyckeln för Claude följer med till dina andra enheter via din privata appmapp i OneDrive.',
+      '"Lägg till en enhet" visar en QR-kod att skanna med telefonen, och instruktioner för att lägga appen på hemskärmen.',
+      '"Bjud in revisor" ger en länk som öppnar föreningens delade mapp direkt för läsning.',
+      'Appen kan installeras på hemskärmen och öppnas som en egen app.'
+    ]
+  },
+  {
     version: '1.0', datum: '2026-11-20',
     nyheter: [
       'Bokföringen och underlagen sparas i föreningens OneDrive-mapp. Logga in med Microsoft under År och arkiv → OneDrive.',
@@ -1929,10 +1939,20 @@ var VERSIONER = [
   var OD_OMFANG = 'Files.ReadWrite offline_access User.Read';
   var GRAF = 'https://graph.microsoft.com/v1.0';
   var DATAFIL = 'Föreningsbokföring.json';
+  var INSTALLNINGSFIL = 'installningar.json';
+  // Appregistrering i Microsoft för den publicerade adressen. Ett Client ID är inte hemligt;
+  // det talar bara om vilken app som loggar in. Andra adresser anger sitt eget under År och arkiv.
+  var STANDARD_KLIENTER = { 'karmadonkey.github.io': '0c0a38fc-1bb6-47a2-b690-e9e749dfb800' };
+  var QR_URL = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+  var NYCKEL_ANDRAD = 'forening-bokforing:claude-nyckel-andrad';
+  var INBJUDAN = 'forening-bokforing:inbjudan';
   var od = { clientId: null, refreshToken: null, konto: null, mapp: null, lage: null, eTag: null, senast: null, smutsig: false };
   var odNu = { token: null, utgar: 0, status: '', fel: null, konflikt: false, synkar: false, igen: false, inloggningKravs: false, timer: null, senastHamtat: 0, mappar: {} };
 
-  function laddaOd() { try { Object.assign(od, JSON.parse(localStorage.getItem(OD_NYCKEL) || '{}')); } catch (e) { /* tomt */ } }
+  function laddaOd() {
+    try { Object.assign(od, JSON.parse(localStorage.getItem(OD_NYCKEL) || '{}')); } catch (e) { /* tomt */ }
+    if (!od.clientId && STANDARD_KLIENTER[location.host]) od.clientId = STANDARD_KLIENTER[location.host];
+  }
   function sparaOd() { try { localStorage.setItem(OD_NYCKEL, JSON.stringify(od)); } catch (e) { /* tomt */ } }
   function odAnslutet() { return !!(od.clientId && od.refreshToken && od.mapp); }
   function lasLage() { return odAnslutet() && od.lage === 'lasare'; }
@@ -2016,6 +2036,96 @@ var VERSIONER = [
   function katalog(rel) { return rel.slice(0, rel.lastIndexOf('/')); }
   function filnamnAv(rel) { return rel.slice(rel.lastIndexOf('/') + 1); }
 
+  // ---------- Inställningar i användarens egen appmapp (OneDrive: Appar/Föreningsbokföring) ----------
+  // Här sparas vilken mapp appen ska använda, och API-nyckeln för Claude, så att en ny enhet
+  // bara behöver logga in. Appmappen är privat och ligger inte i föreningens delade mapp.
+
+  async function lasAppinstallningar() {
+    var res = await graf('/me/drive/special/approot:/' + INSTALLNINGSFIL + ':/content', { tillat: [404], ra: true });
+    if (res.status === 404) return {};
+    return res.json().catch(function () { return {}; });
+  }
+
+  async function sparaAppinstallningar(andring) {
+    var nu = await lasAppinstallningar();
+    await graf('/me/drive/special/approot:/' + INSTALLNINGSFIL + ':/content', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({}, nu, andring))
+    });
+  }
+
+  function nyckelAndrad() { try { return Number(localStorage.getItem(NYCKEL_ANDRAD)) || 0; } catch (e) { return 0; } }
+
+  // Skickar en ändrad API-nyckel till appmappen så att dina andra enheter får den.
+  function delaNyckel() {
+    try { localStorage.setItem(NYCKEL_ANDRAD, String(Date.now())); } catch (e) { /* tomt */ }
+    if (!od.refreshToken) return;
+    sparaAppinstallningar({ claude: { nyckel: lasNyckel() || null, utgar: nyckelUtgar() || null, andrad: nyckelAndrad() } })
+      .catch(function () { /* nästa gång */ });
+  }
+
+  // Hämtar API-nyckeln från appmappen om den är nyare än den här enhetens.
+  function synkaNyckel(inst) {
+    var c = inst && inst.claude;
+    if (!c) {
+      if (lasNyckel() && od.refreshToken) delaNyckel();
+      return false;
+    }
+    if (c.andrad > nyckelAndrad()) {
+      try {
+        if (c.nyckel) localStorage.setItem(NYCKEL, c.nyckel); else localStorage.removeItem(NYCKEL);
+        if (c.utgar) localStorage.setItem(NYCKEL_UTGAR, c.utgar); else localStorage.removeItem(NYCKEL_UTGAR);
+        localStorage.setItem(NYCKEL_ANDRAD, String(c.andrad));
+      } catch (e) { /* tomt */ }
+      nyckelAvvisad = false;
+      return true;
+    }
+    if (c.andrad < nyckelAndrad()) delaNyckel();
+    return false;
+  }
+
+  function lasInbjudan() { try { return JSON.parse(localStorage.getItem(INBJUDAN) || 'null'); } catch (e) { return null; } }
+
+  // En inbjudningslänk (#revisor=…) sparas tills mottagaren har loggat in.
+  function fangaInbjudan() {
+    var m = location.hash.match(/#revisor=([A-Za-z0-9_-]+)/);
+    if (!m) return;
+    try {
+      var b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+      var bin = atob(b64 + '==='.slice((b64.length + 3) % 4));
+      var data = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, function (c) { return c.charCodeAt(0); })));
+      if (data && data.d && data.i) localStorage.setItem(INBJUDAN, JSON.stringify(data));
+    } catch (e) { /* ogiltig länk */ }
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+
+  function inbjudningslank() {
+    var data = { d: od.mapp.driveId, i: od.mapp.id, n: od.mapp.namn, f: store.forening.namn || '' };
+    return omdirigering() + '#revisor=' + b64url(new TextEncoder().encode(JSON.stringify(data)).buffer);
+  }
+
+  // Efter inloggning på en ny enhet: öppna inbjudan eller den mapp som sparats i appmappen.
+  async function aterkoppla() {
+    var inbjudan = lasInbjudan();
+    var inst = await lasAppinstallningar().catch(function () { return {}; });
+    synkaNyckel(inst);
+    if (inbjudan) {
+      localStorage.removeItem(INBJUDAN);
+      var finns = await graf('/drives/' + inbjudan.d + '/items/' + inbjudan.i, { tillat: [403, 404] });
+      if (typeof finns === 'number') throw new Error('Mappen i inbjudan går inte att öppna. Be kassören dela mappen med ditt Microsoft-konto (' + (od.konto || '') + ') och skicka länken igen.');
+      await valjDeladMapp({ driveId: inbjudan.d, id: inbjudan.i, namn: inbjudan.n || finns.name, agare: '' });
+      return 'inbjudan';
+    }
+    if (!inst.mapp) return null;
+    var post = await graf('/drives/' + inst.mapp.driveId + '/items/' + inst.mapp.id, { tillat: [403, 404] });
+    if (typeof post === 'number') return null;
+    od.mapp = inst.mapp;
+    od.lage = inst.lage === 'lasare' ? 'lasare' : 'agare';
+    od.eTag = null; od.senast = null;
+    sparaOd();
+    await forstaSynk();
+    return 'mapp';
+  }
+
   async function hanteraInloggningsretur() {
     var q = new URLSearchParams(location.search);
     if (!q.has('code') && !q.has('error')) return;
@@ -2045,6 +2155,7 @@ var VERSIONER = [
     od.lage = 'agare';
     od.eTag = null; od.senast = null;
     sparaOd();
+    sparaAppinstallningar({ mapp: od.mapp, lage: 'agare' }).catch(function () { /* frivilligt */ });
     await forstaSynk();
   }
 
@@ -2060,6 +2171,7 @@ var VERSIONER = [
     od.lage = 'lasare';
     od.eTag = null; od.senast = null;
     sparaOd();
+    sparaAppinstallningar({ mapp: od.mapp, lage: 'lasare' }).catch(function () { /* frivilligt */ });
     await forstaSynk();
   }
 
@@ -2259,6 +2371,41 @@ var VERSIONER = [
     odNu.konflikt = false;
     sparaOd();
     sattStatus('');
+  }
+
+  // Gör appen installerbar på hemskärmen när den körs från en webbadress.
+  function laggTillManifest() {
+    if (location.protocol === 'file:') return;
+    var l = document.createElement('link');
+    l.rel = 'manifest';
+    l.href = 'manifest.json';
+    document.head.appendChild(l);
+  }
+
+  var qrLaddas = null;
+  function laddaQr() {
+    if (window.qrcode) return Promise.resolve();
+    if (!qrLaddas) {
+      qrLaddas = new Promise(function (ok, fel) {
+        var sk = document.createElement('script');
+        sk.src = QR_URL;
+        sk.onload = ok;
+        sk.onerror = function () { qrLaddas = null; fel(new Error('QR-koden kunde inte laddas. Använd länken i stället.')); };
+        document.head.appendChild(sk);
+      });
+    }
+    return qrLaddas;
+  }
+
+  function ritaQr() {
+    var el = document.getElementById('qrKod');
+    if (!el) return;
+    laddaQr().then(function () {
+      var qr = window.qrcode(0, 'M');
+      qr.addData(el.dataset.text);
+      qr.make();
+      el.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+    }).catch(function (err) { el.textContent = err.message; });
   }
 
   // ---------- Inläsning ----------
@@ -2619,6 +2766,7 @@ var VERSIONER = [
     if (!ar) {
       nav.innerHTML = '';
       main.innerHTML = msg + (vy === 'om' ? '<p><button class="btn btn-secondary btn-small" data-vy="inlasning">Tillbaka</button></p>' + vyOm() : vyStart());
+      ritaQr();
       return;
     }
     if (lasLage() && (vy === 'inlasning' || vy === 'ny')) vy = 'verifikationer';
@@ -2637,6 +2785,7 @@ var VERSIONER = [
       om: vyOm
     }[vy](ar);
     main.innerHTML = msg + html;
+    ritaQr();
     if (vy === 'ny') uppdateraUtkastStatus();
     if (vy === 'dokument' && dokUtkast) uppdateraDokStatus();
   }
@@ -2654,7 +2803,19 @@ var VERSIONER = [
 
   function vyStart() {
     var y = new Date().getFullYear();
-    return '<div class="card"><h2 style="margin-top:0">Kom igång</h2>' +
+    var inbjudan = lasInbjudan();
+    if (inbjudan && location.protocol !== 'file:') {
+      return '<div class="card"><h2 style="margin-top:0">Inbjudan att läsa bokföringen</h2>' +
+        '<p>Du har bjudits in att läsa bokföringen' + (inbjudan.f ? ' för <strong>' + esc(inbjudan.f) + '</strong>' : '') + '. Logga in med det Microsoft-konto som mappen har delats med.</p>' +
+        '<div class="row"><button class="btn" data-action="od-logga-in">Logga in med Microsoft</button>' +
+        '<button class="btn btn-secondary btn-small" data-action="avbryt-inbjudan">Avbryt</button></div></div>';
+    }
+    var snabb = location.protocol !== 'file:' && od.clientId && !od.refreshToken
+      ? '<div class="card"><h2 style="margin-top:0">Använder föreningen redan appen?</h2>' +
+        '<p>Logga in med ditt Microsoft-konto, så hämtas bokföringen från OneDrive.</p>' +
+        '<button class="btn" data-action="od-logga-in">Logga in med Microsoft</button></div><h2>Ny förening</h2>'
+      : '';
+    return snabb + '<div class="card"><h2 style="margin-top:0">Kom igång</h2>' +
       '<p>Skapa föreningens första räkenskapsår, eller läs in en säkerhetskopia.</p>' +
       '<div class="grid2">' +
       '<div><label for="forNamn">Föreningens namn</label><input id="forNamn" value="' + esc(store.forening.namn) + '"></div>' +
@@ -2665,7 +2826,7 @@ var VERSIONER = [
       '<p class="faint">Ingående balanser kan du lägga in som en första verifikation, eller låta komma från föregående år.</p>' +
       '<div class="row"><button class="btn" data-action="skapa-forsta">Skapa räkenskapsår</button>' +
       '<button class="btn btn-secondary" data-action="importera">Läs in säkerhetskopia (JSON)</button></div></div>' +
-      (location.protocol === 'file:' ? '' : '<p class="muted">Finns bokföringen redan i OneDrive, eller ska du läsa en mapp som delats med dig? Koppla appen till OneDrive här:</p>' + vyOneDrive());
+      (location.protocol === 'file:' || snabb ? '' : '<p class="muted">Finns bokföringen redan i OneDrive, eller ska du läsa en mapp som delats med dig? Koppla appen till OneDrive här:</p>' + vyOneDrive());
   }
 
   function underlagChip(u) {
@@ -3162,9 +3323,10 @@ var VERSIONER = [
         '<li>Kopiera <strong>Application (client) ID</strong> från översikten och klistra in det här.</li></ol></details></div>';
     }
     if (!od.refreshToken) {
-      return html + '<p style="margin-top:0">Logga in med det Microsoft-konto som har föreningens OneDrive-mapp, eller som mappen är delad med.</p>' +
+      return html + '<p style="margin-top:0">Logga in med det Microsoft-konto som har föreningens OneDrive-mapp, eller som mappen är delad med. ' +
+        'Har du redan använt appen på en annan enhet hittar den mappen själv.</p>' +
         '<div class="row"><button class="btn" data-action="od-logga-in">Logga in med Microsoft</button>' +
-        '<button class="btn btn-secondary btn-small" data-action="od-glom-klient">Byt Client ID</button></div></div>';
+        (STANDARD_KLIENTER[location.host] === od.clientId ? '' : '<button class="btn btn-secondary btn-small" data-action="od-glom-klient">Byt Client ID</button>') + '</div></div>';
     }
     if (!od.mapp) {
       html += '<p style="margin-top:0">Inloggad som <strong>' + esc(od.konto || '') + '</strong>. Välj var bokföringen ska ligga.</p>' +
@@ -3187,7 +3349,30 @@ var VERSIONER = [
       '<div class="row"><button class="btn btn-small" data-action="od-synka">' + (lasLage() ? 'Hämta senaste' : 'Synka nu') + '</button>' +
       '<button class="btn btn-secondary btn-small" data-action="od-byt-mapp">Byt mapp</button>' +
       '<button class="btn btn-secondary btn-small" data-action="od-logga-ut">Logga ut</button></div>';
-    if (!lasLage()) html += '<p class="faint" style="margin-bottom:0">Revisorn får tillgång genom att du delar mappen med läsrätt i OneDrive och skickar appens adress. Revisorn väljer sedan mappen under "En mapp som delats med mig".</p>';
+    if (!lasLage()) {
+      html += '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="od-qr-enhet">Lägg till en enhet</button>' +
+        '<button class="btn btn-secondary btn-small" data-action="od-qr-revisor">Bjud in revisor</button></div>';
+    }
+    if (odNu.qr) {
+      var revisor = odNu.qr === 'revisor';
+      var text = revisor ? inbjudningslank() : omdirigering();
+      html += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><div class="row" style="align-items:flex-start;gap:18px">' +
+        '<div id="qrKod" data-text="' + esc(text) + '" style="width:180px;height:180px;background:#fff;border-radius:8px;padding:4px" aria-label="QR-kod"></div><div style="flex:1;min-width:220px">';
+      if (revisor) {
+        html += '<strong>Bjud in revisorn</strong><ol style="padding-left:18px">' +
+          '<li>Dela mappen <strong>' + esc(od.mapp.namn) + '</strong> med revisorns Microsoft-konto i OneDrive, med behörigheten <em>Kan visa</em>.</li>' +
+          '<li>Skicka länken nedan till revisorn (eller låt revisorn skanna koden).</li>' +
+          '<li>Revisorn öppnar länken och loggar in. Bokföringen öppnas då direkt för läsning.</li></ol>';
+      } else {
+        html += '<strong>Lägg till en enhet</strong><ol style="padding-left:18px">' +
+          '<li>Skanna koden med telefonens kamera, eller öppna länken på den andra datorn.</li>' +
+          '<li>Tryck <em>Logga in med Microsoft</em> och logga in med samma konto som här. Mappen och API-nyckeln hittas automatiskt.</li>' +
+          '<li>Lägg appen på hemskärmen: i Safari på iPhone, tryck på dela-knappen och <em>Lägg till på hemskärmen</em>. I Chrome på Android, tryck på ⋮ och <em>Lägg till på startskärmen</em>.</li></ol>';
+      }
+      html += '<input readonly value="' + esc(text) + '" id="qrLank" onclick="this.select()">' +
+        '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="od-kopiera-lank">Kopiera länken</button>' +
+        '<button class="btn btn-secondary btn-small" data-action="od-stang-qr">Stäng</button></div></div></div></div>';
+    }
     return html + '</div>';
   }
 
@@ -3223,7 +3408,9 @@ var VERSIONER = [
       '<button class="btn btn-secondary" data-action="nasta-ar">Skapa nästa räkenskapsår</button></div>';
     html += '<h2 id="claude-installning">Claude</h2><div class="card"><p>Claude läser fakturor, kvitton och kontoutdrag. Det kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. ' +
       'Ett vanligt kvitto kostar några tiotals öre att tolka.</p>' +
-      '<p class="faint">Nyckeln sparas bara i den här webbläsaren och skickas bara till Anthropic. Den följer inte med i säkerhetskopian. Underlagen skickas till Claude när du läser in dem.</p>' +
+      '<p class="faint">' + (od.refreshToken ? 'Nyckeln sparas i webbläsaren och i din privata appmapp i OneDrive (Appar/Föreningsbokföring), så att den följer med till dina andra enheter. Den ligger inte i föreningens delade mapp.'
+        : 'Nyckeln sparas i den här webbläsaren. När appen är kopplad till OneDrive följer den med till dina andra enheter.') +
+      ' Den skickas bara till Anthropic och följer inte med i säkerhetskopian. Underlagen skickas till Claude när du läser in dem.</p>' +
       (lasNyckel() && !visaNyckelForm
         ? '<p class="ok">En nyckel är sparad' + (nyckelUtgar() ? ' och går ut ' + esc(nyckelUtgar()) : '') + '.</p>' +
           '<div class="row"><button class="btn btn-small" data-action="testa-nyckel">Testa nyckeln</button>' +
@@ -3247,7 +3434,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning'];
+  var LASBARA = ['avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport]');
@@ -3507,14 +3694,16 @@ var VERSIONER = [
       if (utgar) localStorage.setItem(NYCKEL_UTGAR, utgar); else localStorage.removeItem(NYCKEL_UTGAR);
       nyckelAvvisad = false;
       visaNyckelForm = false;
-      visa('API-nyckeln är sparad i den här webbläsaren.' + (utgar ? ' Appen påminner dig två veckor innan den går ut.' : ' Tips: ange när den går ut så påminner appen dig i tid.'));
+      delaNyckel();
+      visa('API-nyckeln är sparad' + (od.refreshToken ? ' och följer med till dina andra enheter via OneDrive.' : ' i den här webbläsaren.') + (utgar ? ' Appen påminner dig två veckor innan den går ut.' : ' Tips: ange när den går ut så påminner appen dig i tid.'));
       HANDLINGAR['testa-nyckel']();
     },
     'ta-bort-nyckel': function () {
       localStorage.removeItem(NYCKEL);
       localStorage.removeItem(NYCKEL_UTGAR);
       nyckelAvvisad = false;
-      visa('API-nyckeln är borttagen från den här webbläsaren.');
+      delaNyckel();
+      visa('API-nyckeln är borttagen' + (od.refreshToken ? ' från alla dina enheter.' : ' från den här webbläsaren.'));
     },
     'byt-nyckel': function () { visaNyckelForm = true; render(); },
     'avbryt-byt-nyckel': function () { visaNyckelForm = false; render(); },
@@ -3656,7 +3845,17 @@ var VERSIONER = [
       render();
     },
     'od-glom-klient': function () { od.clientId = null; sparaOd(); render(); },
+    'od-qr-enhet': function () { odNu.qr = 'enhet'; render(); },
+    'od-qr-revisor': function () { odNu.qr = 'revisor'; render(); },
+    'od-stang-qr': function () { odNu.qr = null; render(); },
+    'od-kopiera-lank': function () {
+      var el = document.getElementById('qrLank');
+      var klart = function () { visa('Länken är kopierad.'); };
+      if (navigator.clipboard) navigator.clipboard.writeText(el.value).then(klart, function () { el.select(); document.execCommand('copy'); klart(); });
+      else { el.select(); document.execCommand('copy'); klart(); }
+    },
     'od-logga-in': function () { startaInloggning(false); },
+    'avbryt-inbjudan': function () { localStorage.removeItem(INBJUDAN); render(); },
     'od-visa-delade': function () {
       sattStatus('Hämtar delade mappar…');
       delaMappar().then(function (lista) { odNu.delade = lista; sattStatus(''); render(); }).catch(function (err) { visa(err.message, true); });
@@ -3697,6 +3896,7 @@ var VERSIONER = [
     },
     'od-byt-mapp': function () {
       if (od.smutsig && !window.confirm('Det finns ändringar som inte sparats i OneDrive. Byta mapp ändå?')) return;
+      sparaAppinstallningar({ mapp: null, lage: null }).catch(function () { /* frivilligt */ });
       od.mapp = null; od.lage = null; od.eTag = null; od.senast = null; od.smutsig = false; odNu.mappar = {}; odNu.konflikt = false; odNu.delade = null;
       sparaOd();
       sattStatus('');
@@ -3779,6 +3979,8 @@ var VERSIONER = [
 
   ladda();
   laddaOd();
+  fangaInbjudan();
+  laggTillManifest();
   LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
   if (lasLage()) vy = 'rapporter';
   render();
@@ -3786,10 +3988,20 @@ var VERSIONER = [
 
   // Inloggning, och därefter senaste versionen från OneDrive.
   hanteraInloggningsretur().then(function () {
+    if (od.clientId && od.refreshToken && !od.mapp) {
+      sattStatus('Letar efter föreningens mapp…');
+      return aterkoppla().then(function (res) {
+        if (!res) sattStatus('');
+        if (res === 'inbjudan') { vy = 'rapporter'; visa('Bokföringen är öppnad för läsning. Du kan se rapporter, verifikationer och underlag men inte ändra något.'); }
+        else if (res === 'mapp') visa(odNu.konflikt ? 'Mappen är kopplad. Välj vilken version av bokföringen som ska gälla.' : 'Klart! Den här enheten är kopplad till ' + (od.mapp.sokvag || od.mapp.namn) + '.');
+      });
+    }
     if (!od.clientId || !od.mapp) return;
     if (!od.refreshToken) { odNu.inloggningKravs = true; sattStatus('Inte inloggad i OneDrive', true); return; }
     sattStatus('Hämtar från OneDrive…');
-    return hamtaFranOneDrive();
+    return hamtaFranOneDrive().then(function () {
+      return lasAppinstallningar().then(synkaNyckel).catch(function () { /* frivilligt */ });
+    });
   }).catch(function (err) {
     sattStatus(err.message, true);
     // Försök logga in tyst i bakgrunden högst en gång i timmen; annars visas en knapp.
@@ -3797,6 +4009,18 @@ var VERSIONER = [
     try { senast = Number(localStorage.getItem('forening-bokforing:tyst-inloggning')) || 0; } catch (e) { /* tomt */ }
     if (odNu.inloggningKravs && od.clientId && od.mapp && Date.now() - senast > 3600000) startaInloggning(true);
   }).then(render);
+
+  // En inbjudningslänk som öppnas i en flik där appen redan är öppen.
+  window.addEventListener('hashchange', function () {
+    if (!/#revisor=/.test(location.hash)) return;
+    fangaInbjudan();
+    if (od.refreshToken && !od.mapp) {
+      aterkoppla().then(function (res) { if (res === 'inbjudan') { vy = 'rapporter'; visa('Bokföringen är öppnad för läsning.'); } }, function (err) { visa(err.message, true); });
+    } else if (od.mapp) {
+      localStorage.removeItem(INBJUDAN);
+      visa('Den här webbläsaren är redan kopplad till en mapp. Logga ut under År och arkiv → OneDrive och öppna länken igen för att använda inbjudan.', true);
+    } else render();
+  });
 
   // Hämta igen när appen kommer tillbaka i fokus, så att ändringar från en annan enhet syns.
   document.addEventListener('visibilitychange', function () {
