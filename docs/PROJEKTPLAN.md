@@ -102,9 +102,17 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - Startsidan Översikt (att göra, medlemmar, på gång, vem som är inne) och huvuddelarna Bokföring, Medlemmar, Föreningen och Inställningar.
 
+## Styrelsen (från version 1.24)
+
+- Undermappen `Styrelsen` med `Styrelsen.json` (protokoll, beslut, uppgifter, ärenden), `Förtroendeuppdrag.json` och `Undertecknade protokoll`. Ingen exklusiv skrivrätt: ändringar slås ihop post för post, och krockar visas.
+- Roller: ordförande, vice ordförande, sekreterare, ledamot och suppleant läser bokföringen och medlemsregistret och ändrar styrelsens material. Kassör och admin har allt. Bokföraren ser inte styrelsens material. Revisorn läser bokföringen och styrelsens material. Valberedningen läser bara förtroendeuppdragen (filen delas för sig, egen inbjudningslänk). Den gamla rollen Styrelse blir Ledamot.
+- Mötets funktionärer (mötesordförande, mötessekreterare, justerare) väljs per möte och är skilda från rollerna. Styrelsens sekreterare föreslås för styrelsemöten.
+- Underskrift per protokoll: elektroniskt (Microsoft-inloggning, tid och SHA-256-kontrollsumma, signatursida i PDF:en, kontroll i appen) eller papper (PDF med underskriftsrader, inskannat original laddas upp). Den som saknar konto i appen kan bara skriva under på papper.
+- Att utreda: om Stockholms stad och banken godtar enkel elektronisk underskrift.
+
 ## Kommande
 
-- 1.24: styrelsemodul (möten och beslut, uppgifter, förtroendeuppdrag, dokument och stadgeändringar som ärenden till årsmötet).
+- Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
 
 ## Integritet
 
