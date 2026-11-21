@@ -98,9 +98,12 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Checklista för de årliga handlingarna i Idrottsportalen och kontroll av medlemsantal och nolltaxa mot exporten från RF:s system (inget sparas).
 - Apelido (capoeiranamn) för medlemmar och roller.
 
+## Struktur (från version 1.23)
+
+- Startsidan Översikt (att göra, medlemmar, på gång, vem som är inne) och huvuddelarna Bokföring, Medlemmar, Föreningen och Inställningar.
+
 ## Kommande
 
-- 1.23: ny struktur med startsidan Översikt (att göra, medlemmar, på gång, vem som är inne) och huvuddelarna Bokföring, Medlemmar, Föreningen och Inställningar.
 - 1.24: styrelsemodul (möten och beslut, uppgifter, förtroendeuppdrag, dokument och stadgeändringar som ärenden till årsmötet).
 
 ## Integritet
