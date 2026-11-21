@@ -320,6 +320,17 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.24', datum: '2026-11-21',
+    nyheter: [
+      'Ny flik Styrelsen under Föreningen: protokoll, beslut, uppgifter, förtroendeuppdrag och ärenden till årsmötet.',
+      'Protokoll skrivs i appen med mall för styrelsemöte, konstituerande möte och årsmöte (efter föredragningslistan). Mötesordförande, sekreterare och justerare väljs för varje möte.',
+      'Protokoll kan skrivas under elektroniskt (inloggning med Microsoft-konto, tid och kontrollsumma) eller på papper (skriv ut, skriv under och ladda upp den inskannade versionen).',
+      'Beslut kan kopplas till verifikationer, och checklistan inför årsmötet kan läggas in som uppgifter med datum.',
+      'Nya roller: ordförande, vice ordförande, sekreterare, ledamot, suppleant och valberedning. Rollen Styrelse heter nu Ledamot. Bokföraren ser inte styrelsens material, och valberedningen ser bara förtroendeuppdragen.',
+      'Styrelsens material sparas i en egen mapp, Styrelsen, i OneDrive. Alla i styrelsen kan ändra samtidigt.'
+    ]
+  },
+  {
     version: '1.23', datum: '2026-11-21',
     nyheter: [
       'Ny startsida, Översikt: att göra, medlemmarna den här terminen, kommande frister och vem som är inne.',
@@ -2778,7 +2789,10 @@ var VERSIONER = [
   // Rollerna sparas i roller.json i bokföringsmappen och knyts till Microsoft-inloggningen (e-postadressen).
   // Bara en person i taget har skrivrätten; övriga ser bokföringen i läsläge.
 
-  var ROLLER = [['admin', 'Systemadministratör'], ['kassor', 'Kassör'], ['bokforare', 'Bokförare'], ['revisor', 'Revisor'], ['styrelse', 'Styrelse']];
+  var ROLLER = [['admin', 'Systemadministratör'], ['ordforande', 'Ordförande'], ['viceordforande', 'Vice ordförande'], ['kassor', 'Kassör'], ['sekreterare', 'Sekreterare'],
+    ['ledamot', 'Ledamot'], ['suppleant', 'Suppleant'], ['bokforare', 'Bokförare'], ['revisor', 'Revisor'], ['valberedning', 'Valberedning']];
+  // Styrelsens roller: läser bokföringen och registret, och skriver i styrelsens material.
+  var STYRELSEROLLER = ['ordforande', 'viceordforande', 'kassor', 'sekreterare', 'ledamot', 'suppleant'];
   var ROLLFORMAT = 'foreningsbokforing-roller';
 
   function normEpost(e) { return String(e || '').trim().toLowerCase(); }
@@ -2797,12 +2811,16 @@ var VERSIONER = [
   function harRoll(fil, epost, roll) { return rollerFor(fil, epost).indexOf(roll) >= 0; }
 
   // Behörighet i OneDrive som rollerna ger: bokföringsmappen och medlemsregistrets mapp.
+  // data = bokföringen, reg = medlemsregistret, styr = styrelsens material, uppdrag = förtroendeuppdragen.
   function behorighet(roller) {
-    var b = { data: null, reg: null };
+    var b = { data: null, reg: null, styr: null, uppdrag: null };
+    var minst = function (k, v) { if (b[k] !== 'write') b[k] = v === 'write' ? 'write' : (b[k] || v); };
     roller.forEach(function (r) {
-      if (r === 'admin' || r === 'kassor' || r === 'bokforare') { b.data = 'write'; b.reg = 'write'; }
-      if (r === 'styrelse') { if (!b.data) b.data = 'read'; if (!b.reg) b.reg = 'read'; }
-      if (r === 'revisor') { if (!b.data) b.data = 'read'; }
+      if (r === 'admin' || r === 'kassor') { minst('data', 'write'); minst('reg', 'write'); minst('styr', 'write'); minst('uppdrag', 'write'); }
+      if (r === 'bokforare') { minst('data', 'write'); minst('reg', 'write'); }
+      if (STYRELSEROLLER.indexOf(r) >= 0 && r !== 'kassor') { minst('data', 'read'); minst('reg', 'read'); minst('styr', 'write'); minst('uppdrag', 'write'); }
+      if (r === 'revisor') { minst('data', 'read'); minst('styr', 'read'); minst('uppdrag', 'read'); }
+      if (r === 'valberedning') { minst('uppdrag', 'read'); }
     });
     return b;
   }
@@ -2860,9 +2878,263 @@ var VERSIONER = [
 
   function lasRollfil(d) {
     if (!d || d.format !== ROLLFORMAT || !Array.isArray(d.personer)) throw BokforingsFel('roller.json har ett okänt format.');
-    return { format: ROLLFORMAT, personer: d.personer.map(function (p) { var x = { epost: normEpost(p.epost), roller: (p.roller || []).slice() }; if (p.apelido) x.apelido = String(p.apelido); return x; }), skrivratt: normEpost(d.skrivratt), logg: d.logg || [], regMapp: d.regMapp || null };
+    // Rollen Styrelse (före 1.24) blir Ledamot.
+    var roll = function (r) { return r === 'styrelse' ? 'ledamot' : r; };
+    return { format: ROLLFORMAT, personer: d.personer.map(function (p) { var x = { epost: normEpost(p.epost), roller: (p.roller || []).map(roll).filter(function (r, i, l) { return l.indexOf(r) === i; }) }; if (p.apelido) x.apelido = String(p.apelido); return x; }), skrivratt: normEpost(d.skrivratt), logg: d.logg || [], regMapp: d.regMapp || null, styrMapp: d.styrMapp || null, uppdragFil: d.uppdragFil || null };
   }
 
+
+
+  // ---------- Styrelsen ----------
+  // Möten med protokoll och beslut, uppgifter, förtroendeuppdrag och dokument. Sparas för sig (styrelse.json och uppdrag.json).
+
+  var STYRFORMAT = 'foreningsbokforing-styrelse';
+  var UPPDRAGFORMAT = 'foreningsbokforing-uppdrag';
+
+  function tomStyrelse() { return { format: STYRFORMAT, moten: [], uppgifter: [], dokument: [], arenden: [] }; }
+  function tomaUppdrag() { return { format: UPPDRAGFORMAT, uppdrag: [] }; }
+  function normaliseraStyrelse(d) {
+    var t = tomStyrelse();
+    d = d && typeof d === 'object' ? d : {};
+    ['moten', 'uppgifter', 'dokument', 'arenden'].forEach(function (k) { if (Array.isArray(d[k])) t[k] = d[k]; });
+    return t;
+  }
+  function normaliseraUppdrag(d) { return { format: UPPDRAGFORMAT, uppdrag: d && Array.isArray(d.uppdrag) ? d.uppdrag : [] }; }
+
+  function styrId(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  var MOTESTYPER = [['styrelse', 'Styrelsemöte'], ['konstituerande', 'Konstituerande styrelsemöte'], ['arsmote', 'Årsmöte'], ['extra', 'Extra årsmöte']];
+
+  // Mallar för paragraferna. Årsmötet får föredragningslistan från årsmötessidan.
+  function motesmall(typ, opt) {
+    opt = opt || {};
+    var p = function (rubrik, text) { return { rubrik: rubrik, text: text || '' }; };
+    if (typ === 'konstituerande') return [
+      p('Mötets öppnande', 'Mötet öppnades.'),
+      p('Val av mötesfunktionärer', 'Till ordförande för mötet valdes … Till sekreterare för mötet valdes … Till justerare valdes …'),
+      p('Fastställande av styrelsen', 'Styrelsen konstituerade sig i enlighet med beslut på årsmötet:\nOrdförande: …\nVice ordförande: …\nSekreterare: …\nKassör: …\nLedamot: …'),
+      p('Firmatecknare', 'Till firmatecknare för föreningen utsågs:\n… (fullständigt personnummer)\n… (fullständigt personnummer)\nFirmatecknarna tecknar föreningen var för sig.'),
+      p('Övriga frågor', 'Inga övriga frågor.'),
+      p('Nästa styrelsemöte', ''),
+      p('Mötets avslutande', 'Mötet avslutades.')
+    ];
+    if (typ === 'arsmote' || typ === 'extra') {
+      var punkter = (opt.dagordning || '').split('\n').map(function (r) { return r.replace(/^\s*\d+[.)]\s*/, '').trim(); }).filter(Boolean);
+      return [p('Mötets öppnande', 'Föreningens ordförande hälsade alla välkomna och förklarade mötet öppnat.')]
+        .concat(punkter.map(function (x) { return p(x, ''); }))
+        .concat([p('Mötets avslutande', 'Mötesordföranden tackade alla närvarande och förklarade mötet avslutat.')]);
+    }
+    return [
+      p('Mötets öppnande', 'Ordföranden öppnade mötet.'),
+      p('Val av justerare', ''),
+      p('Godkännande av dagordningen', 'Dagordningen godkändes.'),
+      p('Föregående protokoll', 'Föregående protokoll lades till handlingarna.'),
+      p('Ekonomi', ''),
+      p('Verksamheten', ''),
+      p('Beslut', ''),
+      p('Övriga frågor', ''),
+      p('Nästa möte', ''),
+      p('Mötets avslutande', 'Mötet avslutades.')
+    ];
+  }
+
+  // Mötets funktionärer väljs för varje möte och är skilda från rollerna i appen:
+  // på årsmötet kan någon annan än styrelsens ordförande och sekreterare leda mötet och föra protokollet.
+  // Varje funktionär: { namn, epost }. epost behövs bara för elektronisk underskrift.
+  function normFunktionarer(f, behallTomma) {
+    f = f || {};
+    var en = function (x) { x = x || {}; return { namn: String(x.namn || '').trim(), epost: String(x.epost || '').trim().toLowerCase() }; };
+    return { ordforande: en(f.ordforande), sekreterare: en(f.sekreterare), justerare: (f.justerare || []).map(en).filter(function (x) { return behallTomma || x.namn || x.epost; }) };
+  }
+
+  // Vilka som ska skriva under: mötesordförande, mötessekreterare och justerare.
+  // kanLoggaIn(epost) säger om personen finns i appen. De som inte kan skriva under elektroniskt hamnar i saknas.
+  function forslagUndertecknare(m, kanLoggaIn) {
+    var f = normFunktionarer(m.funktionarer);
+    var lista = [];
+    if (f.ordforande.namn || f.ordforande.epost) lista.push(Object.assign({ roll: 'Mötesordförande' }, f.ordforande));
+    if (f.sekreterare.namn || f.sekreterare.epost) lista.push(Object.assign({ roll: 'Mötessekreterare' }, f.sekreterare));
+    f.justerare.forEach(function (j) { lista.push(Object.assign({ roll: 'Justerare' }, j)); });
+    // Samma person i två funktioner skriver under en gång.
+    var sedda = {};
+    lista = lista.filter(function (x) { var k = x.epost || x.namn; if (sedda[k]) { sedda[k].roll += ' och ' + x.roll.toLowerCase(); return false; } sedda[k] = x; return true; });
+    var ok = lista.filter(function (x) { return x.epost && (!kanLoggaIn || kanLoggaIn(x.epost)); });
+    var saknas = lista.filter(function (x) { return ok.indexOf(x) < 0; });
+    return { undertecknare: ok, saknas: saknas, metod: saknas.length || !ok.length ? 'papper' : 'e' };
+  }
+
+  function nyttMote(styr, uppgifter) {
+    var typ = uppgifter.typ || 'styrelse';
+    if (!MOTESTYPER.some(function (t) { return t[0] === typ; })) throw BokforingsFel('Okänd mötestyp.');
+    if (!arGiltigtDatum(uppgifter.datum)) throw BokforingsFel('Ange mötets datum.');
+    var m = { id: styrId('mo'), typ: typ, datum: uppgifter.datum, tid: uppgifter.tid || '', plats: uppgifter.plats || '', narvarande: uppgifter.narvarande || '',
+      funktionarer: normFunktionarer(uppgifter.funktionarer), paragrafer: motesmall(typ, uppgifter), beslut: [], status: 'utkast', skapad: uppgifter.skapad || null };
+    return { styr: Object.assign({}, styr, { moten: styr.moten.concat([m]) }), mote: m };
+  }
+
+  function hittaMote(styr, id) {
+    var m = styr.moten.find(function (x) { return x.id === id; });
+    if (!m) throw BokforingsFel('Mötet finns inte.');
+    return m;
+  }
+
+  function andraMote(styr, id, andring) {
+    var m = hittaMote(styr, id);
+    if (m.status !== 'utkast') throw BokforingsFel('Protokollet är låst för underskrift och kan inte ändras.');
+    var ok = ['datum', 'tid', 'plats', 'narvarande', 'paragrafer', 'beslut', 'funktionarer'];
+    var n = Object.assign({}, m);
+    Object.keys(andring).forEach(function (k) { if (ok.indexOf(k) >= 0) n[k] = k === 'funktionarer' ? normFunktionarer(andring[k], true) : andring[k]; });
+    return Object.assign({}, styr, { moten: styr.moten.map(function (x) { return x.id === id ? n : x; }) });
+  }
+
+  function taBortMote(styr, id) {
+    var m = hittaMote(styr, id);
+    if (m.status !== 'utkast') throw BokforingsFel('Ett låst protokoll kan inte tas bort.');
+    return Object.assign({}, styr, { moten: styr.moten.filter(function (x) { return x.id !== id; }) });
+  }
+
+  // Det som skrivs under: allt som står i protokollet, i en bestämd ordning.
+  function protokolltext(m) {
+    var typ = (MOTESTYPER.find(function (t) { return t[0] === m.typ; }) || ['', ''])[1];
+    var f = normFunktionarer(m.funktionarer);
+    var rader = [typ, 'Datum: ' + m.datum + (m.tid ? ' ' + m.tid : ''), 'Plats: ' + (m.plats || ''), 'Närvarande: ' + (m.narvarande || ''),
+      'Mötesordförande: ' + f.ordforande.namn, 'Mötessekreterare: ' + f.sekreterare.namn, 'Justerare: ' + f.justerare.map(function (j) { return j.namn; }).filter(Boolean).join(', ')];
+    m.paragrafer.forEach(function (p, i) { rader.push('§ ' + (i + 1) + ' ' + p.rubrik); if (p.text) rader.push(p.text); });
+    if (m.beslut.length) { rader.push('Beslut:'); m.beslut.forEach(function (b, i) { rader.push((i + 1) + '. ' + b.text + (b.belopp ? ' (' + formatBelopp(b.belopp) + ' kr)' : '')); }); }
+    return rader.join('\n');
+  }
+
+  // Lås protokollet för underskrift. metod: 'e' (elektroniskt i appen) eller 'papper' (bläck, inskannat).
+  // undertecknare: [{ epost, roll }] för elektronisk underskrift. kontrollsumma: SHA-256 av protokolltexten.
+  function lasForUnderskrift(styr, id, metod, undertecknare, kontrollsumma, tid) {
+    var m = hittaMote(styr, id);
+    if (m.status !== 'utkast') throw BokforingsFel('Protokollet är redan låst.');
+    if (metod !== 'e' && metod !== 'papper') throw BokforingsFel('Välj elektronisk underskrift eller papper.');
+    if (metod === 'e' && (!undertecknare || !undertecknare.length)) throw BokforingsFel('Välj vilka som ska skriva under.');
+    if (!/^[0-9a-f]{64}$/.test(kontrollsumma || '')) throw BokforingsFel('Kontrollsumman saknas.');
+    var n = Object.assign({}, m, { status: 'last', underskrift: { metod: metod, kontrollsumma: kontrollsumma, last: tid || null,
+      undertecknare: (undertecknare || []).map(function (u) { return { epost: String(u.epost).toLowerCase(), namn: u.namn || '', roll: u.roll || '' }; }), signaturer: [], fil: null } });
+    return Object.assign({}, styr, { moten: styr.moten.map(function (x) { return x.id === id ? n : x; }) });
+  }
+
+  // Lås upp, bara om ingen har skrivit under ännu.
+  function lasUppProtokoll(styr, id) {
+    var m = hittaMote(styr, id);
+    if (m.status === 'utkast') return styr;
+    if ((m.underskrift.signaturer || []).length || m.underskrift.fil) throw BokforingsFel('Någon har redan skrivit under. Protokollet kan inte ändras.');
+    var n = Object.assign({}, m, { status: 'utkast' });
+    delete n.underskrift;
+    return Object.assign({}, styr, { moten: styr.moten.map(function (x) { return x.id === id ? n : x; }) });
+  }
+
+  function signera(styr, id, epost, namn, kontrollsumma, tid) {
+    var m = hittaMote(styr, id);
+    var u = m.underskrift;
+    epost = String(epost || '').toLowerCase();
+    if (!u || u.metod !== 'e') throw BokforingsFel('Protokollet är inte låst för elektronisk underskrift.');
+    if (kontrollsumma !== u.kontrollsumma) throw BokforingsFel('Protokollet har ändrats sedan det låstes. Underskriften görs inte.');
+    if (!u.undertecknare.some(function (x) { return x.epost === epost; })) throw BokforingsFel('Du står inte bland dem som ska skriva under.');
+    if (u.signaturer.some(function (x) { return x.epost === epost; })) throw BokforingsFel('Du har redan skrivit under.');
+    var nyU = Object.assign({}, u, { signaturer: u.signaturer.concat([{ epost: epost, namn: namn || epost, tid: tid || null, kontrollsumma: kontrollsumma }]) });
+    var klar = u.undertecknare.every(function (x) { return nyU.signaturer.some(function (s2) { return s2.epost === x.epost; }); });
+    var n = Object.assign({}, m, { underskrift: nyU, status: klar ? 'signerat' : 'last' });
+    return Object.assign({}, styr, { moten: styr.moten.map(function (x) { return x.id === id ? n : x; }) });
+  }
+
+  // Papper: den inskannade, undertecknade PDF:en har laddats upp.
+  function registreraPapper(styr, id, fil, tid) {
+    var m = hittaMote(styr, id);
+    if (!m.underskrift || m.underskrift.metod !== 'papper') throw BokforingsFel('Protokollet är inte låst för underskrift på papper.');
+    if (!fil || !fil.namn) throw BokforingsFel('Välj den inskannade filen.');
+    var n = Object.assign({}, m, { status: 'signerat', underskrift: Object.assign({}, m.underskrift, { fil: { namn: fil.namn, odId: fil.odId || null, lokalId: fil.lokalId || null, tid: tid || null } }) });
+    return Object.assign({}, styr, { moten: styr.moten.map(function (x) { return x.id === id ? n : x; }) });
+  }
+
+  // Kontroll: stämmer protokolltexten med kontrollsumman som skrevs under?
+  function kontrolleraUnderskrifter(m, kontrollsumma) {
+    if (!m.underskrift) return { ok: false, text: 'Inte låst för underskrift.' };
+    if (m.underskrift.metod === 'papper') return { ok: !!m.underskrift.fil, text: m.underskrift.fil ? 'Undertecknat på papper, inskannat.' : 'Väntar på den inskannade filen.' };
+    var andrad = kontrollsumma !== m.underskrift.kontrollsumma;
+    var felaktiga = m.underskrift.signaturer.filter(function (s2) { return s2.kontrollsumma !== m.underskrift.kontrollsumma; });
+    return { ok: !andrad && !felaktiga.length, andrad: andrad, text: andrad ? 'Protokollet har ändrats efter att det låstes.' : felaktiga.length ? 'En underskrift gäller en annan version.' : 'Oförändrat sedan det låstes.' };
+  }
+
+  // Alla beslut i alla protokoll, nyast först.
+  function beslutslogg(styr) {
+    var ut = [];
+    styr.moten.forEach(function (m) { m.beslut.forEach(function (b, i) { ut.push({ mote: m.id, datum: m.datum, typ: m.typ, nr: i + 1, text: b.text, belopp: b.belopp || 0, verifikation: b.verifikation || null, status: m.status }); }); });
+    return ut.sort(function (a, b) { return a.datum < b.datum ? 1 : a.datum > b.datum ? -1 : a.nr - b.nr; });
+  }
+
+  // Uppgifter
+  function laggTillUppgift(styr, u) {
+    if (!String(u.text || '').trim()) throw BokforingsFel('Skriv vad som ska göras.');
+    var x = { id: styrId('up'), text: String(u.text).trim(), ansvarig: String(u.ansvarig || '').trim(), datum: arGiltigtDatum(u.datum) ? u.datum : '', klar: false, grupp: u.grupp || '' };
+    return Object.assign({}, styr, { uppgifter: styr.uppgifter.concat([x]) });
+  }
+  function andraUppgift(styr, id, andring) {
+    return Object.assign({}, styr, { uppgifter: styr.uppgifter.map(function (u) { return u.id === id ? Object.assign({}, u, andring) : u; }) });
+  }
+  function taBortUppgift(styr, id) { return Object.assign({}, styr, { uppgifter: styr.uppgifter.filter(function (u) { return u.id !== id; }) }); }
+
+  // Checklistan inför årsmötet, med datum räknade från mötesdagen.
+  function arsmotesUppgifter(motesdatum) {
+    var d = function (n) { return laggTillDagar(motesdatum, n); };
+    return [
+      ['Kallelsens text', d(-28)], ['Föredragningslista', d(-28)], ['Verksamhetsberättelse (text och ekonomi)', d(-28)], ['Valberedningens förslag', d(-28)],
+      ['Balans- och resultaträkning', d(-28)], ['Revisionsberättelse', d(-14)], ['Medlemsförteckning', d(-28)],
+      ['Publicera kallelsen på hemsidan och i chattgrupperna', d(-14)], ['Påminn dem som inte betalat terminsavgift', d(-14)],
+      ['Publicera verksamhetsberättelse, revisionsberättelse och balans- och resultaträkning', d(-7)],
+      ['Röstlängd till mötet', d(-7)], ['Utkast till årsmötesprotokoll', d(-7)], ['Utkast till protokoll för konstituerande styrelsemöte', d(-7)],
+      ['Påminn medlemmarna om årsmötet', d(-7)], ['Registrera årliga handlingar i Idrottsportalen', d(42)]
+    ].map(function (x) { return { text: x[0], datum: x[1] }; });
+  }
+
+  // Ärenden till årsmötet, t.ex. förslag till stadgeändring.
+  function laggTillArende(styr, a) {
+    if (!String(a.text || '').trim()) throw BokforingsFel('Beskriv ärendet.');
+    var x = { id: styrId('ar'), text: String(a.text).trim(), typ: a.typ || 'forslag', status: 'forslag', mote: a.mote || '' };
+    return Object.assign({}, styr, { arenden: styr.arenden.concat([x]) });
+  }
+  function andraArende(styr, id, andring) { return Object.assign({}, styr, { arenden: styr.arenden.map(function (a) { return a.id === id ? Object.assign({}, a, andring) : a; }) }); }
+
+  // Förtroendeuppdrag: vem som är vald till vad och till när.
+  function laggTillUppdrag(upp, u) {
+    if (!String(u.roll || '').trim() || !String(u.namn || '').trim()) throw BokforingsFel('Ange uppdrag och namn.');
+    var x = { id: styrId('fu'), roll: String(u.roll).trim(), namn: String(u.namn).trim(), apelido: String(u.apelido || '').trim(), vald: arGiltigtDatum(u.vald) ? u.vald : '', till: arGiltigtDatum(u.till) ? u.till : '' };
+    return Object.assign({}, upp, { uppdrag: upp.uppdrag.concat([x]) });
+  }
+  function taBortUppdrag(upp, id) { return Object.assign({}, upp, { uppdrag: upp.uppdrag.filter(function (u) { return u.id !== id; }) }); }
+  // Två personer kan ändra styrelsens material samtidigt. Ändringarna slås ihop post för post (möte, uppgift, uppdrag …).
+  // bas = versionen jag utgick från, mitt = min version, fjarr = den som sparats i OneDrive under tiden.
+  // Har både jag och någon annan ändrat samma post gäller deras version, och min hamnar i krockar så att den kan visas.
+  function slaIhopPoster(bas, mitt, fjarr, nycklar) {
+    var lika = function (a, b) { return JSON.stringify(a) === JSON.stringify(b); };
+    var ut = Object.assign({}, fjarr), krockar = [];
+    nycklar.forEach(function (k) {
+      var B = {}, M = {}, F = {}, ids = [];
+      var lagg = function (x) { if (ids.indexOf(x.id) < 0) ids.push(x.id); };
+      ((bas || {})[k] || []).forEach(function (x) { B[x.id] = x; lagg(x); });
+      ((mitt || {})[k] || []).forEach(function (x) { M[x.id] = x; lagg(x); });
+      var lista = ((fjarr || {})[k] || []).slice();
+      lista.forEach(function (x) { F[x.id] = x; });
+      ids.forEach(function (id) {
+        var b = B[id], m = M[id], f = F[id];
+        if (lika(m, b)) return;
+        if (lika(f, b)) {
+          if (!m) lista = lista.filter(function (x) { return x.id !== id; });
+          else if (f) lista = lista.map(function (x) { return x.id === id ? m : x; });
+          else lista.push(m);
+        } else if (!lika(m, f)) krockar.push({ typ: k, id: id, min: m || null });
+      });
+      ut[k] = lista;
+    });
+    return { data: ut, krockar: krockar };
+  }
+
+  function uppdragSomGarUt(upp, datum) {
+    return upp.uppdrag.filter(function (u) { return u.till && u.till <= datum; }).sort(function (a, b) { return a.till < b.till ? -1 : 1; });
+  }
 
   // ---------- Årsmötet ----------
   // Tidsfrister och ärenden enligt stadgarna (RF:s normalstadgar), och vad Stockholms stad behöver efteråt.
@@ -3402,6 +3674,35 @@ var VERSIONER = [
     flyttaSkrivratt: flyttaSkrivratt,
     lasRollfil: lasRollfil,
     laggTillManader: laggTillManader,
+    STYRELSEROLLER: STYRELSEROLLER,
+    MOTESTYPER: MOTESTYPER,
+    tomStyrelse: tomStyrelse,
+    tomaUppdrag: tomaUppdrag,
+    normaliseraStyrelse: normaliseraStyrelse,
+    normaliseraUppdrag: normaliseraUppdrag,
+    motesmall: motesmall,
+    normFunktionarer: normFunktionarer,
+    forslagUndertecknare: forslagUndertecknare,
+    nyttMote: nyttMote,
+    andraMote: andraMote,
+    taBortMote: taBortMote,
+    protokolltext: protokolltext,
+    lasForUnderskrift: lasForUnderskrift,
+    lasUppProtokoll: lasUppProtokoll,
+    signera: signera,
+    registreraPapper: registreraPapper,
+    kontrolleraUnderskrifter: kontrolleraUnderskrifter,
+    beslutslogg: beslutslogg,
+    laggTillUppgift: laggTillUppgift,
+    andraUppgift: andraUppgift,
+    taBortUppgift: taBortUppgift,
+    arsmotesUppgifter: arsmotesUppgifter,
+    laggTillArende: laggTillArende,
+    andraArende: andraArende,
+    laggTillUppdrag: laggTillUppdrag,
+    taBortUppdrag: taBortUppdrag,
+    uppdragSomGarUt: uppdragSomGarUt,
+    slaIhopPoster: slaIhopPoster,
     visaNamn: visaNamn,
     sattApelidoRoll: sattApelidoRoll,
     visaPerson: visaPerson,
@@ -3452,6 +3753,17 @@ var VERSIONER = [
   var DATAMAPP = 'Bokföring och underlag';
   var REGMAPP = 'Medlemsregister';
   var senastRegJson = null;
+  // Styrelsens material: egen mapp i OneDrive (Styrelsen) och egen lagring i webbläsaren.
+  var STYR_LAGRING = OVNING ? 'forening-bokforing:ovning:styrelsen' : 'forening-bokforing:styrelsen';
+  var STYRMAPP = 'Styrelsen';
+  var STYRFIL = 'Styrelsen.json';
+  var UPPDRAGFIL = 'Förtroendeuppdrag.json';
+  var PROTOKOLLMAPP = 'Undertecknade protokoll';
+  function tomSty() { return { styr: { data: K.tomStyrelse(), bas: null, eTag: null, smutsig: false }, upp: { data: K.tomaUppdrag(), bas: null, eTag: null, smutsig: false } }; }
+  var sty = tomSty();
+  var styrKrockar = [];
+  var styrVy = 'moten';
+  var oppetMote = null;
 
   var NYCKEL = 'forening-bokforing:claude-nyckel';
   var NYCKEL_UTGAR = 'forening-bokforing:claude-nyckel-utgar';
@@ -3496,6 +3808,13 @@ var VERSIONER = [
         LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
       }
     } catch (e) { /* tom lagring är okej */ }
+    try {
+      var sr = JSON.parse(localStorage.getItem(STYR_LAGRING) || 'null');
+      if (sr && sr.styr && sr.upp) {
+        sty.styr = Object.assign(sty.styr, sr.styr, { data: K.normaliseraStyrelse(sr.styr.data) });
+        sty.upp = Object.assign(sty.upp, sr.upp, { data: K.normaliseraUppdrag(sr.upp.data) });
+      }
+    } catch (e) { /* tomt */ }
     var lokalt = null;
     try { var regRad = localStorage.getItem(REG_LAGRING); if (regRad) lokalt = K.normaliseraRegister(JSON.parse(regRad)); } catch (e) { /* tomt */ }
     if (lokalt && (K.registerHarData(lokalt) || !inbaddat)) {
@@ -3936,12 +4255,13 @@ var VERSIONER = [
 
   // En inbjudningslänk (#revisor=…) sparas tills mottagaren har loggat in.
   function fangaInbjudan() {
-    var m = location.hash.match(/#(?:revisor|inbjudan)=([A-Za-z0-9_-]+)/);
+    var m = location.hash.match(/#(revisor|inbjudan|uppdrag)=([A-Za-z0-9_-]+)/);
     if (!m) return;
     try {
-      var b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+      var b64 = m[2].replace(/-/g, '+').replace(/_/g, '/');
       var bin = atob(b64 + '==='.slice((b64.length + 3) % 4));
       var data = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, function (c) { return c.charCodeAt(0); })));
+      if (data && m[1] === 'uppdrag') data.t = 'uppdrag';
       if (data && data.d && data.i) localStorage.setItem(INBJUDAN, JSON.stringify(data));
     } catch (e) { /* ogiltig länk */ }
     history.replaceState(null, '', location.pathname + location.search);
@@ -3957,12 +4277,29 @@ var VERSIONER = [
     var inbjudan = lasInbjudan();
     var inst = await lasAppinstallningar().catch(function () { return {}; });
     synkaNyckel(inst);
+    if (inbjudan && inbjudan.t === 'uppdrag') {
+      // Valberedningen: bara filen med förtroendeuppdragen är delad.
+      localStorage.removeItem(INBJUDAN);
+      var fil = await graf('/drives/' + inbjudan.d + '/items/' + inbjudan.i, { tillat: [403, 404] });
+      if (typeof fil === 'number') throw new Error('Förtroendeuppdragen går inte att öppna. Be föreningen dela dem med ditt Microsoft-konto (' + (od.konto || '') + ') och skicka länken igen.');
+      od.uppdragLas = { driveId: inbjudan.d, id: inbjudan.i, f: inbjudan.f || '' };
+      sparaOd();
+      sparaAppinstallningar({ uppdragLas: od.uppdragLas }).catch(function () { /* frivilligt */ });
+      await synkaStyrelsen();
+      return 'uppdrag';
+    }
     if (inbjudan) {
       localStorage.removeItem(INBJUDAN);
       var finns = await graf('/drives/' + inbjudan.d + '/items/' + inbjudan.i, { tillat: [403, 404] });
       if (typeof finns === 'number') throw new Error('Mappen i inbjudan går inte att öppna. Be kassören dela mappen med ditt Microsoft-konto (' + (od.konto || '') + ') och skicka länken igen.');
       await valjDeladMapp({ driveId: inbjudan.d, id: inbjudan.i, namn: inbjudan.n || finns.name, agare: '' });
       return 'inbjudan';
+    }
+    if (!inst.mapp && inst.uppdragLas) {
+      od.uppdragLas = inst.uppdragLas;
+      sparaOd();
+      await synkaStyrelsen();
+      return 'uppdrag';
     }
     if (!inst.mapp) return null;
     var post = await graf('/drives/' + inst.mapp.driveId + '/items/' + inst.mapp.id, { tillat: [403, 404] });
@@ -4233,6 +4570,188 @@ var VERSIONER = [
       '<button class="btn btn-secondary btn-small" data-action="exportera-register">Spara en kopia av den här versionen</button></div></div>';
   }
 
+  // ---------- Styrelsen i OneDrive ----------
+  // Styrelsens material ligger i en egen mapp, Styrelsen, bredvid bokföringen och medlemsregistret.
+  // Det finns ingen exklusiv skrivrätt: alla i styrelsen kan ändra samtidigt, och ändringarna slås ihop post för post.
+  // Förtroendeuppdragen ligger i en egen fil i mappen, så att den kan delas med valberedningen utan resten.
+
+  var STYRFILER = {
+    styr: { fil: STYRFIL, tom: K.tomStyrelse, norm: K.normaliseraStyrelse, nycklar: ['moten', 'uppgifter', 'dokument', 'arenden'] },
+    upp: { fil: UPPDRAGFIL, tom: K.tomaUppdrag, norm: K.normaliseraUppdrag, nycklar: ['uppdrag'] }
+  };
+
+  function arValberedningslage() { return !!(od.uppdragLas && !od.mapp && !OVNING); }
+
+  // 'write', 'read' eller null. Utan OneDrive (och i övningsläget) är allt ditt eget.
+  function styrBeh(k) {
+    if (revision) return null;
+    if (arValberedningslage()) return k === 'upp' ? 'read' : null;
+    if (!odAnslutet()) return 'write';
+    if (!odNu.roller) return od.lage === 'agare' ? 'write' : null;
+    var b = K.behorighet(K.rollerFor(odNu.roller, mig()));
+    return k === 'upp' ? b.uppdrag : b.styr;
+  }
+  function styrData() { return sty.styr.data; }
+  function uppData() { return sty.upp.data; }
+
+  function sparaStyrLokalt() {
+    try { localStorage.setItem(STYR_LAGRING, JSON.stringify(sty)); } catch (e) { /* lagringen är full eller avstängd */ }
+  }
+
+  // En ändring av styrelsens material sparas direkt i webbläsaren och en kort stund senare i OneDrive.
+  function andraStyr(k, ny, ritaOm) {
+    if (styrBeh(k) !== 'write') throw new Error('Du kan läsa men inte ändra det här.');
+    sty[k].data = ny;
+    sty[k].smutsig = true;
+    sparaStyrLokalt();
+    if (odAnslutet()) schemalaggStyrSynk();
+    if (ritaOm !== false) render();
+  }
+
+  var styrTimer = null;
+  function schemalaggStyrSynk() {
+    clearTimeout(styrTimer);
+    styrTimer = setTimeout(function () { synkaStyrelsen().then(render, function (err) { odNu.styrFel = err.message; render(); }); }, 1500);
+  }
+
+  function iStyrMappen(rel) { return '/drives/' + od.styrMapp.driveId + '/items/' + od.styrMapp.id + ':/' + enc(rel) + ':'; }
+  function styrUrl(k) {
+    if (k === 'upp' && arValberedningslage()) return '/drives/' + od.uppdragLas.driveId + '/items/' + od.uppdragLas.id;
+    return iStyrMappen(STYRFILER[k].fil);
+  }
+
+  async function uppdateraRollfilMed(andring) {
+    if (od.lage !== 'agare' || !odNu.roller) return;
+    var f = odNu.roller;
+    if (!Object.keys(andring).some(function (k) { return JSON.stringify(f[k] || null) !== JSON.stringify(andring[k]); })) return;
+    await sparaRoller(Object.assign({}, f, andring)).catch(function () { /* nästa gång */ });
+  }
+
+  async function sakerstallStyrMapp() {
+    if (od.styrMapp && od.styrMapp.for === od.mapp.id) return;
+    if (odNu.roller && odNu.roller.styrMapp) { od.styrMapp = Object.assign({}, odNu.roller.styrMapp, { for: od.mapp.id }); sparaOd(); return; }
+    if (od.lage !== 'agare') throw new Error('Styrelsens mapp är inte delad med dig.');
+    var foralder, namn;
+    if (od.rot) { foralder = od.rot.id; namn = STYRMAPP; }
+    else {
+      var mapp = await graf('/drives/' + od.mapp.driveId + '/items/' + od.mapp.id + '?$select=id,name,parentReference');
+      foralder = mapp.parentReference && mapp.parentReference.id;
+      if (!foralder) throw new Error('Hittar inte mappen ovanför bokföringsmappen.');
+      namn = mapp.name + ' – styrelsen';
+    }
+    var ny = await sakerstallUndermapp(od.mapp.driveId, foralder, namn);
+    od.styrMapp = { driveId: od.mapp.driveId, id: ny.id, namn: od.rot ? od.rot.namn + '/' + namn : namn, for: od.mapp.id };
+    sparaOd();
+    await uppdateraRollfilMed({ styrMapp: { driveId: od.styrMapp.driveId, id: od.styrMapp.id, namn: od.styrMapp.namn } });
+  }
+
+  async function hamtaStyrFil(k, forsok) {
+    var s = sty[k], d = STYRFILER[k];
+    if (!styrBeh(k)) {
+      // Utan behörighet: ta bort en gammal kopia i webbläsaren.
+      if (s.eTag || s.bas) { sty[k] = tomSty()[k]; sparaStyrLokalt(); }
+      return;
+    }
+    if (!arValberedningslage()) await sakerstallStyrMapp();
+    var meta = await graf(styrUrl(k), { tillat: [403, 404] });
+    if (meta === 403) return;
+    if (meta === 404) { if (styrBeh(k) === 'write') await sparaStyrFil(k, forsok); return; }
+    if (k === 'upp' && !arValberedningslage()) await uppdateraRollfilMed({ uppdragFil: { driveId: meta.parentReference.driveId, id: meta.id } });
+    if (meta.eTag === s.eTag) { if (s.smutsig && styrBeh(k) === 'write') await sparaStyrFil(k, forsok); return; }
+    var fjarr = d.norm(await (await graf(styrUrl(k) + '/content', { ra: true })).json());
+    if (s.smutsig && styrBeh(k) === 'write') {
+      var r = K.slaIhopPoster(s.bas || d.tom(), s.data, fjarr, d.nycklar);
+      s.data = d.norm(r.data);
+      r.krockar.forEach(function (x) { styrKrockar.push(Object.assign({ fil: k }, x)); });
+    } else { s.data = fjarr; s.smutsig = false; }
+    s.bas = fjarr;
+    s.eTag = meta.eTag;
+    sparaStyrLokalt();
+    if (s.smutsig) await sparaStyrFil(k, forsok);
+  }
+
+  async function sparaStyrFil(k, forsok) {
+    var s = sty[k];
+    var rubriker = { 'Content-Type': 'application/json' };
+    if (s.eTag) rubriker['If-Match'] = s.eTag; else rubriker['If-None-Match'] = '*';
+    var skickat = JSON.stringify(s.data);
+    var res = await graf(styrUrl(k) + '/content', { method: 'PUT', headers: rubriker, body: skickat, tillat: [412], ra: true });
+    if (res.status === 412) {
+      if ((forsok || 0) >= 3) throw new Error('Styrelsens material ändras av någon annan just nu. Försök igen om en stund.');
+      return hamtaStyrFil(k, (forsok || 0) + 1);
+    }
+    var post = await res.json();
+    s.eTag = post.eTag;
+    s.bas = JSON.parse(skickat);
+    if (JSON.stringify(s.data) === skickat) s.smutsig = false;
+    sparaStyrLokalt();
+    if (k === 'upp' && post.id) await uppdateraRollfilMed({ uppdragFil: { driveId: (post.parentReference && post.parentReference.driveId) || od.styrMapp.driveId, id: post.id } });
+    if (s.smutsig) schemalaggStyrSynk();
+  }
+
+  var styrKo = Promise.resolve();
+  function synkaStyrelsen() {
+    var steg = styrKo.then(async function () {
+      if (!odAnslutet() && !(arValberedningslage() && od.refreshToken)) return;
+      odNu.styrFel = null;
+      var filer = ['styr', 'upp'];
+      for (var i = 0; i < filer.length; i++) await hamtaStyrFil(filer[i]);
+    });
+    styrKo = steg.catch(function () { /* nästa gång */ });
+    return steg;
+  }
+
+  // Låsning och underskrift görs mot den senaste versionen i OneDrive, så att två som skriver under samtidigt inte krockar.
+  async function styrOperation(op) {
+    if (styrBeh('styr') !== 'write') throw new Error('Du kan inte ändra styrelsens material.');
+    if (!odAnslutet()) { andraStyr('styr', op(styrData())); return; }
+    await synkaStyrelsen();
+    var steg = styrKo.then(async function () {
+      var s = sty.styr;
+      for (var i = 0; i < 4; i++) {
+        var ny = op(s.data);
+        var rubriker = { 'Content-Type': 'application/json' };
+        if (s.eTag) rubriker['If-Match'] = s.eTag; else rubriker['If-None-Match'] = '*';
+        var res = await graf(styrUrl('styr') + '/content', { method: 'PUT', headers: rubriker, body: JSON.stringify(ny), tillat: [412], ra: true });
+        if (res.status !== 412) {
+          var post = await res.json();
+          s.data = ny; s.bas = JSON.parse(JSON.stringify(ny)); s.eTag = post.eTag; s.smutsig = false;
+          sparaStyrLokalt();
+          return;
+        }
+        var meta = await graf(styrUrl('styr'));
+        s.data = K.normaliseraStyrelse(await (await graf(styrUrl('styr') + '/content', { ra: true })).json());
+        s.bas = JSON.parse(JSON.stringify(s.data)); s.eTag = meta.eTag; s.smutsig = false;
+      }
+      throw new Error('Styrelsens material ändras av någon annan just nu. Försök igen.');
+    });
+    styrKo = steg.catch(function () { /* nästa gång */ });
+    await steg;
+    render();
+  }
+
+  function krockNamn(x) {
+    var m = x.min || {};
+    if (x.typ === 'moten') return 'Protokoll ' + (m.datum || '');
+    if (x.typ === 'uppgifter') return 'Uppgift: ' + (m.text || '');
+    if (x.typ === 'uppdrag') return 'Förtroendeuppdrag: ' + (m.roll || '') + ' ' + (m.namn || '');
+    return 'Ärende: ' + (m.text || '');
+  }
+  function styrKrockBanner() {
+    if (!styrKrockar.length) return '';
+    return '<div class="card fel" role="alert"><strong>Någon annan ändrade samma sak i styrelsens material samtidigt som du.</strong> ' +
+      '<p>Den andras version gäller. Din version finns här, så att du kan föra in det som saknas:</p>' +
+      styrKrockar.map(function (x) {
+        return '<details><summary>' + esc(krockNamn(x)) + '</summary><pre style="white-space:pre-wrap">' +
+          esc(!x.min ? 'Du tog bort den.' : x.typ === 'moten' ? K.protokolltext(x.min) : x.typ === 'uppdrag' ? x.min.roll + ': ' + x.min.namn + ' ' + (x.min.vald || '') + ' – ' + (x.min.till || '') : x.min.text) + '</pre></details>';
+      }).join('') + '<div class="row"><button class="btn btn-secondary btn-small" data-action="styr-krock-stang">Stäng</button></div></div>';
+  }
+
+  function uppdragslank(uf) {
+    var data = { d: uf.driveId, i: uf.id, f: store.forening.namn || '' };
+    return omdirigering() + '#uppdrag=' + b64url(new TextEncoder().encode(JSON.stringify(data)).buffer);
+  }
+
   function schemalaggSynk() {
     clearTimeout(odNu.timer);
     sattStatus('Ej sparat i OneDrive ännu…');
@@ -4473,6 +4992,11 @@ var VERSIONER = [
 
   function kopplaFranOneDrive() {
     clearTimeout(odNu.timer);
+    clearTimeout(styrTimer);
+    // Valberedningens kopia tas bort; styrelsens material finns kvar i webbläsaren, som bokföringen.
+    if (arValberedningslage()) sty = tomSty();
+    ['styr', 'upp'].forEach(function (k) { sty[k].eTag = null; });
+    sparaStyrLokalt();
     od = { clientId: od.clientId, refreshToken: null, konto: null, mapp: null, lage: null, eTag: null, senast: null, smutsig: false };
     odNu.token = null;
     odNu.mappar = {};
@@ -5601,6 +6125,7 @@ var VERSIONER = [
     ['rapporter', 'Rapporter'],
     ['bokslut', 'Bokslut'],
     ['kontoplan', 'Kontoplan'],
+    ['styrelsen', 'Styrelsen'],
     ['arsmote', 'Årsmötet'],
     ['staden', 'Stockholms stad'],
     ['arkiv', 'År och arkiv'],
@@ -5612,7 +6137,7 @@ var VERSIONER = [
     ['oversikt', 'Översikt', ['oversikt']],
     ['bokforing', 'Bokföring', ['inlasning', 'verifikationer', 'ny', 'huvudbok', 'rapporter', 'bokslut', 'kontoplan']],
     ['medlemmar', 'Medlemmar', ['medlemmar']],
-    ['foreningen', 'Föreningen', ['arsmote', 'staden', 'dokument']],
+    ['foreningen', 'Föreningen', ['styrelsen', 'arsmote', 'staden', 'dokument']],
     ['installningar', 'Inställningar', ['arkiv', 'om']]
   ];
   var senastIGrupp = {};
@@ -5629,11 +6154,11 @@ var VERSIONER = [
     renderArvaljare();
     var nav = document.getElementById('nav');
     var main = document.getElementById('main');
-    var msg = ovningsBanner() + revisionBanner() + skrivrattBanner() + konfliktBanner() + regKonfliktBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
+    var msg = ovningsBanner() + revisionBanner() + skrivrattBanner() + konfliktBanner() + regKonfliktBanner() + styrKrockBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
     if (!ar) {
       nav.innerHTML = '';
       document.getElementById('undernav').innerHTML = '';
-      main.innerHTML = msg + (vy === 'om' ? '<p><button class="btn btn-secondary btn-small" data-vy="inlasning">Tillbaka</button></p>' + vyOm() : vyStart()) + hjalpPanel();
+      main.innerHTML = msg + (arValberedningslage() ? vyValberedning() : vy === 'om' ? '<p><button class="btn btn-secondary btn-small" data-vy="inlasning">Tillbaka</button></p>' + vyOm() : vyStart()) + hjalpPanel();
       ritaQr();
       return;
     }
@@ -5644,9 +6169,14 @@ var VERSIONER = [
     var tillaten = function (v) {
       if (ar.grovkopia && (v === 'inlasning' || v === 'ny')) return false;
       if (v === 'medlemmar') return regSynligt;
+      if (v === 'styrelsen') return !!(styrBeh('styr') || styrBeh('upp'));
       return !lasLage() || (v !== 'inlasning' && v !== 'ny');
     };
-    if (!tillaten(vy)) vy = 'oversikt';
+    if (!tillaten(vy)) {
+      // Första tillåtna fliken i samma del, annars översikten (t.ex. bokföraren under Föreningen, där Styrelsen inte visas).
+      var iGrupp = GRUPPER.find(function (g) { return g[0] === gruppFor(vy); })[2].filter(tillaten);
+      vy = iGrupp[0] || 'oversikt';
+    }
     var grupp = gruppFor(vy);
     senastIGrupp[grupp] = vy;
     nav.innerHTML = GRUPPER.filter(function (g) { return g[2].some(tillaten); }).map(function (g) {
@@ -5660,6 +6190,7 @@ var VERSIONER = [
     var html = {
       oversikt: vyOversikt,
       arsmote: function (a) { return vyArsmoteSida(a); },
+      styrelsen: vyStyrelsen,
       staden: function (a) { return vyStaden(a); },
       inlasning: vyInlasning,
       verifikationer: vyVerifikationer,
@@ -6577,6 +7108,35 @@ var VERSIONER = [
   };
 
   var HJALP = {
+    styrelsen: {
+      rubrik: 'Styrelsens material',
+      vad: 'Protokoll med beslut, uppgifter med ansvarig och datum, förtroendeuppdragen och ärenden till årsmötet, samlat på ett ställe.',
+      varfor: 'Styrelsen ansvarar mellan årsmötena för föreningens angelägenheter. Protokollen visar vad som beslutades och av vem, och är underlag för revisorn och för verksamhetsberättelsen.',
+      gor: 'Alla i styrelsen kan skriva protokoll och ändra samtidigt. Bokföraren ser inte styrelsens material. Revisorn kan läsa det, och valberedningen ser förtroendeuppdragen.'
+    },
+    funktionarer: {
+      rubrik: 'Mötets funktionärer',
+      vad: 'Mötesordförande, mötessekreterare och justerare väljs för varje möte.',
+      varfor: 'De behöver inte vara samma personer som styrelsens ordförande och sekreterare. På årsmötet väljs ofta någon annan att leda mötet och föra protokollet, ibland någon utanför föreningen.',
+      gor: 'Fyll i namn och e-post. Den som har ett konto i appen med styrelsens behörighet kan skriva under elektroniskt; andra skriver under på papper.'
+    },
+    beslut: {
+      rubrik: 'Beslut i protokollet',
+      vad: 'Varje beslut skrivs för sig, med belopp om det gäller pengar, och kan kopplas till den verifikation där utgiften bokförs.',
+      varfor: 'Revisorn granskar att utgifter är beslutade. Med kopplingen syns direkt vilket beslut en betalning bygger på. Alla beslut samlas under fliken Beslut.'
+    },
+    underskrift: {
+      rubrik: 'Underskrift av protokoll',
+      vad: 'Protokollet låses och skrivs under, antingen elektroniskt i appen eller på papper med bläck.',
+      varfor: 'Underskriften visar att protokollet stämmer med vad som beslutades. Elektroniskt: var och en loggar in med sitt Microsoft-konto, och appen sparar vem, när och en kontrollsumma (SHA-256) som visar att texten inte har ändrats efteråt. Det är en enkel elektronisk underskrift. Papper: det inskannade originalet sparas i mappen Styrelsen.',
+      gor: 'Fråga Stockholms stad och banken om de godtar enkel elektronisk underskrift innan ni använder den för handlingar som ska lämnas till dem, till exempel protokollet om firmatecknare. Välj papper om någon utan konto i appen ska skriva under.'
+    },
+    uppdrag: {
+      rubrik: 'Förtroendeuppdrag',
+      vad: 'Vem som är vald till ordförande, ledamot, revisor, valberedning och så vidare, när och till när.',
+      varfor: 'Valberedningen behöver veta vilka mandat som går ut till nästa årsmöte, och styrelsen ser i god tid vilka platser som ska fyllas.',
+      gor: 'Uppdragen ligger i en egen fil som delas med valberedningen för läsning, utan resten av styrelsens material.'
+    },
     bokforing: {
       rubrik: 'Bokföring av banktransaktioner',
       vad: 'Varje pengarörelse på föreningens konto blir en verifikation: en anteckning om vad som hände, när, hur mycket och på vilka konton.',
@@ -6758,6 +7318,7 @@ var VERSIONER = [
   async function efterBokforing() {
     await hamtaRoller().catch(function (err) { odNu.rollFel = 'Rollerna: ' + err.message; });
     await hamtaRegister().catch(function (err) { odNu.regFel = 'Medlemsregistret: ' + err.message; });
+    await synkaStyrelsen().catch(function (err) { odNu.styrFel = 'Styrelsen: ' + err.message; });
   }
 
   async function hamtaRoller() {
@@ -6817,7 +7378,7 @@ var VERSIONER = [
     var data = await graf('/drives/' + item.driveId + '/items/' + item.id + '/permissions');
     return (data.value || []).filter(function (p) {
       var e = (p.invitation && p.invitation.email) || (p.grantedToV2 && p.grantedToV2.user && p.grantedToV2.user.email) || (p.grantedTo && p.grantedTo.user && p.grantedTo.user.email) || '';
-      return String(e).toLowerCase() === epost && (p.roles || []).indexOf('owner') < 0;
+      return String(e).toLowerCase() === epost && (p.roles || []).indexOf('owner') < 0 && !p.inheritedFrom;
     });
   }
 
@@ -6846,7 +7407,18 @@ var VERSIONER = [
       var text = 'Du har fått rollen ' + namn + ' i Föreningsbokföring för ' + (store.forening.namn || 'föreningen') + '. Öppna appen med den här länken och logga in med ditt Microsoft-konto: ' + inbjudningslank();
       await sattDelning(od.mapp, epost, b.data, text);
       if (od.regMapp) await sattDelning(od.regMapp, epost, b.reg, text);
+      // Styrelsens mapp, och förtroendeuppdragen för valberedningen.
+      if (b.styr || b.uppdrag || od.styrMapp) {
+        await synkaStyrelsen();
+        if (od.styrMapp) await sattDelning(od.styrMapp, epost, b.styr, text);
+        var uf = odNu.roller && odNu.roller.uppdragFil;
+        if (uf) {
+          var textValb = 'Du har fått rollen ' + namn + ' i Föreningsbokföring för ' + (store.forening.namn || 'föreningen') + '. Öppna förtroendeuppdragen med den här länken och logga in med ditt Microsoft-konto: ' + uppdragslank(uf);
+          await sattDelning(uf, epost, b.styr ? null : b.uppdrag, b.data ? text : textValb);
+        }
+      }
     }
+    fil = Object.assign({}, fil, { styrMapp: odNu.roller.styrMapp || fil.styrMapp || null, uppdragFil: odNu.roller.uppdragFil || fil.uppdragFil || null });
     if (!fil.regMapp && od.regMapp) fil.regMapp = { driveId: od.regMapp.driveId, id: od.regMapp.id, namn: od.regMapp.namn };
     await sparaRoller(fil);
   }
@@ -6880,7 +7452,8 @@ var VERSIONER = [
     }
     if (K.harRoll(f, jag, 'admin')) {
       html += '<h3>Personer</h3><p class="faint" style="margin-top:0">Rollerna ger behörighet i OneDrive: systemadministratör, kassör och bokförare får ändra i bokföringen och medlemsregistret, ' +
-        'revisorn får läsa bokföringen och styrelsen får läsa bokföringen och medlemsregistret. Alla behöver ett Microsoft-konto och får ett mejl med länk till appen.</p>' +
+        'revisorn får läsa bokföringen och styrelsens material. Ordförande, vice ordförande, sekreterare, ledamot och suppleant får läsa bokföringen och medlemsregistret och ändra styrelsens material; kassören får allt. ' +
+        'Bokföraren ser inte styrelsens material. Valberedningen ser bara förtroendeuppdragen. Rollerna i appen är skilda från mötets funktionärer, som väljs för varje möte. Alla behöver ett Microsoft-konto och får ett mejl med länk till appen.</p>' +
         '<div class="scroll"><table class="kortlista"><thead><tr><th>E-post</th><th>Apelido</th>' + K.ROLLER.map(function (r) { return '<th>' + esc(r[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' +
         f.personer.map(function (p) {
           return '<tr><td><strong>' + esc(p.epost) + '</strong>' + (p.epost === f.skrivratt ? ' <span class="tag ok">skrivrätt</span>' : '') + '</td>' +
@@ -7075,6 +7648,11 @@ var VERSIONER = [
     var fg = foregaende(ar);
     var html = '<p class="faint" style="margin-top:12px">Årsmötet för räkenskapsåret <strong>' + esc(K.arNamn(ar)) + '</strong>. ' +
       (fg && idag() <= ar.slut ? 'Årsmötet i år gäller oftast förra året: <button class="tag knapp-tag" data-action="valj-ar" data-ar="' + esc(K.arNamn(fg)) + '">Byt till ' + esc(K.arNamn(fg)) + '</button>' : 'Byt år överst om du förbereder ett annat årsmöte.') + '</p>';
+    if (styrBeh('styr') === 'write') {
+      html += '<div class="card"><strong>Styrelsen:</strong> skriv årsmötets protokoll i appen utifrån föredragningslistan, och lägg in checklistan inför mötet som uppgifter med datum.' +
+        '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="styr-arsmote-protokoll">Skapa årsmötesprotokoll</button>' +
+        '<button class="btn btn-secondary btn-small" data-action="styr-uppg-arsmote">Lägg in checklistan som uppgifter</button></div></div>';
+    }
     return html + vyArsmotet(ar) + vyArsmote(ar);
   }
 
@@ -7119,6 +7697,12 @@ var VERSIONER = [
       }
       html += '<div class="card"><h3 style="margin-top:0">Att göra</h3>' + (gor ? '<ul class="checklista varningar">' + gor + '</ul>' : '<p class="ok" style="margin:0">Inget att göra just nu.</p>') + '</div>';
     }
+    // Styrelsen
+    if (styrBeh('styr')) {
+      var sp = styrPaminnelser(rad);
+      html += '<div class="card"><h3 style="margin-top:0">Styrelsen</h3>' + (sp ? '<ul class="checklista varningar">' + sp + '</ul>' : '<p class="ok" style="margin:0">Inget som väntar på dig.</p>') +
+        '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-vy="styrelsen">Styrelsen</button></div></div>';
+    }
     // Medlemmar
     var regSynligt = !lasLage() || (odNu.regLas && K.registerHarData(reg()));
     if (regSynligt && K.registerHarData(reg())) {
@@ -7143,6 +7727,442 @@ var VERSIONER = [
     return html;
   }
 
+  // ---------- Styrelsen ----------
+
+  var STYRFLIKAR = [['moten', 'Möten och protokoll'], ['beslut', 'Beslut'], ['uppgifter', 'Uppgifter'], ['uppdrag', 'Förtroendeuppdrag'], ['arenden', 'Ärenden till årsmötet']];
+  var UPPDRAGSROLLER = ['Ordförande', 'Vice ordförande', 'Kassör', 'Sekreterare', 'Ledamot', 'Suppleant', 'Revisor', 'Revisorssuppleant', 'Valberedning'];
+  var ARENDETYPER = [['stadgar', 'Stadgeändring'], ['forslag', 'Styrelsens förslag'], ['motion', 'Motion']];
+  var ARENDESTATUS = [['forslag', 'Förslag'], ['arsmote', 'Till årsmötet'], ['antaget', 'Antaget'], ['avslaget', 'Avslaget']];
+
+  function motesNamn(m) { return (K.MOTESTYPER.find(function (t) { return t[0] === m.typ; }) || ['', 'Möte'])[1]; }
+  function styrPersoner() {
+    var f = odNu.roller;
+    return f ? f.personer.map(function (p) { return { epost: p.epost, namn: K.visaPerson(f, p.epost), roller: p.roller }; }) : [];
+  }
+  function personMedRoll(r) { return styrPersoner().find(function (p) { return p.roller.indexOf(r) >= 0; }) || null; }
+  // Kan personen skriva under elektroniskt? Hen måste kunna logga in och ändra styrelsens material.
+  function kanLoggaIn(epost) {
+    if (!odAnslutet()) return OVNING;
+    return styrPersoner().some(function (p) { return p.epost === epost && K.behorighet(p.roller).styr === 'write'; });
+  }
+  function oppetMoteObj() { return styrData().moten.find(function (x) { return x.id === oppetMote; }) || null; }
+  function arSekreterare() { return !odAnslutet() || (odNu.roller && K.harRoll(odNu.roller, mig(), 'sekreterare')); }
+
+  async function sha256(text) {
+    var b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(b)).map(function (x) { return x.toString(16).padStart(2, '0'); }).join('');
+  }
+
+  function statusTag(m) {
+    if (m.status === 'utkast') return '<span class="tag">Utkast</span>';
+    var u = m.underskrift;
+    if (m.status === 'signerat') return '<span class="tag ok">' + (u.metod === 'papper' ? 'Undertecknat på papper' : 'Undertecknat elektroniskt') + '</span>';
+    return '<span class="tag varning">' + (u.metod === 'papper' ? 'Väntar på det inskannade originalet' : 'Väntar på underskrift, ' + u.signaturer.length + ' av ' + u.undertecknare.length) + '</span>';
+  }
+
+  function vyStyrelsen(ar) {
+    var bs = styrBeh('styr'), bu = styrBeh('upp');
+    var flikar = STYRFLIKAR.filter(function (f) { return f[0] === 'uppdrag' ? bu : bs; });
+    if (!flikar.some(function (f) { return f[0] === styrVy; })) styrVy = flikar[0][0];
+    var html = '<h2>Styrelsen' + hjalp('styrelsen') + '</h2>';
+    if (bs === 'read') html += '<p class="faint">Du kan läsa styrelsens material men inte ändra det.</p>';
+    else if (!bs) html += '<p class="faint">Du ser förtroendeuppdragen. Resten av styrelsens material är inte delat med dig.</p>';
+    html += '<div class="row" style="margin-bottom:10px">' + flikar.map(function (f) {
+      return '<button class="btn btn-small' + (styrVy === f[0] ? '' : ' btn-secondary') + '" data-action="styr-vy" data-v="' + f[0] + '"' + (styrVy === f[0] ? ' aria-pressed="true"' : '') + '>' + esc(f[1]) + '</button>';
+    }).join('') + '</div>';
+    if (odNu.styrFel) html += '<p class="fel">' + esc(odNu.styrFel) + '</p>';
+    html += '<div class="arsmote-form">' + { moten: vyMoten, beslut: vyBeslut, uppgifter: vyUppgifter, uppdrag: vyUppdrag, arenden: vyArenden }[styrVy](ar) + '</div>';
+    if (odAnslutet() && od.styrMapp) html += '<p class="faint" style="font-size:.85em;margin-top:14px">Sparas i mappen ' + esc(od.styrMapp.namn) + ' i OneDrive. Alla i styrelsen kan ändra samtidigt; ändrar två personer samma sak visas det.</p>';
+    return html;
+  }
+
+  function vyMoten(ar) {
+    var s = styrData(), skriv = styrBeh('styr') === 'write';
+    var m0 = oppetMoteObj();
+    if (m0) return vyMote(ar, m0);
+    oppetMote = null;
+    var html = '';
+    if (skriv) {
+      var am = arsmoteData(ar);
+      html += '<div class="card"><h3 style="margin-top:0">Nytt protokoll</h3><div class="row">' +
+        '<select id="nyMotesTyp" style="width:auto" aria-label="Typ av möte">' + K.MOTESTYPER.map(function (t) { return '<option value="' + t[0] + '">' + esc(t[1]) + '</option>'; }).join('') + '</select>' +
+        '<input id="nyMotesDatum" type="date" value="' + esc(idag()) + '" style="width:auto" aria-label="Datum">' +
+        '<input id="nyMotesTid" type="time" style="width:auto" aria-label="Tid">' +
+        '<input id="nyMotesPlats" placeholder="Plats" style="max-width:220px" aria-label="Plats">' +
+        '<button class="btn btn-small" data-action="styr-nytt-mote">Skapa protokoll</button></div>' +
+        '<p class="faint" style="margin-bottom:0">Protokollet får en mall med paragrafer som du ändrar fritt. Årsmötets protokoll följer föredragningslistan under Årsmötet' + (am.motesdatum ? ' (mötet ' + esc(am.motesdatum) + ')' : '') + '. ' +
+        'Styrelsens sekreterare föreslås som protokollförare, men mötets funktionärer kan ändras för varje möte.</p></div>';
+    }
+    var lista = s.moten.slice().sort(function (a, b) { return a.datum < b.datum ? 1 : a.datum > b.datum ? -1 : 0; });
+    html += lista.length ? '<div class="scroll"><table class="kortlista"><thead><tr><th>Datum</th><th>Möte</th><th>Status</th><th></th></tr></thead><tbody>' + lista.map(function (m) {
+      return '<tr><td>' + esc(m.datum) + '</td><td data-etikett="Möte">' + esc(motesNamn(m)) + '</td><td data-etikett="Status">' + statusTag(m) + '</td>' +
+        '<td><button class="btn btn-secondary btn-small" data-action="styr-oppna" data-id="' + esc(m.id) + '">Öppna</button></td></tr>';
+    }).join('') + '</tbody></table></div>' : '<p class="faint">Inga protokoll ännu.</p>';
+    return html;
+  }
+
+  function personLista() {
+    return '<datalist id="styrPersonLista">' + styrPersoner().map(function (p) { return '<option value="' + esc(p.epost) + '">' + esc(p.namn) + '</option>'; }).join('') + '</datalist>';
+  }
+
+  function funktionarRad(etikett, funk, i, x, dis) {
+    var a = ' data-funk="' + funk + '"' + (i != null ? ' data-si="' + i + '"' : '');
+    return '<div class="row" style="align-items:center;margin:4px 0"><span style="min-width:140px">' + esc(etikett) + '</span>' +
+      '<input' + a + ' data-ff="namn" value="' + esc(x.namn) + '" placeholder="Namn" style="max-width:200px" aria-label="' + esc(etikett) + ', namn"' + dis + '>' +
+      '<input' + a + ' data-ff="epost" type="email" list="styrPersonLista" value="' + esc(x.epost) + '" placeholder="E-post (för elektronisk underskrift)" style="max-width:260px" aria-label="' + esc(etikett) + ', e-post"' + dis + '>' +
+      (i != null && !dis ? '<button class="btn btn-secondary btn-small" data-action="styr-just-bort" data-si="' + i + '" aria-label="Ta bort justeraren">Ta bort</button>' : '') + '</div>';
+  }
+
+  function vyMote(ar, m) {
+    var skriv = styrBeh('styr') === 'write';
+    var redigera = skriv && m.status === 'utkast';
+    var dis = redigera ? '' : ' disabled';
+    var f = K.normFunktionarer(m.funktionarer, true);
+    var html = '<p><button class="btn btn-secondary btn-small" data-action="styr-stang">Alla protokoll</button></p>';
+    html += '<div class="card"><h3 style="margin-top:0">' + esc(motesNamn(m)) + ' ' + esc(m.datum) + ' ' + statusTag(m) + '</h3>' +
+      (m.status !== 'utkast' ? '<p class="faint">Protokollet är låst för underskrift och kan inte ändras.</p>' : '') +
+      '<div class="grid2"><div><label for="mDatum">Datum</label><input id="mDatum" type="date" data-mf="datum" value="' + esc(m.datum) + '"' + dis + '></div>' +
+      '<div><label for="mTid">Tid</label><input id="mTid" type="time" data-mf="tid" value="' + esc(m.tid) + '"' + dis + '></div></div>' +
+      '<label for="mPlats">Plats</label><input id="mPlats" data-mf="plats" value="' + esc(m.plats) + '"' + dis + '>' +
+      '<label for="mNarvarande">Närvarande</label><textarea id="mNarvarande" data-mf="narvarande" rows="2"' + dis + '>' + esc(m.narvarande) + '</textarea>' +
+      '<h4>Mötets funktionärer' + hjalp('funktionarer') + '</h4>' + personLista() +
+      funktionarRad('Mötesordförande', 'ordforande', null, f.ordforande, dis) +
+      funktionarRad('Mötessekreterare', 'sekreterare', null, f.sekreterare, dis) +
+      f.justerare.map(function (j, i) { return funktionarRad('Justerare', 'justerare', i, j, dis); }).join('') +
+      (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-just-ny">Lägg till justerare</button>' : '') + '</div>';
+    // Paragrafer
+    html += '<div class="card"><h3 style="margin-top:0">Paragrafer</h3>' + m.paragrafer.map(function (p, i) {
+      return '<div style="border-top:1px solid var(--linje);padding:8px 0"><div class="row" style="align-items:center"><strong>§ ' + (i + 1) + '</strong>' +
+        '<input data-pf="rubrik" data-si="' + i + '" value="' + esc(p.rubrik) + '" placeholder="Rubrik" style="flex:1;min-width:160px" aria-label="Rubrik för paragraf ' + (i + 1) + '"' + dis + '>' +
+        (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-par-upp" data-si="' + i + '" aria-label="Flytta upp"' + (i ? '' : ' disabled') + '>Upp</button>' +
+          '<button class="btn btn-secondary btn-small" data-action="styr-par-ner" data-si="' + i + '" aria-label="Flytta ner"' + (i < m.paragrafer.length - 1 ? '' : ' disabled') + '>Ner</button>' +
+          '<button class="btn btn-secondary btn-small" data-action="styr-par-bort" data-si="' + i + '">Ta bort</button>' : '') + '</div>' +
+        '<textarea data-pf="text" data-si="' + i + '" rows="3" aria-label="Text för paragraf ' + (i + 1) + '"' + dis + '>' + esc(p.text) + '</textarea></div>';
+    }).join('') + (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-par-ny">Lägg till paragraf</button>' : '') + '</div>';
+    // Beslut
+    var verOpt = function (val) {
+      var lista = (ar.verifikationer || []).map(function (v) { return [store.aktivt + ':' + v.nr, 'Ver ' + v.nr + ' ' + v.datum + ' ' + v.text]; });
+      if (val && !lista.some(function (x) { return x[0] === val; })) lista.unshift([val, 'Ver ' + val.split(':').pop() + ' (' + val.split(':')[0] + ')']);
+      return '<option value="">Ingen verifikation</option>' + lista.map(function (x) { return '<option value="' + esc(x[0]) + '"' + (x[0] === val ? ' selected' : '') + '>' + esc(x[1].slice(0, 70)) + '</option>'; }).join('');
+    };
+    html += '<div class="card"><h3 style="margin-top:0">Beslut' + hjalp('beslut') + '</h3>' + (m.beslut.length ? '' : '<p class="faint">Inga beslut i protokollet.</p>') + m.beslut.map(function (b, i) {
+      return '<div style="border-top:1px solid var(--linje);padding:8px 0"><textarea data-bf="text" data-si="' + i + '" rows="2" placeholder="Beslut" aria-label="Beslut ' + (i + 1) + '"' + dis + '>' + esc(b.text) + '</textarea>' +
+        '<div class="row"><input data-bf="belopp" data-si="' + i + '" value="' + (b.belopp ? esc(kr(b.belopp)) : '') + '" placeholder="Belopp, kr (frivilligt)" style="max-width:180px" inputmode="decimal" aria-label="Belopp"' + dis + '>' +
+        '<select data-bf="verifikation" data-si="' + i + '" style="max-width:320px" aria-label="Verifikation"' + dis + '>' + verOpt(b.verifikation || '') + '</select>' +
+        (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-bes-bort" data-si="' + i + '">Ta bort</button>' : '') + '</div></div>';
+    }).join('') + (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-bes-ny">Lägg till beslut</button>' : '') + '</div>';
+    html += vyUnderskrift(m, skriv);
+    return html;
+  }
+
+  function vyUnderskrift(m, skriv) {
+    var html = '<div class="card"><h3 style="margin-top:0">Underskrift' + hjalp('underskrift') + '</h3>';
+    var pdf = '<button class="btn btn-secondary btn-small" data-action="styr-pdf">Ladda ner PDF</button><button class="btn btn-secondary btn-small" data-action="styr-pdf-skriv-ut">Skriv ut</button>';
+    if (m.status === 'utkast') {
+      if (!skriv) return html + '<p class="faint">Protokollet är ett utkast.</p><div class="row">' + pdf + '</div></div>';
+      var fo = K.forslagUndertecknare(m, kanLoggaIn);
+      var eMojligt = fo.undertecknare.length > 0;
+      html += '<p style="margin-top:0">Välj hur protokollet ska skrivas under. När det är låst kan det inte ändras.</p>' +
+        '<label style="display:flex;gap:8px;align-items:flex-start;font-weight:normal"><input type="radio" name="styrMetod" value="e" style="width:auto"' + (fo.metod === 'e' ? ' checked' : '') + (eMojligt ? '' : ' disabled') + '>' +
+        '<span><strong>Elektroniskt i appen.</strong> Var och en loggar in med sitt Microsoft-konto och skriver under. Appen sparar vem, när och en kontrollsumma som visar att texten inte ändrats.</span></label>' +
+        '<label style="display:flex;gap:8px;align-items:flex-start;font-weight:normal"><input type="radio" name="styrMetod" value="papper" style="width:auto"' + (fo.metod === 'papper' ? ' checked' : '') + '>' +
+        '<span><strong>På papper med bläck.</strong> Skriv ut, låt alla skriva under och ladda upp den inskannade versionen.</span></label>';
+      if (fo.undertecknare.length || fo.saknas.length) {
+        html += '<p style="margin-bottom:4px">Ska skriva under:</p><ul style="margin-top:0">' +
+          fo.undertecknare.map(function (u) { return '<li>' + esc(u.roll) + ': ' + esc(u.namn || u.epost) + ' <span class="faint">' + esc(u.epost) + '</span></li>'; }).join('') +
+          fo.saknas.map(function (u) { return '<li>' + esc(u.roll) + ': ' + esc(u.namn || u.epost) + ' <span class="tag varning">kan bara skriva under på papper</span></li>'; }).join('') + '</ul>';
+        if (fo.saknas.length) html += '<p class="faint">Den som inte har ett konto i appen med styrelsens behörighet kan inte skriva under elektroniskt, till exempel en mötesordförande utifrån. Välj papper, eller lägg till personen under Inställningar, Roller.</p>';
+      } else html += '<p class="faint">Fyll i mötets funktionärer ovan, så föreslår appen vilka som ska skriva under.</p>';
+      if (!odAnslutet() && !OVNING) html += '<p class="faint">Elektronisk underskrift kräver att appen är kopplad till föreningens OneDrive.</p>';
+      html += '<div class="row"><button class="btn btn-small" data-action="styr-las">Lås för underskrift</button>' + pdf +
+        '<button class="btn btn-secondary btn-small" data-action="styr-ta-bort">Ta bort protokollet</button></div></div>';
+      return html;
+    }
+    var u = m.underskrift;
+    if (u.metod === 'e') {
+      html += '<p style="margin-top:0">Skrivs under elektroniskt. Låst ' + esc(klockslag(u.last)) + '.</p><ul>' + u.undertecknare.map(function (x) {
+        var sig = u.signaturer.find(function (y) { return y.epost === x.epost; });
+        return '<li>' + esc(x.roll) + ': ' + esc(x.namn || x.epost) + ' – ' + (sig ? '<span class="ok">underskrivet ' + esc(klockslag(sig.tid)) + '</span>' : '<span class="faint">väntar</span>') + '</li>';
+      }).join('') + '</ul>';
+      var vantar = u.undertecknare.filter(function (x) { return !u.signaturer.some(function (y) { return y.epost === x.epost; }); });
+      if (skriv && OVNING) {
+        html += vantar.map(function (x) { return '<button class="btn btn-small" data-action="styr-signera" data-epost="' + esc(x.epost) + '">Skriv under som ' + esc(x.namn || x.epost) + ' (övning)</button> '; }).join('');
+      } else if (skriv && vantar.some(function (x) { return x.epost === mig(); })) {
+        html += '<label style="display:flex;gap:8px;align-items:flex-start;font-weight:normal"><input type="checkbox" id="styrGodkann" style="width:auto"><span>Jag har läst protokollet och godkänner det.</span></label>' +
+          '<div class="row"><button class="btn btn-small" data-action="styr-signera">Skriv under</button></div>';
+      }
+    } else {
+      html += '<p style="margin-top:0">Skrivs under på papper. Låst ' + esc(klockslag(u.last)) + '.</p>';
+      if (u.fil) html += '<p>Undertecknat original: <strong>' + esc(u.fil.namn) + '</strong> <button class="btn btn-secondary btn-small" data-action="styr-papper-visa">Visa</button></p>';
+      else html += '<ol><li>Skriv ut protokollet.</li><li>Låt mötesordföranden, sekreteraren och justerarna skriva under.</li><li>Skanna eller fotografera det och ladda upp filen här.</li></ol>' +
+        (skriv ? '<div class="row"><button class="btn btn-small" data-action="styr-papper-valj">Ladda upp det undertecknade protokollet</button></div>' : '');
+    }
+    html += '<div class="row" style="margin-top:8px">' + pdf + '<button class="btn btn-secondary btn-small" data-action="styr-kontrollera">Kontrollera underskrifterna</button>' +
+      (skriv && !u.signaturer.length && !u.fil ? '<button class="btn btn-secondary btn-small" data-action="styr-las-upp">Lås upp för ändringar</button>' : '') + '</div></div>';
+    return html;
+  }
+
+  function vyBeslut() {
+    var logg = K.beslutslogg(styrData());
+    if (!logg.length) return '<p class="faint">Inga beslut ännu. Beslut skrivs in i protokollen.</p>';
+    return '<div class="scroll"><table class="kortlista"><thead><tr><th>Datum</th><th>Beslut</th><th class="num">Belopp</th><th>Verifikation</th><th>Protokoll</th></tr></thead><tbody>' + logg.map(function (b) {
+      return '<tr><td>' + esc(b.datum) + '</td><td data-etikett="Beslut">' + esc(b.text) + '</td><td class="num" data-etikett="Belopp">' + (b.belopp ? esc(kr(b.belopp)) : '') + '</td>' +
+        '<td data-etikett="Verifikation">' + (b.verifikation ? 'Ver ' + esc(b.verifikation.split(':').pop()) + ' <span class="faint">(' + esc(b.verifikation.split(':')[0]) + ')</span>' : '') + '</td>' +
+        '<td data-etikett="Protokoll"><button class="tag knapp-tag" data-action="styr-oppna" data-id="' + esc(b.mote) + '">' + esc(K.MOTESTYPER.find(function (t) { return t[0] === b.typ; })[1]) + '</button></td></tr>';
+    }).join('') + '</tbody></table></div>';
+  }
+
+  function vyUppgifter(ar) {
+    var s = styrData(), skriv = styrBeh('styr') === 'write', nu0 = idag(), snart = K.laggTillDagar(nu0, 14);
+    var html = '';
+    if (skriv) {
+      var am = arsmoteData(ar);
+      html += '<div class="card"><h3 style="margin-top:0">Ny uppgift</h3><div class="row">' +
+        '<input id="nyUppgText" placeholder="Vad ska göras" style="flex:2;min-width:200px" aria-label="Vad ska göras">' +
+        '<input id="nyUppgAnsvarig" list="styrNamnLista" placeholder="Ansvarig" style="max-width:180px" aria-label="Ansvarig">' +
+        '<input id="nyUppgDatum" type="date" style="width:auto" aria-label="Senast">' +
+        '<button class="btn btn-small" data-action="styr-uppg-ny">Lägg till</button></div>' +
+        '<datalist id="styrNamnLista">' + styrPersoner().map(function (p) { return '<option value="' + esc(p.namn) + '">'; }).join('') + '</datalist>' +
+        (am.motesdatum ? '<p class="faint" style="margin-bottom:0">Årsmötet är ' + esc(am.motesdatum) + '. <button class="btn btn-secondary btn-small" data-action="styr-uppg-arsmote">Lägg in checklistan inför årsmötet</button></p>'
+          : '<p class="faint" style="margin-bottom:0">Ange datum för årsmötet under Årsmötet, så kan checklistan inför mötet läggas in här med datum.</p>') + '</div>';
+    }
+    var lista = s.uppgifter.slice().sort(function (a, b) {
+      if (a.klar !== b.klar) return a.klar ? 1 : -1;
+      return (a.datum || '9999') < (b.datum || '9999') ? -1 : (a.datum || '9999') > (b.datum || '9999') ? 1 : 0;
+    });
+    if (!lista.length) return html + '<p class="faint">Inga uppgifter.</p>';
+    return html + '<div class="scroll"><table class="kortlista"><thead><tr><th>Klar</th><th>Uppgift</th><th>Ansvarig</th><th>Senast</th><th></th></tr></thead><tbody>' + lista.map(function (u) {
+      var sen = !u.klar && u.datum && u.datum < nu0, nara = !u.klar && u.datum && u.datum >= nu0 && u.datum <= snart;
+      return '<tr' + (u.klar ? ' class="faint"' : '') + '><td><input type="checkbox" style="width:auto" data-action="styr-uppg-klar" data-id="' + esc(u.id) + '"' + (u.klar ? ' checked' : '') + (skriv ? '' : ' disabled') + ' aria-label="Klar"></td>' +
+        '<td data-etikett="Uppgift">' + (u.klar ? '<s>' + esc(u.text) + '</s>' : esc(u.text)) + '</td><td data-etikett="Ansvarig">' + esc(u.ansvarig) + '</td>' +
+        '<td data-etikett="Senast">' + esc(u.datum) + (sen ? ' <span class="tag varning">försenad</span>' : nara ? ' <span class="tag">snart</span>' : '') + '</td>' +
+        '<td>' + (skriv ? '<button class="btn btn-secondary btn-small" data-action="styr-uppg-bort" data-id="' + esc(u.id) + '">Ta bort</button>' : '') + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+  }
+
+  function uppdragTabell(skriv) {
+    var upp = uppData(), nu0 = idag(), snart = K.laggTillManader(nu0, 3);
+    var ordning = function (r) { var i = UPPDRAGSROLLER.indexOf(r); return i < 0 ? 99 : i; };
+    var lista = upp.uppdrag.slice().sort(function (a, b) { return ordning(a.roll) - ordning(b.roll) || (a.namn < b.namn ? -1 : 1); });
+    if (!lista.length) return '<p class="faint">Inga förtroendeuppdrag inlagda.</p>';
+    return '<div class="scroll"><table class="kortlista"><thead><tr><th>Uppdrag</th><th>Namn</th><th>Vald</th><th>Mandat till</th><th></th></tr></thead><tbody>' + lista.map(function (u) {
+      var ut = u.till && u.till <= snart;
+      return '<tr><td>' + esc(u.roll) + '</td><td data-etikett="Namn">' + esc(u.namn) + (u.apelido ? ' <span class="faint">(' + esc(u.apelido) + ')</span>' : '') + '</td>' +
+        '<td data-etikett="Vald">' + esc(u.vald) + '</td><td data-etikett="Mandat till">' + esc(u.till) + (ut ? ' <span class="tag varning">' + (u.till < nu0 ? 'har gått ut' : 'går ut snart') + '</span>' : '') + '</td>' +
+        '<td>' + (skriv ? '<button class="btn btn-secondary btn-small" data-action="styr-uppdrag-bort" data-id="' + esc(u.id) + '">Ta bort</button>' : '') + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+  }
+
+  function vyUppdrag() {
+    var skriv = styrBeh('upp') === 'write';
+    var html = '<p class="faint" style="margin-top:0">Vem som är vald till vad och hur länge. Valberedningen kan läsa listan.' + hjalp('uppdrag') + '</p>';
+    if (skriv) {
+      html += '<div class="card"><h3 style="margin-top:0">Lägg till</h3><div class="row">' +
+        '<input id="nyUppdragRoll" list="uppdragRoller" placeholder="Uppdrag" style="max-width:170px" aria-label="Uppdrag">' +
+        '<datalist id="uppdragRoller">' + UPPDRAGSROLLER.map(function (r) { return '<option value="' + esc(r) + '">'; }).join('') + '</datalist>' +
+        '<input id="nyUppdragNamn" placeholder="Namn" style="max-width:200px" aria-label="Namn">' +
+        '<input id="nyUppdragApelido" placeholder="Apelido" style="max-width:130px" aria-label="Apelido">' +
+        '<label style="display:inline-flex;align-items:center;gap:4px;margin:0">Vald <input id="nyUppdragVald" type="date" style="width:auto"></label>' +
+        '<label style="display:inline-flex;align-items:center;gap:4px;margin:0">till <input id="nyUppdragTill" type="date" style="width:auto"></label>' +
+        '<button class="btn btn-small" data-action="styr-uppdrag-ny">Lägg till</button></div></div>';
+    }
+    return html + uppdragTabell(skriv);
+  }
+
+  function vyArenden() {
+    var s = styrData(), skriv = styrBeh('styr') === 'write';
+    var html = '<p class="faint" style="margin-top:0">Förslag som ska tas upp på årsmötet, till exempel ändringar i stadgarna. Ärenden med status Till årsmötet tas med i kallelsen och föredragningslistan.</p>';
+    if (skriv) {
+      html += '<div class="card"><h3 style="margin-top:0">Nytt ärende</h3>' +
+        '<select id="nyArendeTyp" style="width:auto" aria-label="Typ">' + ARENDETYPER.map(function (t) { return '<option value="' + t[0] + '">' + esc(t[1]) + '</option>'; }).join('') + '</select>' +
+        '<textarea id="nyArendeText" rows="3" placeholder="Beskriv förslaget" aria-label="Beskriv förslaget"></textarea>' +
+        '<div class="row"><button class="btn btn-small" data-action="styr-arende-ny">Lägg till</button></div></div>';
+    }
+    if (!s.arenden.length) return html + '<p class="faint">Inga ärenden.</p>';
+    return html + s.arenden.map(function (a) {
+      return '<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><span class="tag">' + esc((ARENDETYPER.find(function (t) { return t[0] === a.typ; }) || ['', 'Ärende'])[1]) + '</span>' +
+        '<select data-arende="' + esc(a.id) + '" style="width:auto" aria-label="Status"' + (skriv ? '' : ' disabled') + '>' + ARENDESTATUS.map(function (x) { return '<option value="' + x[0] + '"' + (a.status === x[0] ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('') + '</select></div>' +
+        '<p style="white-space:pre-wrap;margin-bottom:0">' + esc(a.text) + '</p></div>';
+    }).join('');
+  }
+
+  // Den som bara är valberedning har ingen bokföring: appen visar bara förtroendeuppdragen.
+  function vyValberedning() {
+    return '<h2>Förtroendeuppdrag</h2><p class="faint">' + (od.uppdragLas.f ? esc(od.uppdragLas.f) + '. ' : '') + 'Du ser förtroendeuppdragen som valberedning. Listan hämtas från föreningens OneDrive varje gång du öppnar appen.</p>' +
+      uppdragTabell(false) + (odNu.styrFel ? '<p class="fel">' + esc(odNu.styrFel) + '</p>' : '') +
+      '<div class="row" style="margin-top:14px"><button class="btn btn-secondary btn-small" data-action="styr-uppdrag-hamta">Hämta igen</button><button class="btn btn-secondary btn-small" data-action="od-logga-ut">Logga ut</button></div>';
+  }
+
+  // Påminnelser på översikten.
+  function styrPaminnelser(rad) {
+    var s = styrData(), jag = mig(), nu0 = idag(), ut = '';
+    var oppna = function (m, txt) { return '<button class="btn btn-secondary btn-small" data-action="styr-oppna" data-id="' + esc(m.id) + '">' + txt + '</button>'; };
+    s.moten.forEach(function (m) {
+      var namn = 'Protokollet från ' + motesNamn(m).toLowerCase() + ' ' + m.datum;
+      if (m.status === 'last' && m.underskrift.metod === 'e') {
+        var vantar = m.underskrift.undertecknare.filter(function (u) { return !m.underskrift.signaturer.some(function (x) { return x.epost === u.epost; }); });
+        if (vantar.some(function (u) { return u.epost === jag; })) ut += rad(esc(namn) + ' väntar på din underskrift.', oppna(m, 'Läs och skriv under'));
+        else if (vantar.length) ut += rad(esc(namn) + ' väntar på ' + antal(vantar.length, 'underskrift', 'underskrifter') + '.', oppna(m, 'Visa'));
+      }
+      if (m.status === 'last' && m.underskrift.metod === 'papper') ut += rad(esc(namn) + ' väntar på det inskannade originalet.', oppna(m, 'Visa'));
+      if (m.status === 'utkast' && m.datum <= K.laggTillDagar(nu0, -7) && arSekreterare()) ut += rad(esc(namn) + ' är fortfarande ett utkast.', oppna(m, 'Öppna'));
+    });
+    var sena = s.uppgifter.filter(function (u) { return !u.klar && u.datum && u.datum <= K.laggTillDagar(nu0, 14); });
+    if (sena.length) ut += rad(antal(sena.length, 'uppgift', 'uppgifter') + ' med sista datum inom två veckor eller passerat: ' + esc(sena.slice(0, 3).map(function (u) { return u.text; }).join(', ')) + (sena.length > 3 ? ' …' : '') + '.',
+      '<button class="btn btn-secondary btn-small" data-action="styr-vy" data-v="uppgifter">Uppgifter</button>');
+    if (styrBeh('upp')) {
+      var gar = K.uppdragSomGarUt(uppData(), K.laggTillManader(nu0, 3));
+      if (gar.length) ut += rad(antal(gar.length, 'förtroendeuppdrag går', 'förtroendeuppdrag går') + ' ut inom tre månader.', '<button class="btn btn-secondary btn-small" data-action="styr-vy" data-v="uppdrag">Förtroendeuppdrag</button>');
+    }
+    return ut;
+  }
+
+  function styrInput(t) {
+    var i = Number(t.dataset.si);
+    andraOppet(function (m) {
+      if (t.dataset.mf) m[t.dataset.mf] = t.value;
+      if (t.dataset.pf) m.paragrafer[i][t.dataset.pf] = t.value;
+      if (t.dataset.bf) {
+        var b = m.beslut[i];
+        if (t.dataset.bf === 'belopp') { try { b.belopp = t.value.trim() ? Math.abs(K.parseBelopp(t.value)) : 0; } catch (e) { /* ofullständigt belopp: behåll det förra */ } }
+        else if (t.dataset.bf === 'verifikation') b.verifikation = t.value || null;
+        else b.text = t.value;
+      }
+      if (t.dataset.ff) {
+        m.funktionarer = K.normFunktionarer(m.funktionarer, true);
+        var x = t.dataset.funk === 'justerare' ? m.funktionarer.justerare[i] : m.funktionarer[t.dataset.funk];
+        x[t.dataset.ff] = t.value;
+        // Väljs en person ur listan fylls namnet i.
+        if (t.dataset.ff === 'epost' && !x.namn) {
+          var p = styrPersoner().find(function (y) { return y.epost === t.value.trim().toLowerCase(); });
+          if (p) {
+            x.namn = p.namn;
+            var falt = t.parentNode.querySelector('[data-ff="namn"]');
+            if (falt) falt.value = p.namn;
+          }
+        }
+      }
+    }, false);
+  }
+
+  function andraOppet(fn, ritaOm) {
+    var m = oppetMoteObj();
+    if (!m) return;
+    var k = JSON.parse(JSON.stringify(m));
+    fn(k);
+    andraStyr('styr', K.andraMote(styrData(), m.id, { datum: k.datum, tid: k.tid, plats: k.plats, narvarande: k.narvarande, paragrafer: k.paragrafer, beslut: k.beslut, funktionarer: k.funktionarer }), ritaOm);
+  }
+
+  // Protokollet som PDF. Elektroniskt underskrivet: en sida med underskrifterna och kontrollsumman. Annars: rader för underskrift.
+  async function skapaProtokollPdf(m) {
+    var doc = nyPdf(await laddaJsPdf());
+    var summa = await sha256(K.protokolltext(m));
+    var V = 20, H = 190, NED = 275, f = store.forening, fu = K.normFunktionarer(m.funktionarer);
+    var y = 12 + (function () { var h = ritaLogo(doc, V, 12, 18, 16); return h ? h + 6 : 4; })();
+    var skriv = function (t, stil, storlek, farg) {
+      storlek = storlek || 10;
+      doc.setFont('helvetica', stil || 'normal'); doc.setFontSize(storlek);
+      if (farg) doc.setTextColor.apply(doc, farg);
+      String(t == null ? '' : t).split('\n').forEach(function (stycke) {
+        doc.splitTextToSize(pt(stycke), H - V).forEach(function (r) { if (y > NED) { doc.addPage(); y = 20; } doc.text(r, V, y); y += storlek * 0.45; });
+      });
+      doc.setTextColor(26, 26, 26);
+    };
+    skriv(f.namn || '', 'bold', 11);
+    if (f.orgnr) skriv('Org.nr ' + f.orgnr, 'normal', 8.5, GRA);
+    y += 5;
+    if (m.status === 'utkast') { skriv('UTKAST', 'bold', 10, [170, 40, 40]); y += 3; }
+    y += 3;
+    skriv('Protokoll, ' + motesNamn(m).toLowerCase(), 'bold', 16, SKIFFER);
+    y += 2;
+    skriv('Datum: ' + m.datum + (m.tid ? ' kl. ' + m.tid : ''));
+    if (m.plats) skriv('Plats: ' + m.plats);
+    if (m.narvarande) skriv('Närvarande: ' + m.narvarande);
+    if (fu.ordforande.namn) skriv('Mötesordförande: ' + fu.ordforande.namn);
+    if (fu.sekreterare.namn) skriv('Mötessekreterare: ' + fu.sekreterare.namn);
+    var just = fu.justerare.filter(function (j) { return j.namn; });
+    if (just.length) skriv('Justerare: ' + just.map(function (j) { return j.namn; }).join(', '));
+    y += 4;
+    m.paragrafer.forEach(function (p, i) {
+      if (y > NED - 12) { doc.addPage(); y = 20; }
+      skriv('§ ' + (i + 1) + ' ' + p.rubrik, 'bold', 11);
+      if (p.text) skriv(p.text);
+      y += 3;
+    });
+    if (m.beslut.length) {
+      skriv('Beslut', 'bold', 11);
+      m.beslut.forEach(function (b, i) { skriv((i + 1) + '. ' + b.text + (b.belopp ? ' (' + kr(b.belopp) + ' kr)' : '') + (b.verifikation ? ', verifikation ' + b.verifikation.split(':').pop() : '')); });
+      y += 3;
+    }
+    var u = m.underskrift;
+    if (u && u.metod === 'e') {
+      doc.addPage(); y = 22;
+      skriv('Elektroniska underskrifter', 'bold', 14, SKIFFER);
+      y += 2;
+      u.undertecknare.forEach(function (x) {
+        var sig = u.signaturer.find(function (z) { return z.epost === x.epost; });
+        skriv(x.roll + ': ' + (x.namn || x.epost), 'bold', 10);
+        skriv(sig ? 'Underskrivet ' + new Date(sig.tid).toLocaleString('sv-SE') + ' av ' + sig.epost + ' (inloggad med Microsoft-konto)' : 'Inte underskrivet ännu', 'normal', 9.5, sig ? null : GRA);
+        y += 2;
+      });
+      y += 4;
+      skriv('Kontrollsumma (SHA-256) för protokollets text när det låstes:', 'normal', 9);
+      skriv(u.kontrollsumma, 'normal', 8.5);
+      skriv(summa === u.kontrollsumma ? 'Texten i den här utskriften har samma kontrollsumma, alltså är den oförändrad.' : 'OBS: texten har ändrats efter att protokollet låstes.', 'normal', 9, summa === u.kontrollsumma ? null : [170, 40, 40]);
+      y += 3;
+      skriv('Protokollet har skrivits under i Föreningsbokföring. Varje person har loggat in med sitt Microsoft-konto och bekräftat att hen läst och godkänner protokollet. Underskrifterna kan kontrolleras i appen under Föreningen, Styrelsen.', 'normal', 8.5, GRA);
+    } else {
+      // Rader för underskrift på papper.
+      var namn = [];
+      if (fu.sekreterare.namn || fu.sekreterare.epost) namn.push(['Mötessekreterare', fu.sekreterare.namn]);
+      if (fu.ordforande.namn || fu.ordforande.epost) namn.push(['Mötesordförande', fu.ordforande.namn]);
+      just.forEach(function (j) { namn.push(['Justerare', j.namn]); });
+      if (!namn.length) namn = [['Mötessekreterare', ''], ['Mötesordförande', ''], ['Justerare', '']];
+      y += 6;
+      if (y + Math.ceil(namn.length / 2) * 24 > NED) { doc.addPage(); y = 30; }
+      namn.forEach(function (n, i) {
+        var x = i % 2 ? 110 : V, yy = y + Math.floor(i / 2) * 24 + 14;
+        doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.3); doc.line(x, yy, x + 70, yy);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+        doc.text(pt(n[1] || ''), x, yy + 4.5);
+        doc.setTextColor.apply(doc, GRA); doc.setFontSize(8); doc.text(pt(n[0]), x, yy + 8.5); doc.setTextColor(26, 26, 26);
+      });
+    }
+    var sidor = doc.getNumberOfPages();
+    for (var i = 1; i <= sidor; i++) {
+      doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor.apply(doc, GRA);
+      doc.text(pt('Protokoll ' + m.datum + ' · version ' + summa.slice(0, 12) + ' · sida ' + i + ' av ' + sidor), V, 290);
+      doc.setTextColor(26, 26, 26);
+    }
+    return doc.output('blob');
+  }
+
+  function protokollFilnamn(m) { return K.sakertNamn('Protokoll ' + motesNamn(m).toLowerCase() + ' ' + m.datum + '.pdf'); }
+
+  async function laddaUppProtokoll(m, fil) {
+    var andelse = (fil.name.match(/\.[a-z0-9]+$/i) || ['.pdf'])[0].toLowerCase();
+    var namn = K.sakertNamn('Protokoll ' + motesNamn(m).toLowerCase() + ' ' + m.datum + ' undertecknat' + andelse);
+    var ref = { namn: namn };
+    if (odAnslutet()) {
+      await sakerstallStyrMapp();
+      var mapp = await sakerstallUndermapp(od.styrMapp.driveId, od.styrMapp.id, PROTOKOLLMAPP);
+      var bas = '/drives/' + od.styrMapp.driveId + '/items/' + mapp.id + ':/' + enc(namn) + ':';
+      var post;
+      if (fil.size <= 4 * 1024 * 1024) post = await graf(bas + '/content?@microsoft.graph.conflictBehavior=rename', { method: 'PUT', body: fil });
+      else {
+        var session = await graf(bas + '/createUploadSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } }) });
+        var res = await fetch(session.uploadUrl, { method: 'PUT', headers: { 'Content-Range': 'bytes 0-' + (fil.size - 1) + '/' + fil.size }, body: fil });
+        if (!res.ok) throw new Error('Uppladdningen misslyckades.');
+        post = await res.json();
+      }
+      ref.odId = post.id; ref.namn = post.name;
+    } else {
+      ref.lokalId = 'styrelsen-' + m.id;
+      await sparaFil(ref.lokalId, fil, namn);
+    }
+    await styrOperation(function (d) { return K.registreraPapper(d, m.id, ref, new Date().toISOString()); });
+  }
+
   // ---------- Övningsläge ----------
 
   function ovningsBanner() {
@@ -7157,10 +8177,17 @@ var VERSIONER = [
     try {
       localStorage.removeItem('forening-bokforing:ovning:v1');
       localStorage.removeItem('forening-bokforing:ovning:medlemsregister');
+      localStorage.removeItem('forening-bokforing:ovning:styrelsen');
       if (!tom) {
-        var d = localStorage.getItem(RIKTIG_LAGRING), r = localStorage.getItem(RIKTIG_REG_LAGRING);
+        var d = localStorage.getItem(RIKTIG_LAGRING), r = localStorage.getItem(RIKTIG_REG_LAGRING), st = localStorage.getItem('forening-bokforing:styrelsen');
         if (d) localStorage.setItem('forening-bokforing:ovning:v1', d);
         if (r) localStorage.setItem('forening-bokforing:ovning:medlemsregister', r);
+        if (st) {
+          // Övningen är aldrig kopplad till OneDrive: bara innehållet följer med.
+          var x = JSON.parse(st);
+          ['styr', 'upp'].forEach(function (k) { if (x[k]) { x[k].eTag = null; x[k].bas = null; x[k].smutsig = false; } });
+          localStorage.setItem('forening-bokforing:ovning:styrelsen', JSON.stringify(x));
+        }
       }
     } catch (e) { throw new Error('Övningen kunde inte skapas: webbläsarens lagring är full eller avstängd.'); }
   }
@@ -7169,6 +8196,7 @@ var VERSIONER = [
     try {
       localStorage.removeItem('forening-bokforing:ovning:v1');
       localStorage.removeItem('forening-bokforing:ovning:medlemsregister');
+      localStorage.removeItem('forening-bokforing:ovning:styrelsen');
     } catch (e) { /* tomt */ }
     try { indexedDB.deleteDatabase(FILDB + '-ovning'); } catch (e) { /* tomt */ }
   }
@@ -8015,7 +9043,7 @@ var VERSIONER = [
     if (t.dataset.rapport) { rapportVy = t.dataset.rapport; render(); return; }
     if (t.dataset.ver && !t.dataset.action) { var nr = Number(t.dataset.ver); oppenVer = oppenVer === nr ? null : nr; render(); return; }
     var handling = HANDLINGAR[t.dataset.action];
-    if (handling && lasLage() && t.dataset.action.indexOf('od-') !== 0 && LASBARA.indexOf(t.dataset.action) < 0) {
+    if (handling && lasLage() && t.dataset.action.indexOf('od-') !== 0 && t.dataset.action.indexOf('styr-') !== 0 && LASBARA.indexOf(t.dataset.action) < 0) {
       visa('Endast läsning: bokföringen kan inte ändras från en mapp som delats med dig.', true);
       return;
     }
@@ -8027,6 +9055,7 @@ var VERSIONER = [
 
   document.addEventListener('input', function (e) {
     var t = e.target;
+    if (t.dataset.mf || t.dataset.pf || t.dataset.bf || t.dataset.ff) { try { styrInput(t); } catch (err) { visa(err.message, true); } return; }
     if (t.dataset.u) { utkast[t.dataset.u] = t.value; uppdateraUtkastStatus(); }
     if (t.dataset.rad != null && t.dataset.f) { utkast.rader[Number(t.dataset.rad)][t.dataset.f] = t.value; uppdateraUtkastStatus(); }
     if (t.dataset.inkorg) {
@@ -8058,6 +9087,7 @@ var VERSIONER = [
   });
 
   document.addEventListener('change', function (e) {
+    if (e.target.dataset.arende) { try { andraStyr('styr', K.andraArende(styrData(), e.target.dataset.arende, { status: e.target.value })); } catch (err) { visa(err.message, true); } return; }
     if (e.target.id === 'valjAr') { store.aktivt = e.target.value; spara(); meddelande = null; utkast = nyttUtkast(); render(); }
     if (e.target.id === 'hbKonto') { valtKonto = e.target.value; render(); }
     if (e.target.id === 'mTermin') { valdTermin = e.target.value; render(); }
@@ -8332,6 +9362,150 @@ var VERSIONER = [
       }).catch(function (err) { paketStatus = null; visa('Revisionspaketet kunde inte skapas: ' + err.message, true); });
     },
     'oppna-paket': function () { oppnaPaket(); },
+    'styr-vy': function (t) { vy = 'styrelsen'; styrVy = t.dataset.v; oppetMote = null; render(); },
+    'styr-oppna': function (t) { vy = 'styrelsen'; styrVy = 'moten'; oppetMote = t.dataset.id; meddelande = null; render(); window.scrollTo(0, 0); },
+    'styr-stang': function () { oppetMote = null; meddelande = null; render(); },
+    'styr-krock-stang': function () { styrKrockar = []; render(); },
+    'styr-uppdrag-hamta': function () { synkaStyrelsen().then(function () { visa('Förtroendeuppdragen är hämtade.'); }, function (err) { visa(err.message, true); }); },
+    'styr-nytt-mote': function () {
+      var typ = varde('nyMotesTyp'), ar = aktivt(), am = ar ? arsmoteData(ar) : {};
+      var funk = {};
+      if (typ === 'styrelse' || typ === 'konstituerande') {
+        var o = personMedRoll('ordforande'), sk = personMedRoll('sekreterare');
+        // Utan apelido är namnet bara e-postadressen; då får namnet fyllas i.
+        var fp = function (x) { return x ? { namn: x.namn === x.epost ? '' : x.namn, epost: x.epost } : {}; };
+        funk = { ordforande: fp(o), sekreterare: fp(sk) };
+      }
+      var r = K.nyttMote(styrData(), { typ: typ, datum: varde('nyMotesDatum'), tid: varde('nyMotesTid'), plats: varde('nyMotesPlats'), dagordning: am.dagordning, funktionarer: funk, skapad: new Date().toISOString() });
+      oppetMote = r.mote.id;
+      andraStyr('styr', r.styr);
+    },
+    'styr-arsmote-protokoll': function () {
+      var ar = aktivt(), am = arsmoteData(ar);
+      if (!am.motesdatum) throw new Error('Ange datum för årsmötet först.');
+      var r = K.nyttMote(styrData(), { typ: 'arsmote', datum: am.motesdatum, dagordning: am.dagordning, skapad: new Date().toISOString() });
+      vy = 'styrelsen'; styrVy = 'moten'; oppetMote = r.mote.id;
+      andraStyr('styr', r.styr);
+      window.scrollTo(0, 0);
+    },
+    'styr-par-ny': function () { andraOppet(function (m) { m.paragrafer.push({ rubrik: '', text: '' }); }); },
+    'styr-par-bort': function (t) { if (window.confirm('Ta bort paragrafen?')) andraOppet(function (m) { m.paragrafer.splice(Number(t.dataset.si), 1); }); },
+    'styr-par-upp': function (t) { var i = Number(t.dataset.si); andraOppet(function (m) { if (i > 0) m.paragrafer.splice(i - 1, 0, m.paragrafer.splice(i, 1)[0]); }); },
+    'styr-par-ner': function (t) { var i = Number(t.dataset.si); andraOppet(function (m) { if (i < m.paragrafer.length - 1) m.paragrafer.splice(i + 1, 0, m.paragrafer.splice(i, 1)[0]); }); },
+    'styr-bes-ny': function () { andraOppet(function (m) { m.beslut.push({ text: '' }); }); },
+    'styr-bes-bort': function (t) { andraOppet(function (m) { m.beslut.splice(Number(t.dataset.si), 1); }); },
+    'styr-just-ny': function () { andraOppet(function (m) { m.funktionarer = K.normFunktionarer(m.funktionarer, true); m.funktionarer.justerare.push({ namn: '', epost: '' }); }); },
+    'styr-just-bort': function (t) { andraOppet(function (m) { m.funktionarer = K.normFunktionarer(m.funktionarer, true); m.funktionarer.justerare.splice(Number(t.dataset.si), 1); }); },
+    'styr-ta-bort': function () {
+      var m = oppetMoteObj();
+      if (!m || !window.confirm('Ta bort protokollet från ' + m.datum + '?')) return;
+      oppetMote = null;
+      andraStyr('styr', K.taBortMote(styrData(), m.id));
+    },
+    'styr-las': function () {
+      var m = oppetMoteObj();
+      var metod = (document.querySelector('input[name="styrMetod"]:checked') || {}).value;
+      if (!metod) throw new Error('Välj elektronisk underskrift eller papper.');
+      var fo = K.forslagUndertecknare(m, kanLoggaIn);
+      if (metod === 'e' && fo.saknas.length && !window.confirm(fo.saknas.map(function (u) { return u.namn || u.epost; }).join(', ') + ' kan inte skriva under elektroniskt och kommer inte att finnas med. Låsa ändå?')) return;
+      if (!window.confirm('Låsa protokollet för underskrift? Det kan inte ändras efter att någon skrivit under.')) return;
+      var text = K.protokolltext(m);
+      sha256(text).then(function (summa) {
+        return styrOperation(function (d) {
+          var mm = d.moten.find(function (x) { return x.id === m.id; });
+          if (!mm || K.protokolltext(mm) !== text) throw new Error('Protokollet ändrades av någon annan just nu. Läs igenom det och försök igen.');
+          return K.lasForUnderskrift(d, m.id, metod, metod === 'e' ? fo.undertecknare : [], summa, new Date().toISOString());
+        });
+      }).then(function () {
+        visa(metod === 'e' ? 'Protokollet är låst. De som ska skriva under ser det på Översikt när de öppnar appen.' : 'Protokollet är låst. Skriv ut det, låt alla skriva under och ladda upp den inskannade versionen.');
+      }).catch(function (err) { visa(err.message, true); });
+    },
+    'styr-las-upp': function () {
+      var m = oppetMoteObj();
+      if (!window.confirm('Låsa upp protokollet så att det kan ändras?')) return;
+      styrOperation(function (d) { return K.lasUppProtokoll(d, m.id); }).then(function () { visa('Protokollet är upplåst.'); }, function (err) { visa(err.message, true); });
+    },
+    'styr-signera': function (t) {
+      var m = oppetMoteObj();
+      var vem = OVNING ? t.dataset.epost : mig();
+      if (!OVNING && !(document.getElementById('styrGodkann') || {}).checked) throw new Error('Kryssa i att du har läst protokollet och godkänner det.');
+      var u = m.underskrift.undertecknare.find(function (x) { return x.epost === vem; }) || {};
+      var namn = u.namn || (odNu.roller ? K.visaPerson(odNu.roller, vem) : vem);
+      sha256(K.protokolltext(m)).then(function (summa) {
+        return styrOperation(function (d) { return K.signera(d, m.id, vem, namn, summa, new Date().toISOString()); });
+      }).then(function () {
+        var mm = oppetMoteObj();
+        visa(mm && mm.status === 'signerat' ? 'Du har skrivit under. Alla har nu skrivit under protokollet.' : 'Du har skrivit under.');
+      }).catch(function (err) { visa(err.message, true); });
+    },
+    'styr-kontrollera': function () {
+      var m = oppetMoteObj();
+      sha256(K.protokolltext(m)).then(function (summa) {
+        var k = K.kontrolleraUnderskrifter(m, summa);
+        var u = m.underskrift;
+        var detaljer = u.metod === 'e' ? ' ' + u.signaturer.length + ' av ' + u.undertecknare.length + ' har skrivit under. Kontrollsumma ' + summa.slice(0, 16) + '…' : '';
+        visa((k.ok ? 'Stämmer: ' : 'Varning: ') + k.text + detaljer, !k.ok);
+      });
+    },
+    'styr-papper-valj': function () {
+      var m = oppetMoteObj();
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/pdf,image/*';
+      input.onchange = function () {
+        var fil = input.files[0];
+        if (!fil) return;
+        visa('Laddar upp…');
+        laddaUppProtokoll(m, fil).then(function () { visa('Det undertecknade protokollet är sparat.'); }, function (err) { visa(err.message, true); });
+      };
+      input.click();
+    },
+    'styr-papper-visa': function () {
+      var m = oppetMoteObj(), fil = m.underskrift.fil;
+      var hamta = fil.odId && odAnslutet()
+        ? sakerstallStyrMapp().then(function () { return graf('/drives/' + od.styrMapp.driveId + '/items/' + fil.odId + '/content', { ra: true }); }).then(function (r) { return r.blob(); })
+        : hamtaFil(fil.lokalId).then(function (x) { return x && x.blob; });
+      hamta.then(function (blob) {
+        if (!blob) throw new Error('Filen finns inte i den här webbläsaren.');
+        laddaNer(fil.namn, blob, filtyp(fil.namn));
+      }).catch(function (err) { visa(err.message, true); });
+    },
+    'styr-pdf': function () {
+      var m = oppetMoteObj();
+      skapaProtokollPdf(m).then(function (blob) { laddaNer(protokollFilnamn(m), blob, 'application/pdf'); }, function (err) { visa(err.message, true); });
+    },
+    'styr-pdf-skriv-ut': function () {
+      var m = oppetMoteObj();
+      var fonster = window.open('', '_blank');
+      skapaProtokollPdf(m).then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        if (fonster) fonster.location = url; else laddaNer(protokollFilnamn(m), blob, 'application/pdf');
+      }, function (err) { if (fonster) fonster.close(); visa(err.message, true); });
+    },
+    'styr-uppg-ny': function () {
+      andraStyr('styr', K.laggTillUppgift(styrData(), { text: varde('nyUppgText'), ansvarig: varde('nyUppgAnsvarig'), datum: varde('nyUppgDatum') }));
+    },
+    'styr-uppg-klar': function (t) {
+      var u = styrData().uppgifter.find(function (x) { return x.id === t.dataset.id; });
+      if (u) andraStyr('styr', K.andraUppgift(styrData(), u.id, { klar: !u.klar }));
+    },
+    'styr-uppg-bort': function (t) { if (window.confirm('Ta bort uppgiften?')) andraStyr('styr', K.taBortUppgift(styrData(), t.dataset.id)); },
+    'styr-uppg-arsmote': function () {
+      var am = arsmoteData(aktivt());
+      if (!am.motesdatum) throw new Error('Ange datum för årsmötet först.');
+      var grupp = 'arsmote-' + am.motesdatum;
+      if (styrData().uppgifter.some(function (u) { return u.grupp === grupp; }) && !window.confirm('Checklistan för årsmötet ' + am.motesdatum + ' är redan inlagd. Lägga in den igen?')) return;
+      var d = styrData();
+      K.arsmotesUppgifter(am.motesdatum).forEach(function (x) { d = K.laggTillUppgift(d, { text: x.text, datum: x.datum, grupp: grupp }); });
+      vy = 'styrelsen'; styrVy = 'uppgifter';
+      andraStyr('styr', d, false);
+      visa('Checklistan inför årsmötet är inlagd som uppgifter. Fyll i vem som är ansvarig.');
+    },
+    'styr-uppdrag-ny': function () {
+      andraStyr('upp', K.laggTillUppdrag(uppData(), { roll: varde('nyUppdragRoll'), namn: varde('nyUppdragNamn'), apelido: varde('nyUppdragApelido'), vald: varde('nyUppdragVald'), till: varde('nyUppdragTill') }));
+    },
+    'styr-uppdrag-bort': function (t) { if (window.confirm('Ta bort förtroendeuppdraget?')) andraStyr('upp', K.taBortUppdrag(uppData(), t.dataset.id)); },
+    'styr-arende-ny': function () { andraStyr('styr', K.laggTillArende(styrData(), { typ: varde('nyArendeTyp'), text: varde('nyArendeText') })); },
     'valj-ar': function (t) { if (store.ar[t.dataset.ar]) { store.aktivt = t.dataset.ar; spara(); utkast = nyttUtkast(); render(); } },
     'kopiera-ekonomitext': function () {
       var el = document.getElementById('amEkonomitext');
@@ -9061,6 +10235,9 @@ var VERSIONER = [
       od.rot = null;
       od.mapp = null; od.lage = null; od.eTag = null; od.senast = null; od.smutsig = false; odNu.mappar = {}; odNu.konflikt = false; odNu.delade = null;
       od.regMapp = null; od.regETag = null; odNu.regKonflikt = false;
+      od.styrMapp = null; od.uppdragLas = null;
+      ['styr', 'upp'].forEach(function (k) { sty[k].eTag = null; });
+      sparaStyrLokalt();
       sparaOd();
       sattStatus('');
       render();
@@ -9168,6 +10345,7 @@ var VERSIONER = [
       sattStatus('Letar efter föreningens mapp…');
       return aterkoppla().then(function (res) {
         if (!res) sattStatus('');
+        if (res === 'uppdrag') sattStatus('Förtroendeuppdragen är hämtade');
         if (res === 'inbjudan') { vy = 'rapporter'; visa('Bokföringen är öppnad för läsning. Du kan se rapporter, verifikationer och underlag men inte ändra något.'); }
         else if (res === 'mapp') visa(odNu.konflikt ? 'Mappen är kopplad. Välj vilken version av bokföringen som ska gälla.' : 'Klart! Den här enheten är kopplad till ' + (od.mapp.sokvag || od.mapp.namn) + '.');
       });

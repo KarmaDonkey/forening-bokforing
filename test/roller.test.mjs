@@ -12,7 +12,7 @@ function roller() {
   f = K.sattRoller(f, ADMIN, ADMIN, ['admin', 'kassor']);
   f = K.sattRoller(f, ADMIN, BOK, ['bokforare']);
   f = K.sattRoller(f, ADMIN, REV, ['revisor']);
-  f = K.sattRoller(f, ADMIN, STY, ['styrelse']);
+  f = K.sattRoller(f, ADMIN, STY, ['ledamot']);
   return f;
 }
 
@@ -25,14 +25,32 @@ test('den första inloggningen blir systemadministratör med skrivrätten', () =
 test('roller och behörighet i OneDrive', () => {
   const f = roller();
   eq(K.rollerFor(f, ADMIN), ['admin', 'kassor']);
-  eq(K.behorighet(['bokforare']), { data: 'write', reg: 'write' });
-  eq(K.behorighet(['revisor']), { data: 'read', reg: null });
-  eq(K.behorighet(['styrelse']), { data: 'read', reg: 'read' });
-  eq(K.behorighet(['revisor', 'styrelse']), { data: 'read', reg: 'read' });
-  eq(K.behorighet([]), { data: null, reg: null });
+  eq(K.behorighet(['bokforare']), { data: 'write', reg: 'write', styr: null, uppdrag: null });
+  eq(K.behorighet(['revisor']), { data: 'read', reg: null, styr: 'read', uppdrag: 'read' });
+  eq(K.behorighet(['ledamot']), { data: 'read', reg: 'read', styr: 'write', uppdrag: 'write' });
+  eq(K.behorighet(['revisor', 'ledamot']), { data: 'read', reg: 'read', styr: 'write', uppdrag: 'write' });
+  eq(K.behorighet([]), { data: null, reg: null, styr: null, uppdrag: null });
   assert.equal(K.kanFaSkrivratt(f, BOK), true);
   assert.equal(K.kanTaSkrivratt(f, BOK), false);
   assert.equal(K.kanFaSkrivratt(f, STY), false);
+});
+
+test('styrelsens roller, valberedningen och bokföraren', () => {
+  for (const r of ['ordforande', 'viceordforande', 'sekreterare', 'ledamot', 'suppleant']) {
+    eq(K.behorighet([r]), { data: 'read', reg: 'read', styr: 'write', uppdrag: 'write' });
+  }
+  eq(K.behorighet(['kassor']), { data: 'write', reg: 'write', styr: 'write', uppdrag: 'write' });
+  eq(K.behorighet(['admin']), { data: 'write', reg: 'write', styr: 'write', uppdrag: 'write' });
+  // Bokföraren sköter bara bokföringen och ser inte styrelsens material.
+  eq(K.behorighet(['bokforare']).styr, null);
+  eq(K.behorighet(['valberedning']), { data: null, reg: null, styr: null, uppdrag: 'read' });
+  eq(K.behorighet(['bokforare', 'sekreterare']), { data: 'write', reg: 'write', styr: 'write', uppdrag: 'write' });
+});
+
+test('rollen Styrelse från tidigare versioner blir Ledamot', () => {
+  const gammal = { format: 'foreningsbokforing-roller', personer: [{ epost: ADMIN, roller: ['admin'] }, { epost: STY, roller: ['styrelse', 'ledamot'] }], skrivratt: ADMIN, logg: [] };
+  const f = K.lasRollfil(gammal);
+  eq(K.rollerFor(f, STY), ['ledamot']);
 });
 
 test('bara en systemadministratör kan ändra roller, och det finns alltid en kvar', () => {
