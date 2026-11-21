@@ -277,7 +277,7 @@ test('kvitto: rader för en medlem, löpnummer och registrering', () => {
   reg = K.andraMedlem(reg, 'm2', { kategori: 'familj' });
   reg = K.registreraBetalning(reg, { datum: '2030-02-01', belopp: kr(2900), termin: 'VT-30', nyckel: '+46701111111', poster: [{ medlem: 'm1', typ: 'termin', belopp: kr(2500) }, { medlem: 'm1', typ: 'arsavgift', belopp: kr(400) }, { medlem: 'm2', typ: 'termin', belopp: 0 }] });
   reg = K.registreraBetalning(reg, { datum: '2031-02-01', belopp: kr(2000), termin: 'VT-31', nyckel: 'ref:123', poster: [{ medlem: 'm3', typ: 'termin', belopp: kr(2000) }] });
-  eq(K.kvittorader(reg, 'm1', null, '2030').map((r) => [r.text, r.belopp, r.betalsatt]), [['Medlemsavgift 2030 (del av betalning ' + K.formatBelopp(kr(2900)) + ' kr)', kr(400), 'Swish'], ['Terminsavgift VT-30 (del av betalning ' + K.formatBelopp(kr(2900)) + ' kr)', kr(2500), 'Swish']]);
+  eq(K.kvittorader(reg, 'm1', null, '2030').map((r) => [r.text, r.belopp, r.betalsatt]), [['Medlemsavgift 2030', kr(400), 'Swish'], ['Terminsavgift VT-30', kr(2500), 'Swish']]);
   eq(K.kvittorader(reg, 'm2').map((r) => [r.text, r.belopp]), [['Terminsavgift VT-30 (ingår i familjeavgift)', 0]]);
   eq(K.kvittorader(reg, 'm3').map((r) => [r.text, r.betalsatt]), [['Terminsavgift VT-31', 'Bankgiro']]);
   eq(K.kvittorader(reg, 'm3', null, '2030'), []);
