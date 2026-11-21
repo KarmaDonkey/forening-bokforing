@@ -311,6 +311,15 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.20', datum: '2026-11-21',
+    nyheter: [
+      'Roller: systemadministratör, kassör, bokförare, revisor och styrelse. Systemadministratören delar ut rollerna under År och arkiv, och appen delar mapparna i OneDrive med rätt behörighet.',
+      'Skrivrätt: bara en person i taget kan ändra. Kassören lämnar över skrivrätten till bokföraren och kan ta tillbaka den; alla andra ser bokföringen i läsläge.',
+      'Styrelsen kan läsa medlemsregistret.',
+      'Appen ber om behörighet att läsa och skriva i mappar som delats med dig. Därför behöver alla logga in med Microsoft en gång till.'
+    ]
+  },
+  {
     version: '1.19', datum: '2026-11-21',
     nyheter: [
       'Texten på varje rad i ett kvitto kan skrivas om innan PDF:en skapas, och förslaget är kortare än förut.',
@@ -2720,6 +2729,74 @@ var VERSIONER = [
   }
 
 
+
+  // ---------- Roller ----------
+  // Rollerna sparas i roller.json i bokföringsmappen och knyts till Microsoft-inloggningen (e-postadressen).
+  // Bara en person i taget har skrivrätten; övriga ser bokföringen i läsläge.
+
+  var ROLLER = [['admin', 'Systemadministratör'], ['kassor', 'Kassör'], ['bokforare', 'Bokförare'], ['revisor', 'Revisor'], ['styrelse', 'Styrelse']];
+  var ROLLFORMAT = 'foreningsbokforing-roller';
+
+  function normEpost(e) { return String(e || '').trim().toLowerCase(); }
+
+  function nyRollfil(epost) {
+    epost = normEpost(epost);
+    if (!epost) throw BokforingsFel('Inloggningen saknar e-postadress.');
+    return { format: ROLLFORMAT, personer: [{ epost: epost, roller: ['admin'] }], skrivratt: epost, logg: [] };
+  }
+
+  function rollerFor(fil, epost) {
+    var p = fil && fil.personer.find(function (x) { return x.epost === normEpost(epost); });
+    return p ? p.roller.slice() : [];
+  }
+
+  function harRoll(fil, epost, roll) { return rollerFor(fil, epost).indexOf(roll) >= 0; }
+
+  // Behörighet i OneDrive som rollerna ger: bokföringsmappen och medlemsregistrets mapp.
+  function behorighet(roller) {
+    var b = { data: null, reg: null };
+    roller.forEach(function (r) {
+      if (r === 'admin' || r === 'kassor' || r === 'bokforare') { b.data = 'write'; b.reg = 'write'; }
+      if (r === 'styrelse') { if (!b.data) b.data = 'read'; if (!b.reg) b.reg = 'read'; }
+      if (r === 'revisor') { if (!b.data) b.data = 'read'; }
+    });
+    return b;
+  }
+
+  function kanFaSkrivratt(fil, epost) { return rollerFor(fil, epost).some(function (r) { return r === 'admin' || r === 'kassor' || r === 'bokforare'; }); }
+  function kanTaSkrivratt(fil, epost) { return rollerFor(fil, epost).some(function (r) { return r === 'admin' || r === 'kassor'; }); }
+
+  function rollLogg(fil, av, text, tid) { return (fil.logg || []).concat([{ tid: tid || null, av: normEpost(av), text: text }]).slice(-100); }
+
+  // Sätter en persons roller. Tomma roller tar bort personen. Det måste alltid finnas en systemadministratör.
+  function sattRoller(fil, av, epost, roller, tid) {
+    if (!harRoll(fil, av, 'admin')) throw BokforingsFel('Bara en systemadministratör kan ändra roller.');
+    epost = normEpost(epost);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(epost)) throw BokforingsFel('Skriv en giltig e-postadress.');
+    roller = ROLLER.map(function (r) { return r[0]; }).filter(function (r) { return roller.indexOf(r) >= 0; });
+    var personer = fil.personer.filter(function (x) { return x.epost !== epost; });
+    if (roller.length) personer.push({ epost: epost, roller: roller });
+    if (!personer.some(function (x) { return x.roller.indexOf('admin') >= 0; })) throw BokforingsFel('Det måste finnas minst en systemadministratör.');
+    var ut = Object.assign({}, fil, { personer: personer, logg: rollLogg(fil, av, epost + ': ' + (roller.length ? roller.join(', ') : 'borttagen'), tid) });
+    // Har den som har skrivrätten inte längre rätt till den går den tillbaka till den som ändrade.
+    if (!kanFaSkrivratt(ut, ut.skrivratt)) ut.skrivratt = normEpost(av);
+    return ut;
+  }
+
+  // Skrivrätten lämnas över av den som har den, eller tas av en kassör eller systemadministratör.
+  function flyttaSkrivratt(fil, av, till, tid) {
+    av = normEpost(av); till = normEpost(till);
+    if (!kanFaSkrivratt(fil, till)) throw BokforingsFel(till + ' har ingen roll som får bokföra.');
+    if (fil.skrivratt !== av && !kanTaSkrivratt(fil, av)) throw BokforingsFel('Bara den som har skrivrätten, kassören eller systemadministratören kan flytta den.');
+    if (fil.skrivratt === till) return fil;
+    return Object.assign({}, fil, { skrivratt: till, logg: rollLogg(fil, av, 'skrivrätten: ' + (fil.skrivratt || '–') + ' → ' + till, tid) });
+  }
+
+  function lasRollfil(d) {
+    if (!d || d.format !== ROLLFORMAT || !Array.isArray(d.personer)) throw BokforingsFel('roller.json har ett okänt format.');
+    return { format: ROLLFORMAT, personer: d.personer.map(function (p) { return { epost: normEpost(p.epost), roller: (p.roller || []).slice() }; }), skrivratt: normEpost(d.skrivratt), logg: d.logg || [], regMapp: d.regMapp || null };
+  }
+
   // ---------- Revisionspaket ----------
   // Ett år med verifikationer, underlag och rapporter i en zip-fil, som revisorn kan öppna i appen utan konto.
 
@@ -3082,6 +3159,16 @@ var VERSIONER = [
     kvittorader: kvittorader,
     nastaKvittonummer: nastaKvittonummer,
     registreraKvitto: registreraKvitto,
+    ROLLER: ROLLER,
+    nyRollfil: nyRollfil,
+    rollerFor: rollerFor,
+    harRoll: harRoll,
+    behorighet: behorighet,
+    kanFaSkrivratt: kanFaSkrivratt,
+    kanTaSkrivratt: kanTaSkrivratt,
+    sattRoller: sattRoller,
+    flyttaSkrivratt: flyttaSkrivratt,
+    lasRollfil: lasRollfil,
     revisionspaketData: revisionspaketData,
     lasRevisionspaket: lasRevisionspaket,
     namnNyckel: namnNyckel,
@@ -3430,7 +3517,9 @@ var VERSIONER = [
 
   var OD_NYCKEL = 'forening-bokforing:onedrive';
   var OD_AUTH = 'https://login.microsoftonline.com/consumers';
-  var OD_OMFANG = 'Files.ReadWrite offline_access User.Read';
+  // .All behövs för att läsa och skriva i mappar som någon annan har delat (revisor, styrelse, bokförare).
+  var OD_OMFANG = 'Files.ReadWrite.All offline_access User.Read';
+  var ROLLFIL = 'roller.json';
   var GRAF = 'https://graph.microsoft.com/v1.0';
   var DATAFIL = 'Föreningsbokföring.json';
   var INSTALLNINGSFIL = 'installningar.json';
@@ -3453,7 +3542,17 @@ var VERSIONER = [
   }
   function sparaOd() { try { localStorage.setItem(OD_NYCKEL, JSON.stringify(od)); } catch (e) { /* tomt */ } }
   function odAnslutet() { return !revision && !OVNING && !!(od.clientId && od.refreshToken && od.mapp); }
-  function lasLage() { return !!revision || (odAnslutet() && od.lage === 'lasare'); }
+  function mig() { return String(od.konto || '').trim().toLowerCase(); }
+  function arLasare() { return odAnslutet() && od.lage === 'lasare'; }
+  // Skrivrätten: bara en person i taget. Utan rollfil gäller det gamla: den som äger mappen får skriva.
+  function kanSkriva() {
+    if (revision) return false;
+    if (!odAnslutet()) return true;
+    if (od.lage === 'lasare') return false;
+    if (!odNu.roller) return od.lage === 'agare';
+    return odNu.roller.skrivratt === mig();
+  }
+  function lasLage() { return !!revision || (odAnslutet() && !kanSkriva()); }
   function omdirigering() { return location.origin + location.pathname; }
 
   function sattStatus(text, fel) {
@@ -3501,7 +3600,7 @@ var VERSIONER = [
     try {
       await tokenAnrop({ grant_type: 'refresh_token', refresh_token: od.refreshToken });
     } catch (err) {
-      if (err.kod === 'invalid_grant' || err.kod === 'interaction_required') {
+      if (err.kod === 'invalid_grant' || err.kod === 'interaction_required' || err.kod === 'consent_required' || err.kod === 'invalid_scope') {
         od.refreshToken = null;
         sparaOd();
         odNu.inloggningKravs = true;
@@ -3591,7 +3690,7 @@ var VERSIONER = [
 
   // En inbjudningslänk (#revisor=…) sparas tills mottagaren har loggat in.
   function fangaInbjudan() {
-    var m = location.hash.match(/#revisor=([A-Za-z0-9_-]+)/);
+    var m = location.hash.match(/#(?:revisor|inbjudan)=([A-Za-z0-9_-]+)/);
     if (!m) return;
     try {
       var b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -3604,7 +3703,7 @@ var VERSIONER = [
 
   function inbjudningslank() {
     var data = { d: od.mapp.driveId, i: od.mapp.id, n: od.mapp.namn, f: store.forening.namn || '' };
-    return omdirigering() + '#revisor=' + b64url(new TextEncoder().encode(JSON.stringify(data)).buffer);
+    return omdirigering() + '#inbjudan=' + b64url(new TextEncoder().encode(JSON.stringify(data)).buffer);
   }
 
   // Efter inloggning på en ny enhet: öppna inbjudan eller den mapp som sparats i appmappen.
@@ -3624,7 +3723,7 @@ var VERSIONER = [
     if (typeof post === 'number') return null;
     od.mapp = inst.mapp;
     od.rot = inst.lage === 'lasare' ? null : (inst.rot || null);
-    od.lage = inst.lage === 'lasare' ? 'lasare' : 'agare';
+    od.lage = inst.lage === 'lasare' || inst.lage === 'medarbetare' ? inst.lage : 'agare';
     od.eTag = null; od.senast = null; od.regETag = null;
     sparaOd();
     await forstaSynk();
@@ -3700,11 +3799,11 @@ var VERSIONER = [
   async function forstaSynk() {
     var meta = await graf(iMappen(DATAFIL), { tillat: [404] });
     if (meta === 404) {
-      if (lasLage()) throw new Error('Den delade mappen innehåller ingen bokföring från appen ännu.');
+      if (od.lage !== 'agare') throw new Error('Den delade mappen innehåller ingen bokföring från appen ännu.');
       od.smutsig = true;
       sparaOd();
       await synkaUpp();
-      await hamtaRegister().catch(function (err) { odNu.regFel = 'Medlemsregistret: ' + err.message; });
+      await efterBokforing();
       return 'uppladdat';
     }
     if (harLokalData() && !lasLage()) {
@@ -3713,7 +3812,7 @@ var VERSIONER = [
       return 'konflikt';
     }
     await hamtaOchTillampa(meta);
-    await hamtaRegister().catch(function (err) { odNu.regFel = 'Medlemsregistret: ' + err.message; });
+    await efterBokforing();
     return 'hamtat';
   }
 
@@ -3730,14 +3829,14 @@ var VERSIONER = [
     var reg = store.medlemsregister;
     store = data;
     // Den som bara läser får aldrig medlemsregistret. Ett register från version 1.12 flyttas ut ur bokföringsfilen.
-    store.medlemsregister = lasLage() ? K.tomtRegister() : (inbaddat && !K.registerHarData(reg) ? K.normaliseraRegister(inbaddat) : reg);
+    store.medlemsregister = inbaddat && od.lage === 'agare' && !K.registerHarData(reg) ? K.normaliseraRegister(inbaddat) : reg;
     if (!store.regler) store.regler = [];
     if (!store.motpartsregler) store.motpartsregler = [];
     LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
     if (aktivtNu && store.ar[aktivtNu]) store.aktivt = aktivtNu;
     if (!store.ar[store.aktivt]) store.aktivt = Object.keys(store.ar).sort().pop() || null;
     od.eTag = meta.eTag;
-    od.smutsig = !!inbaddat && !lasLage();
+    od.smutsig = !!inbaddat && od.lage === 'agare' && kanSkriva();
     od.senast = new Date().toISOString();
     sparaOd();
     sparaLokalt();
@@ -3752,14 +3851,14 @@ var VERSIONER = [
   // Hämtar senaste versionen om någon annan enhet har sparat. Ändringar här som inte hunnit sparas ger en krock.
   async function hamtaFranOneDrive() {
     await hamtaBokforing();
-    await hamtaRegister().catch(function (err) { odNu.regFel = 'Medlemsregistret: ' + err.message; });
+    await efterBokforing();
   }
 
   async function hamtaBokforing() {
     if (!odAnslutet() || odNu.konflikt) return;
     odNu.senastHamtat = Date.now();
     var meta = await graf(iMappen(DATAFIL), { tillat: [404] });
-    if (meta === 404 && !lasLage()) {
+    if (meta === 404 && od.lage === 'agare') {
       // Har appens filer flyttats från en annan enhet? Då står den nya mappen i appmappen.
       var inst = await lasAppinstallningar().catch(function () { return {}; });
       if (inst.mapp && inst.mapp.id !== od.mapp.id && inst.lage !== 'lasare') {
@@ -3775,7 +3874,7 @@ var VERSIONER = [
       }
     }
     if (meta === 404) {
-      if (!lasLage()) { od.smutsig = true; sparaOd(); await synkaUpp(); }
+      if (od.lage === 'agare' && kanSkriva()) { od.smutsig = true; sparaOd(); await synkaUpp(); }
       return;
     }
     if (meta.eTag === od.eTag) {
@@ -3796,6 +3895,11 @@ var VERSIONER = [
   function iRegMappen() { return '/drives/' + od.regMapp.driveId + '/items/' + od.regMapp.id + ':/' + enc(REGFIL) + ':'; }
 
   async function sakerstallRegMapp() {
+    if (od.lage !== 'agare') {
+      // Den som har fått bokföringen delad hittar registret via rollfilen, om det har delats med hen.
+      if (odNu.roller && odNu.roller.regMapp) { od.regMapp = Object.assign({}, odNu.roller.regMapp, { for: od.mapp.id }); return; }
+      throw new Error('Medlemsregistret är inte delat med dig.');
+    }
     if (od.regMapp && od.regMapp.for === od.mapp.id) return;
     var inst = await lasAppinstallningar().catch(function () { return {}; });
     if (inst.regMapp && inst.regMapp.for === od.mapp.id) {
@@ -3849,16 +3953,24 @@ var VERSIONER = [
   }
 
   async function hamtaRegister() {
-    if (!regAnslutet() || odNu.regKonflikt) return;
-    await sakerstallRegMapp();
-    var meta = await graf(iRegMappen(), { tillat: [404] });
-    if (meta === 404) {
-      if (K.registerHarData(store.medlemsregister)) { od.regSmutsig = true; od.regETag = null; sparaOd(); await synkaRegister(); }
+    if (!odAnslutet() || odNu.regKonflikt) return;
+    // Rollen avgör: utan behörighet till registret läses det inte, och en gammal kopia tas bort.
+    if (od.lage !== 'agare' && odNu.roller && !K.behorighet(K.rollerFor(odNu.roller, mig())).reg) {
+      odNu.regLas = false;
+      if (K.registerHarData(store.medlemsregister)) { store.medlemsregister = K.tomtRegister(); senastRegJson = null; try { localStorage.removeItem(REG_LAGRING); } catch (e) { /* tomt */ } }
       return;
     }
-    if (meta.eTag === od.regETag) { if (od.regSmutsig) await synkaRegister(); return; }
+    try { await sakerstallRegMapp(); } catch (e) { odNu.regLas = false; return; }
+    var meta = await graf(iRegMappen(), { tillat: [403, 404] });
+    if (meta === 403 || (meta === 404 && od.lage !== 'agare')) { odNu.regLas = false; return; }
+    odNu.regLas = true;
+    if (meta === 404) {
+      if (K.registerHarData(store.medlemsregister) && kanSkriva()) { od.regSmutsig = true; od.regETag = null; sparaOd(); await synkaRegister(); }
+      return;
+    }
+    if (meta.eTag === od.regETag) { if (od.regSmutsig && kanSkriva()) await synkaRegister(); return; }
     var fjarr = await lasRegisterFil();
-    if (od.regSmutsig && K.registerHarData(store.medlemsregister) && JSON.stringify(fjarr) !== JSON.stringify(store.medlemsregister)) {
+    if (od.regSmutsig && kanSkriva() && K.registerHarData(store.medlemsregister) && JSON.stringify(fjarr) !== JSON.stringify(store.medlemsregister)) {
       odNu.regKonflikt = true;
       return;
     }
@@ -4093,6 +4205,8 @@ var VERSIONER = [
         antal++;
       }
     }
+    var rollfil = await graf(iMappen(ROLLFIL), { tillat: [404] });
+    if (rollfil !== 404) { var rf = await flyttaTill(rollfil.id, ROLLFIL); odNu.rollerETag = rf.eTag; antal++; }
     // Bokföringsfilen sist, så att den gamla mappen gäller tills allt annat är flyttat.
     var meta = await graf(iMappen(DATAFIL));
     var nyMeta = await flyttaTill(meta.id, DATAFIL);
@@ -5235,7 +5349,7 @@ var VERSIONER = [
     renderArvaljare();
     var nav = document.getElementById('nav');
     var main = document.getElementById('main');
-    var msg = ovningsBanner() + revisionBanner() + konfliktBanner() + regKonfliktBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
+    var msg = ovningsBanner() + revisionBanner() + skrivrattBanner() + konfliktBanner() + regKonfliktBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
     if (!ar) {
       nav.innerHTML = '';
       main.innerHTML = msg + (vy === 'om' ? '<p><button class="btn btn-secondary btn-small" data-vy="inlasning">Tillbaka</button></p>' + vyOm() : vyStart());
@@ -5243,11 +5357,13 @@ var VERSIONER = [
       return;
     }
     if (lasLage() && (vy === 'inlasning' || vy === 'ny')) vy = 'verifikationer';
-    if (lasLage() && vy === 'medlemmar') vy = 'rapporter';
+    var regSynligt = !lasLage() || (odNu.regLas && K.registerHarData(reg()));
+    if (!regSynligt && vy === 'medlemmar') vy = 'rapporter';
     if (ar.grovkopia && (vy === 'inlasning' || vy === 'ny')) vy = 'rapporter';
     nav.innerHTML = VYER.filter(function (v) {
       if (ar.grovkopia && (v[0] === 'inlasning' || v[0] === 'ny')) return false;
-      return !lasLage() || (v[0] !== 'inlasning' && v[0] !== 'ny' && v[0] !== 'medlemmar');
+      if (v[0] === 'medlemmar') return regSynligt;
+      return !lasLage() || (v[0] !== 'inlasning' && v[0] !== 'ny');
     }).map(function (v) {
       return '<button type="button" data-vy="' + v[0] + '"' + (vy === v[0] ? ' aria-current="page"' : '') + '>' + (ar.grovkopia && v[0] === 'bokslut' ? 'Arkivkopia' : v[1]) + '</button>';
     }).join('');
@@ -6037,7 +6153,7 @@ var VERSIONER = [
         ? 'Bokföringen och underlagen ligger i undermappen <strong>' + esc(DATAMAPP) + '</strong>, som du kan dela med revisorn. Medlemsregistret ligger i <strong>' + esc(REGMAPP) + '</strong>, som du inte delar. Ändringar sparas automatiskt.'
         : 'Bokföringen ligger i ' + esc(DATAFIL) + ', underlagen i årsmapparna under Bokföringsunderlag. Ändringar sparas automatiskt.') + '</p>' +
       (!lasLage() && od.regMapp && !od.rot ? '<p class="faint">Medlemsregistret ligger för sig i mappen <strong>' + esc(od.regMapp.namn) + '</strong> bredvid bokföringsmappen. Den mappen följer inte med när du delar bokföringen med revisorn.</p>' : '') +
-      (!lasLage() ? '<details style="margin:8px 0"' + (od.rot ? '' : ' open') + '><summary>' + (od.rot ? 'Flytta appens filer till en annan mapp' : 'Flytta appens filer till en egen mapp (rekommenderas)') + '</summary>' +
+      (!lasLage() && od.lage === 'agare' ? '<details style="margin:8px 0"' + (od.rot ? '' : ' open') + '><summary>' + (od.rot ? 'Flytta appens filer till en annan mapp' : 'Flytta appens filer till en egen mapp (rekommenderas)') + '</summary>' +
         '<p class="faint">Appen flyttar bokföringen, underlagen, kvittona, logotypen och medlemsregistret till den nya mappen, i undermapparna ' + esc(DATAMAPP) + ' och ' + esc(REGMAPP) + '. Andra filer, till exempel dina Excel-filer, rörs inte. ' +
         'Har du delat bokföringen med revisorn behöver du dela den nya mappen ' + esc(DATAMAPP) + ' och skicka en ny inbjudan efteråt.</p>' +
         '<div class="row"><input id="odNyMapp" placeholder="t.ex. Föreningen/Föreningsbokföring" style="max-width:420px"><button class="btn btn-small" data-action="od-flytta">Flytta</button></div></details>' : '') +
@@ -6046,7 +6162,7 @@ var VERSIONER = [
       '<button class="btn btn-secondary btn-small" data-action="od-byt-mapp">Byt mapp</button>' +
       '<button class="btn btn-secondary btn-small" data-action="od-logga-ut">Logga ut</button></div>';
     if (!lasLage()) {
-      html += vyDelning();
+      html += '<p class="faint">Revisorn, styrelsen och bokföraren bjuder du in under Roller och skrivrätt nedan.</p>';
       html += '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="od-qr-enhet">Lägg till en enhet</button>' +
         '<button class="btn btn-secondary btn-small" data-action="od-qr-revisor">Bjud in revisor</button></div>';
     }
@@ -6089,10 +6205,10 @@ var VERSIONER = [
 
   function vyArkiv(ar) {
     if (revision) return vyRevisionInfo();
-    if (lasLage()) return vyOneDrive();
+    if (lasLage()) return vyOneDrive() + vyRoller();
     var varningar = ar.grovkopia ? [] : K.kontroller(ar);
     var arLast = ar.lastTom === ar.slut;
-    var html = (OVNING ? '' : vyOneDrive()) + vyOvning() + vyRevisionspaket(ar) + vyExcelHistorik();
+    var html = (OVNING ? '' : vyOneDrive() + vyRoller()) + vyOvning() + vyRevisionspaket(ar) + vyExcelHistorik();
     if (ar.grovkopia) return html + vyArkivRest(ar);
     html += '<h2>Kontroller</h2><div class="card">' + (varningar.length
       ? '<ul>' + varningar.map(function (w) { return '<li>' + esc(w.meddelande) + '</li>'; }).join('') + '</ul>'
@@ -6137,6 +6253,144 @@ var VERSIONER = [
     return html;
   }
 
+
+  // ---------- Roller och skrivrätt i OneDrive ----------
+
+  async function efterBokforing() {
+    await hamtaRoller().catch(function (err) { odNu.rollFel = 'Rollerna: ' + err.message; });
+    await hamtaRegister().catch(function (err) { odNu.regFel = 'Medlemsregistret: ' + err.message; });
+  }
+
+  async function hamtaRoller() {
+    if (!odAnslutet()) return;
+    var meta = await graf(iMappen(ROLLFIL), { tillat: [404] });
+    if (meta === 404) {
+      odNu.roller = null; odNu.rollerETag = null;
+      // Den som äger mappen och kopplar den först blir systemadministratör.
+      if (od.lage === 'agare' && mig()) {
+        var ny = K.nyRollfil(mig());
+        if (od.regMapp) ny.regMapp = { driveId: od.regMapp.driveId, id: od.regMapp.id, namn: od.regMapp.namn };
+        await sparaRoller(ny);
+      }
+      return;
+    }
+    if (meta.eTag !== odNu.rollerETag) {
+      var res = await graf(iMappen(ROLLFIL) + '/content', { ra: true });
+      odNu.roller = K.lasRollfil(await res.json());
+      odNu.rollerETag = meta.eTag;
+    }
+    if (od.lage !== 'agare') {
+      var b = K.behorighet(K.rollerFor(odNu.roller, mig()));
+      var lage = b.data === 'write' ? 'medarbetare' : 'lasare';
+      if (lage !== od.lage) { od.lage = lage; sparaOd(); sparaAppinstallningar({ lage: lage }).catch(function () { /* frivilligt */ }); }
+    } else if (od.regMapp && kanSkriva() && (!odNu.roller.regMapp || odNu.roller.regMapp.id !== od.regMapp.id)) {
+      await sparaRoller(Object.assign({}, odNu.roller, { regMapp: { driveId: od.regMapp.driveId, id: od.regMapp.id, namn: od.regMapp.namn } }));
+    }
+  }
+
+  async function sparaRoller(fil) {
+    var rubriker = { 'Content-Type': 'application/json' };
+    if (odNu.rollerETag) rubriker['If-Match'] = odNu.rollerETag;
+    var res = await graf(iMappen(ROLLFIL) + '/content', { method: 'PUT', headers: rubriker, body: JSON.stringify(fil, null, 1), tillat: [412], ra: true });
+    if (res.status === 412) { odNu.rollerETag = null; await hamtaRoller(); throw new Error('Rollerna ändrades samtidigt från en annan enhet. Försök igen.'); }
+    var post = await res.json();
+    odNu.roller = K.lasRollfil(fil);
+    odNu.rollerETag = post.eTag;
+  }
+
+  function nu() { return new Date().toISOString().slice(0, 16); }
+
+  async function lamnaSkrivratt(till) {
+    await synkaUpp();
+    if (od.smutsig || od.regSmutsig) throw new Error('Allt kunde inte sparas i OneDrive. Försök igen innan du lämnar över.');
+    await hamtaRoller();
+    await sparaRoller(K.flyttaSkrivratt(odNu.roller, mig(), till, nu()));
+  }
+
+  async function taSkrivratt() {
+    await hamtaRoller();
+    await sparaRoller(K.flyttaSkrivratt(odNu.roller, mig(), mig(), nu()));
+    await hamtaFranOneDrive();
+  }
+
+  // Delningen i OneDrive som en persons roller ska ge: läsa eller ändra i bokföringsmappen och registrets mapp.
+  async function delningarFor(item, epost) {
+    var data = await graf('/drives/' + item.driveId + '/items/' + item.id + '/permissions');
+    return (data.value || []).filter(function (p) {
+      var e = (p.invitation && p.invitation.email) || (p.grantedToV2 && p.grantedToV2.user && p.grantedToV2.user.email) || (p.grantedTo && p.grantedTo.user && p.grantedTo.user.email) || '';
+      return String(e).toLowerCase() === epost && (p.roles || []).indexOf('owner') < 0;
+    });
+  }
+
+  async function sattDelning(item, epost, behov, meddelande) {
+    var finns = await delningarFor(item, epost);
+    var nuvarande = finns.some(function (p) { return (p.roles || []).indexOf('write') >= 0; }) ? 'write' : finns.length ? 'read' : null;
+    if (nuvarande === behov) return;
+    for (var i = 0; i < finns.length; i++) {
+      await graf('/drives/' + item.driveId + '/items/' + item.id + '/permissions/' + encodeURIComponent(finns[i].id), { method: 'DELETE', tillat: [404] });
+    }
+    if (!behov) return;
+    await graf('/drives/' + item.driveId + '/items/' + item.id + '/invite', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipients: [{ email: epost }], roles: [behov], requireSignIn: true, sendInvitation: !nuvarande, message: meddelande })
+    });
+  }
+
+  async function andraRoller(epost, roller) {
+    epost = String(epost || '').trim().toLowerCase();
+    await hamtaRoller();
+    var fil = K.sattRoller(odNu.roller, mig(), epost, roller, nu());
+    if (epost !== mig()) {
+      try { await sakerstallRegMapp(); } catch (e) { /* registret finns inte ännu */ }
+      var b = K.behorighet(roller);
+      var namn = K.ROLLER.filter(function (r) { return roller.indexOf(r[0]) >= 0; }).map(function (r) { return r[1]; }).join(' och ');
+      var text = 'Du har fått rollen ' + namn + ' i Föreningsbokföring för ' + (store.forening.namn || 'föreningen') + '. Öppna appen med den här länken och logga in med ditt Microsoft-konto: ' + inbjudningslank();
+      await sattDelning(od.mapp, epost, b.data, text);
+      if (od.regMapp) await sattDelning(od.regMapp, epost, b.reg, text);
+    }
+    if (!fil.regMapp && od.regMapp) fil.regMapp = { driveId: od.regMapp.driveId, id: od.regMapp.id, namn: od.regMapp.namn };
+    await sparaRoller(fil);
+  }
+
+  function rollnamn(r) { var x = K.ROLLER.find(function (y) { return y[0] === r; }); return x ? x[1] : r; }
+
+  function skrivrattBanner() {
+    if (!odAnslutet() || !odNu.roller || kanSkriva() || od.lage === 'lasare') return '';
+    var f = odNu.roller;
+    return '<div class="card" style="border-left:4px solid var(--guld)"><strong>Läsläge.</strong> ' + esc(f.skrivratt || 'Ingen') + ' har skrivrätten just nu. ' +
+      (K.kanTaSkrivratt(f, mig()) ? '<button class="btn btn-secondary btn-small" data-action="skrivratt-ta">Ta skrivrätten</button>' : 'Be kassören lämna över den när du ska bokföra.') + '</div>';
+  }
+
+  function vyRoller() {
+    if (!odAnslutet() || !odNu.roller) return '';
+    var f = odNu.roller, jag = mig();
+    var mina = K.rollerFor(f, jag);
+    var html = '<h2 id="roller">Roller och skrivrätt</h2><div class="card">';
+    html += '<p style="margin-top:0">Du är inloggad som <strong>' + esc(jag) + '</strong>' + (mina.length ? ' med rollen ' + esc(mina.map(rollnamn).join(' och ')) : '') + '. ' +
+      'Skrivrätten har <strong>' + esc(f.skrivratt || 'ingen') + '</strong>. Bara den som har skrivrätten kan ändra något; alla andra ser bokföringen i läsläge.</p>';
+    var mottagare = f.personer.filter(function (p) { return p.epost !== f.skrivratt && K.kanFaSkrivratt(f, p.epost); });
+    if (f.skrivratt === jag && mottagare.length) {
+      html += '<div class="row"><select id="skrivrattTill" style="width:auto">' + mottagare.map(function (p) { return '<option value="' + esc(p.epost) + '">' + esc(p.epost) + ' (' + esc(p.roller.map(rollnamn).join(', ')) + ')</option>'; }).join('') + '</select>' +
+        '<button class="btn btn-secondary btn-small" data-action="skrivratt-lamna">Lämna över skrivrätten</button></div>';
+    } else if (f.skrivratt !== jag && K.kanTaSkrivratt(f, jag)) {
+      html += '<div class="row"><button class="btn btn-secondary btn-small" data-action="skrivratt-ta">Ta skrivrätten</button></div>';
+    }
+    if (K.harRoll(f, jag, 'admin')) {
+      html += '<h3>Personer</h3><p class="faint" style="margin-top:0">Rollerna ger behörighet i OneDrive: systemadministratör, kassör och bokförare får ändra i bokföringen och medlemsregistret, ' +
+        'revisorn får läsa bokföringen och styrelsen får läsa bokföringen och medlemsregistret. Alla behöver ett Microsoft-konto och får ett mejl med länk till appen.</p>' +
+        '<div class="scroll"><table class="kortlista"><thead><tr><th>E-post</th>' + K.ROLLER.map(function (r) { return '<th>' + esc(r[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        f.personer.map(function (p) {
+          return '<tr><td><strong>' + esc(p.epost) + '</strong>' + (p.epost === f.skrivratt ? ' <span class="tag ok">skrivrätt</span>' : '') + '</td>' + K.ROLLER.map(function (r) {
+            return '<td data-etikett="' + esc(r[1]) + '"><input type="checkbox" style="width:auto" data-roll="' + r[0] + '" data-epost="' + esc(p.epost) + '"' + (p.roller.indexOf(r[0]) >= 0 ? ' checked' : '') + ' aria-label="' + esc(r[1]) + '"></td>';
+          }).join('') + '</tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<div class="row" style="margin-top:8px"><input id="nyRollEpost" type="email" placeholder="e-postadress" style="max-width:280px">' +
+        '<select id="nyRoll" style="width:auto">' + K.ROLLER.filter(function (r) { return r[0] !== 'admin'; }).map(function (r) { return '<option value="' + r[0] + '">' + esc(r[1]) + '</option>'; }).join('') + '</select>' +
+        '<button class="btn btn-small" data-action="roll-lagg-till">Lägg till</button></div>' +
+        (f.logg.length ? '<details style="margin-top:8px"><summary class="faint">Logg</summary><ul class="faint">' + f.logg.slice().reverse().map(function (l) { return '<li>' + esc((l.tid || '').replace('T', ' ')) + ' ' + esc(l.av) + ': ' + esc(l.text) + '</li>'; }).join('') + '</ul></details>' : '');
+    }
+    return html + (odNu.rollFel ? '<p class="fel">' + esc(odNu.rollFel) + '</p>' : '') + '</div>';
+  }
 
   // ---------- Övningsläge ----------
 
@@ -6991,7 +7245,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport]');
@@ -7074,6 +7328,16 @@ var VERSIONER = [
       if (t.dataset.avg === 'komihag') au2.komIhag = t.checked;
       if (t.dataset.avg === 'termin' && !K.giltigtTerminId(au2.termin)) visa('Terminen ska skrivas som VT-27 eller HT-26.', true);
       else if (['lagg-till', 'nykategori', 'komihag'].indexOf(t.dataset.avg) >= 0) render();
+      return;
+    }
+    if (t.dataset.roll && odNu.roller) {
+      var ep = t.dataset.epost;
+      var rl = K.rollerFor(odNu.roller, ep).filter(function (x) { return x !== t.dataset.roll; });
+      if (t.checked) rl.push(t.dataset.roll);
+      if (!rl.length && !window.confirm('Ta bort ' + ep + ' helt? Delningen i OneDrive tas bort.')) { render(); return; }
+      sattStatus('Sparar rollerna…');
+      andraRoller(ep, rl).then(function () { sattStatus('Synkad med OneDrive'); visa('Rollerna för ' + ep + ' är sparade.'); })
+        .catch(function (err) { sattStatus(''); visa(err.fel ? err.fel.join(' ') : err.message, true); render(); });
       return;
     }
     if (t.dataset.excel && excelForhand) {
@@ -7290,6 +7554,26 @@ var VERSIONER = [
       }).catch(function (err) { paketStatus = null; visa('Revisionspaketet kunde inte skapas: ' + err.message, true); });
     },
     'oppna-paket': function () { oppnaPaket(); },
+    'skrivratt-lamna': function () {
+      var till = varde('skrivrattTill');
+      if (!window.confirm('Lämna över skrivrätten till ' + till + '? Du kan sedan bara läsa tills den lämnas tillbaka.')) return;
+      sattStatus('Sparar och lämnar över…');
+      lamnaSkrivratt(till).then(function () { sattStatus('Synkad med OneDrive'); visa('Skrivrätten har ' + till + ' nu.'); })
+        .catch(function (err) { sattStatus(''); visa(err.fel ? err.fel.join(' ') : err.message, true); });
+    },
+    'skrivratt-ta': function () {
+      var f = odNu.roller;
+      if (f && f.skrivratt && !window.confirm(f.skrivratt + ' har skrivrätten. Ta den? Det som ' + f.skrivratt + ' inte har hunnit spara kan ge en krock.')) return;
+      sattStatus('Tar skrivrätten…');
+      taSkrivratt().then(function () { visa('Du har skrivrätten.'); }).catch(function (err) { sattStatus(''); visa(err.fel ? err.fel.join(' ') : err.message, true); });
+    },
+    'roll-lagg-till': function () {
+      var epost = varde('nyRollEpost'), roll = varde('nyRoll');
+      var nuvarande = K.rollerFor(odNu.roller, epost);
+      sattStatus('Delar och sparar rollen…');
+      andraRoller(epost, nuvarande.concat([roll])).then(function () { sattStatus('Synkad med OneDrive'); visa(epost + ' har fått rollen ' + rollnamn(roll) + '. Ett mejl med inbjudan skickas från Microsoft.'); })
+        .catch(function (err) { sattStatus(''); visa(err.fel ? err.fel.join(' ') : err.message, true); });
+    },
     'ovning-starta': function () { kopieraTillOvning(false); window.open(ovningsAdress(), '_blank'); },
     'ovning-starta-tom': function () { kopieraTillOvning(true); window.open(ovningsAdress(), '_blank'); },
     'ovning-aterstall': function () {

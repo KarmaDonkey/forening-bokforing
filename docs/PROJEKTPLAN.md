@@ -71,6 +71,12 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Appens mapp, t.ex. `Föreningen/Föreningsbokföring`, med undermapparna `Bokföring och underlag` (bokföringen, logotypen och årsmappar med underlag; kan delas med revisorn) och `Medlemsregister` (delas inte).
 - Föreningens Excel-filer ligger kvar där de är och läses in i appen som arkivkopior.
 
+## Roller (från version 1.20)
+
+- Systemadministratör (den som först kopplar mappen), kassör, bokförare, revisor och styrelse. Rollerna sparas i `roller.json` i bokföringsmappen och ger behörighet i OneDrive: admin/kassör/bokförare ändra båda mapparna, revisor läsa bokföringen, styrelse läsa bokföringen och medlemsregistret.
+- Skrivrätt: bara en person i taget kan ändra. Kassören lämnar över till bokföraren och kan ta tillbaka; systemadministratören kan ta den i nödfall.
+- Skyddet är OneDrive-behörigheten; appen döljer bara knappar för den som inte har skrivrätten.
+
 ## Revisorn (från version 1.15)
 
 - Med Microsoft-konto: kassören delar mappen `Bokföring och underlag` från appen med läsbehörighet. Revisorn öppnar appen via länken i mejlet och läser bokföringen och underlagen, alltid aktuellt.
