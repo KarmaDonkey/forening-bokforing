@@ -160,6 +160,12 @@
   .dok-underskrifter { display: grid; grid-template-columns: 1fr 1fr; gap: 26px 32px; margin-top: 30px; }
   .dok-linje { border-bottom: 1px solid #1a1a1a; height: 34px; margin-bottom: 4px; }
   .trolig { background: var(--surface-2); border-radius: 8px; padding: 6px 10px; justify-content: space-between; }
+  .avgift-panel { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; margin-top: 8px; }
+  .avgift-panel table td { border-bottom: 0; padding: 3px 4px; vertical-align: middle; }
+  .avgift-panel input.num { width: 110px; text-align: right; }
+  .nyckeltal { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 10px 0; }
+  .nyckeltal div { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; }
+  .nyckeltal strong { display: block; font-size: 22px; }
   .logg { margin: 8px 0; padding-left: 18px; font-size: 14px; }
   a { color: var(--lank); }
   footer { margin-top: 40px; background: var(--kol); color: var(--kol-text); text-align: center; padding: 22px 16px calc(22px + env(safe-area-inset-bottom)); font-size: 13px; }
@@ -302,6 +308,17 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.12', datum: '2026-11-21',
+    nyheter: [
+      'Ny flik Medlemmar med medlemsregister, betalare och avgifter per termin.',
+      'Ett Swish-nummer eller en bankgiroreferens kopplas till en eller flera medlemmar. Samma barn kan ha flera betalare, och en förälder kan betala för syskon.',
+      'När en inbetalning bokförs föreslår appen vem den gäller och delar upp beloppet i medlemsavgift och terminsavgift på var sitt konto. Känner appen igen numret och beloppet stämmer räcker ett tryck.',
+      'Inbetalningar som redan är bokförda kan kopplas till medlemmar under Att koppla, utan att bokföringen ändras.',
+      'Statistik per termin: antal betalande per kategori, vilka som har betalat, vilka som betalat för lite och vilka som betalade förra terminen men inte nu. Kan delas som PDF.',
+      'Kontoutdrag med kolumnen Transaktionstyp ger nu betalarens Swish-nummer. Läser du in ett kontoutdrag igen kompletteras redan inlästa rader med numret.'
+    ]
+  },
   {
     version: '1.11', datum: '2026-11-21',
     nyheter: [
@@ -1219,7 +1236,7 @@ var VERSIONER = [
 
   var BANKKOLUMNER = {
     datum: ['bokforingsdag', 'bokforingsdatum', 'bokfdag', 'bokfdatum', 'bokfort', 'datum', 'transaktionsdag', 'transaktionsdatum', 'valutadag', 'date'],
-    text: ['beskrivning', 'text', 'transaktion', 'transaktionstext', 'rubrik', 'specifikation', 'mottagare', 'description'],
+    text: ['beskrivning', 'text', 'transaktion', 'transaktionstext', 'transaktionstyp', 'rubrik', 'specifikation', 'mottagare', 'avsandare', 'description'],
     referens: ['referens', 'meddelande', 'ref', 'reference'],
     belopp: ['belopp', 'beloppsek', 'beloppkr', 'summa', 'amount'],
     insattning: ['insattning', 'insattningar'],
@@ -1316,7 +1333,7 @@ var VERSIONER = [
     if (!ar.kontoplan.some(function (k) { return k.nr === konto; })) throw BokforingsFel('Bankkontot ' + konto + ' finns inte i kontoplanen.');
     var befintliga = {};
     (ar.bankrader || []).forEach(function (r) { befintliga[r.id] = true; });
-    var sedda = {};
+    var sedda = {}, kompletterade = {};
     var nya = [], dubbletter = 0, utanfor = 0;
     rader.forEach(function (r) {
       if (r.datum < ar.start || r.datum > ar.slut) { utanfor++; return; }
@@ -1324,11 +1341,20 @@ var VERSIONER = [
       sedda[bas] = (sedda[bas] || 0) + 1;
       var id = bankradId(r, sedda[bas] - 1);
       if (befintliga[id]) { dubbletter++; return; }
+      // Samma transaktion inläst tidigare utan betalarens nummer (t.ex. före version 1.12): komplettera texten.
+      var mobil = hittaMobilnummer(r.text + ' ' + (r.referens || ''));
+      if (mobil) {
+        var tidigare = (ar.bankrader || []).find(function (x) {
+          return !kompletterade[x.id] && x.konto === konto && x.datum === r.datum && x.belopp === r.belopp && x.saldo != null && x.saldo === r.saldo &&
+            !hittaMobilnummer(x.text + ' ' + (x.referens || ''));
+        });
+        if (tidigare) { kompletterade[tidigare.id] = { text: r.text || '', referens: r.referens || '' }; dubbletter++; return; }
+      }
       nya.push({ id: id, datum: r.datum, text: r.text || '', referens: r.referens || '', belopp: r.belopp, saldo: r.saldo == null ? null : r.saldo, konto: konto, verifikation: null });
     });
-    var alla = (ar.bankrader || []).concat(nya).map(function (r, i) { return { r: r, i: i }; });
+    var alla = (ar.bankrader || []).map(function (r) { return kompletterade[r.id] ? Object.assign({}, r, kompletterade[r.id]) : r; }).concat(nya).map(function (r, i) { return { r: r, i: i }; });
     alla.sort(function (a, b) { return a.r.datum < b.r.datum ? -1 : a.r.datum > b.r.datum ? 1 : a.i - b.i; });
-    return { ar: Object.assign({}, ar, { bankrader: alla.map(function (x) { return x.r; }) }), nya: nya.length, dubbletter: dubbletter, utanfor: utanfor };
+    return { ar: Object.assign({}, ar, { bankrader: alla.map(function (x) { return x.r; }) }), nya: nya.length, dubbletter: dubbletter, utanfor: utanfor, kompletterade: Object.keys(kompletterade).length };
   }
 
   function oppnaBankrader(ar) {
@@ -1878,7 +1904,402 @@ var VERSIONER = [
       ut.artiklar.push({ id: nyttId(), beskrivning: String(a.beskrivning), pris: a.pris, konto: a.konto || '' });
       antal.artiklar++;
     });
+    // Avgifter för medlemmar: terminer som saknas läggs till, årsavgiften om den inte är angiven.
+    if (fil.terminer || fil.arsavgift) {
+      var reg = normaliseraRegister(befintligt.medlemsregister);
+      antal.terminer = 0;
+      (fil.terminer || []).forEach(function (t) {
+        if (!t || reg.terminer.some(function (x) { return x.id === t.id; })) return;
+        reg = sattTermin(reg, t.id, t.avgifter || {});
+        antal.terminer++;
+      });
+      ['vanlig', 'funktionar'].forEach(function (k) {
+        var v = fil.arsavgift && fil.arsavgift[k];
+        if (arHeltal(v) && v > 0 && !reg.arsavgift[k]) { reg.arsavgift = Object.assign({}, reg.arsavgift); reg.arsavgift[k] = v; antal.terminer++; }
+      });
+      ut.medlemsregister = reg;
+    }
     return { data: ut, antal: antal };
+  }
+
+
+  // ---------- Medlemmar och terminsavgifter ----------
+  // Betalare (ett Swish-nummer, en bankgiroreferens) kopplas till en eller flera medlemmar.
+  // Samma barn kan ha flera betalare, och en betalare kan betala för flera.
+
+  var KATEGORIER = [['barn', 'Barn'], ['student', 'Student'], ['vuxen', 'Vuxen'], ['familj', 'Familj'], ['funktionar', 'Funktionär, tränare eller stödmedlem']];
+  var KATEGORI_KORT = { barn: 'Barn', student: 'Student', vuxen: 'Vuxen', familj: 'Familj', funktionar: 'Funktionär' };
+
+  function tomtRegister() {
+    return { medlemmar: [], betalare: [], terminer: [], arsavgift: { vanlig: 0, funktionar: 0 }, konton: { medlemsavgift: '', terminsavgift: '' }, betalningar: [], ignorerade: [] };
+  }
+
+  function normaliseraRegister(r) {
+    var t = tomtRegister();
+    r = r && typeof r === 'object' ? r : {};
+    Object.keys(t).forEach(function (k) {
+      if (Array.isArray(t[k])) t[k] = Array.isArray(r[k]) ? r[k] : [];
+      else t[k] = Object.assign(t[k], r[k] || {});
+    });
+    return t;
+  }
+
+  function kategorinamn(k) {
+    var x = KATEGORIER.find(function (y) { return y[0] === k; });
+    return x ? x[1] : 'Okänd';
+  }
+
+  // Svenskt mobilnummer i en banktext, t.ex. "Swish +46701234567" eller "070-123 45 67".
+  function hittaMobilnummer(t) {
+    t = String(t || '');
+    var re = /(\+46|0046|46|0)((?:[\s-]?\d){9})(?!\d)/g;
+    var m;
+    while ((m = re.exec(t))) {
+      if (m.index > 0 && /[\d+]/.test(t[m.index - 1])) { re.lastIndex = m.index + 1; continue; }
+      var d = m[2].replace(/\D/g, '');
+      if (d.length === 9 && d[0] === '7') return '+46' + d;
+      re.lastIndex = m.index + 1;
+    }
+    return null;
+  }
+
+  function visaMobilnummer(n) {
+    var d = String(n).replace(/^\+46/, '');
+    return '0' + d.slice(0, 2) + '-' + d.slice(2, 5) + ' ' + d.slice(5, 7) + ' ' + d.slice(7, 9);
+  }
+
+  // Vem som betalat, utifrån bankraden. Nyckeln används för att känna igen betalaren nästa gång.
+  function tolkaBetalare(bankrad) {
+    if (!bankrad) return null;
+    var text = String(bankrad.text || ''), ref = String(bankrad.referens || '').trim();
+    var mobil = hittaMobilnummer(text + ' ' + ref);
+    if (mobil) return { nyckel: mobil, visning: visaMobilnummer(mobil), typ: 'swish' };
+    if (ref && /\d/.test(ref)) return { nyckel: 'ref:' + ref.toLowerCase().replace(/\s+/g, ' '), visning: (/bankgiro/i.test(text) ? 'Bankgiro ' : 'Referens ') + ref, typ: 'referens' };
+    var n = normaliseraText(text);
+    if (n && !/^(swish|bankgiro|insattning|overforing|inbetalning)( |$)/.test(n.replace(/[åä]/g, 'a').replace(/ö/g, 'o'))) return { nyckel: 'text:' + n, visning: text.trim(), typ: 'text' };
+    if (n && ref) return { nyckel: 'text:' + n + ' ' + ref.toLowerCase(), visning: text.trim() + ' ' + ref, typ: 'text' };
+    return null;
+  }
+
+  // Terminer: VT = januari–juni, HT = juli–december. Id som på hemsidor: "HT-26".
+  function terminForDatum(datum) {
+    return (Number(datum.slice(5, 7)) <= 6 ? 'VT-' : 'HT-') + datum.slice(2, 4);
+  }
+  function terminSortering(id) { return '20' + id.slice(3, 5) + (id.slice(0, 2) === 'VT' ? '1' : '2'); }
+  function terminNamn(id) { return (id.slice(0, 2) === 'VT' ? 'Vårterminen 20' : 'Höstterminen 20') + id.slice(3, 5); }
+  function kalenderarForTermin(id) { return '20' + id.slice(3, 5); }
+  function foregaendeTermin(id) {
+    var ar = Number(id.slice(3, 5));
+    return id.slice(0, 2) === 'HT' ? 'VT-' + String(ar).padStart(2, '0') : 'HT-' + String((ar + 99) % 100).padStart(2, '0');
+  }
+  function nastaTermin(id) {
+    var ar = Number(id.slice(3, 5));
+    return id.slice(0, 2) === 'VT' ? 'HT-' + String(ar).padStart(2, '0') : 'VT-' + String((ar + 1) % 100).padStart(2, '0');
+  }
+  function giltigtTerminId(id) { return /^(VT|HT)-\d{2}$/.test(String(id || '')); }
+
+  // Avgifterna för en termin. Saknas terminen gäller den senaste tidigare terminens avgifter.
+  function terminsavgifter(reg, id) {
+    var t = reg.terminer.find(function (x) { return x.id === id; });
+    if (t) return { avgifter: t.avgifter, fran: id };
+    var tidigare = reg.terminer.filter(function (x) { return terminSortering(x.id) < terminSortering(id); })
+      .sort(function (a, b) { return terminSortering(b.id) < terminSortering(a.id) ? -1 : 1; })[0];
+    return tidigare ? { avgifter: tidigare.avgifter, fran: tidigare.id } : { avgifter: {}, fran: null };
+  }
+
+  function sattTermin(reg, id, avgifter) {
+    if (!giltigtTerminId(id)) throw BokforingsFel('Terminen ska skrivas som VT-27 eller HT-26.');
+    var a = {};
+    KATEGORIER.forEach(function (k) {
+      if (k[0] === 'funktionar') return;
+      var v = avgifter && avgifter[k[0]];
+      if (v != null && v !== '') { if (!arHeltal(v) || v < 0) throw BokforingsFel('Ogiltig avgift för ' + k[1].toLowerCase() + '.'); a[k[0]] = v; }
+    });
+    var terminer = reg.terminer.filter(function (t) { return t.id !== id; }).concat([{ id: id, avgifter: a }]);
+    terminer.sort(function (x, y) { return terminSortering(x.id) < terminSortering(y.id) ? -1 : 1; });
+    return Object.assign({}, reg, { terminer: terminer });
+  }
+
+  function taBortTermin(reg, id) {
+    return Object.assign({}, reg, { terminer: reg.terminer.filter(function (t) { return t.id !== id; }) });
+  }
+
+  function nyttRegisterId(lista, prefix) {
+    return prefix + (lista.reduce(function (m, x) { var n = Number(String(x.id).slice(prefix.length)); return n > m ? n : m; }, 0) + 1);
+  }
+
+  function laggTillMedlem(reg, uppgifter) {
+    var namn = String((uppgifter && uppgifter.namn) || '').trim();
+    var kategori = uppgifter && uppgifter.kategori;
+    if (!namn) throw BokforingsFel('Medlemmen behöver ett namn.');
+    if (!KATEGORIER.some(function (k) { return k[0] === kategori; })) throw BokforingsFel('Välj kategori för medlemmen.');
+    var m = { id: nyttRegisterId(reg.medlemmar, 'm'), namn: namn, kategori: kategori };
+    return { reg: Object.assign({}, reg, { medlemmar: reg.medlemmar.concat([m]) }), medlem: m };
+  }
+
+  function andraMedlem(reg, id, andring) {
+    if (!reg.medlemmar.some(function (m) { return m.id === id; })) throw BokforingsFel('Medlemmen finns inte.');
+    if (andring.namn != null && !String(andring.namn).trim()) throw BokforingsFel('Medlemmen behöver ett namn.');
+    if (andring.kategori != null && !KATEGORIER.some(function (k) { return k[0] === andring.kategori; })) throw BokforingsFel('Okänd kategori.');
+    return Object.assign({}, reg, {
+      medlemmar: reg.medlemmar.map(function (m) {
+        if (m.id !== id) return m;
+        var n = Object.assign({}, m);
+        if (andring.namn != null) n.namn = String(andring.namn).trim();
+        if (andring.kategori != null) n.kategori = andring.kategori;
+        return n;
+      })
+    });
+  }
+
+  function taBortMedlem(reg, id) {
+    if (reg.betalningar.some(function (b) { return b.poster.some(function (p) { return p.medlem === id; }); })) {
+      throw BokforingsFel('Medlemmen har registrerade betalningar och kan inte tas bort.');
+    }
+    return Object.assign({}, reg, {
+      medlemmar: reg.medlemmar.filter(function (m) { return m.id !== id; }),
+      betalare: reg.betalare.map(function (b) { return Object.assign({}, b, { medlemmar: b.medlemmar.filter(function (x) { return x !== id; }) }); })
+    });
+  }
+
+  function hittaBetalare(reg, nyckel) {
+    return reg.betalare.find(function (b) { return b.nyckel === nyckel; }) || null;
+  }
+
+  // Kopplar en betalare till medlemmar. Tidigare kopplingar finns kvar.
+  function kopplaBetalare(reg, betalare, medlemIds) {
+    if (!betalare || !betalare.nyckel) return reg;
+    var finns = hittaBetalare(reg, betalare.nyckel);
+    var ids = (finns ? finns.medlemmar : []).slice();
+    (medlemIds || []).forEach(function (id) {
+      if (!reg.medlemmar.some(function (m) { return m.id === id; })) throw BokforingsFel('Medlemmen finns inte.');
+      if (ids.indexOf(id) < 0) ids.push(id);
+    });
+    var post = Object.assign({ nyckel: betalare.nyckel, visning: betalare.visning || betalare.nyckel, namn: '' }, finns || {}, { medlemmar: ids });
+    return Object.assign({}, reg, { betalare: finns ? reg.betalare.map(function (b) { return b.nyckel === post.nyckel ? post : b; }) : reg.betalare.concat([post]) });
+  }
+
+  function andraBetalare(reg, nyckel, andring) {
+    return Object.assign({}, reg, {
+      betalare: reg.betalare.map(function (b) {
+        if (b.nyckel !== nyckel) return b;
+        var n = Object.assign({}, b);
+        if (andring.namn != null) n.namn = String(andring.namn).trim();
+        if (andring.taBortMedlem) n.medlemmar = n.medlemmar.filter(function (x) { return x !== andring.taBortMedlem; });
+        return n;
+      })
+    });
+  }
+
+  function taBortBetalare(reg, nyckel) {
+    return Object.assign({}, reg, { betalare: reg.betalare.filter(function (b) { return b.nyckel !== nyckel; }) });
+  }
+
+  // Betalningar som gäller, dvs. inte bokförda i en verifikation som sedan rättats.
+  function giltigaBetalningar(reg, arMap) {
+    return reg.betalningar.filter(function (b) {
+      if (b.ver == null || !arMap || !arMap[b.arId]) return true;
+      return !rattadAv(arMap[b.arId], b.ver);
+    });
+  }
+
+  function harBetaltArsavgift(reg, medlemId, kalenderar, arMap) {
+    return giltigaBetalningar(reg, arMap).some(function (b) {
+      return kalenderarForTermin(b.termin) === kalenderar && b.poster.some(function (p) { return p.medlem === medlemId && p.typ === 'arsavgift'; });
+    });
+  }
+
+  function arsavgiftFor(reg, medlem) {
+    return medlem.kategori === 'funktionar' ? (reg.arsavgift.funktionar || 0) : (reg.arsavgift.vanlig || 0);
+  }
+
+  // Poster för ett antal medlemmar en viss termin. Familjeavgiften tas en gång, på den första familjemedlemmen.
+  // medArsavgift: true = alla som inte betalt i år, 'forsta' = bara den första (t.ex. en familj), false = ingen.
+  function posterFor(reg, termin, medlemmar, medArsavgift, arMap) {
+    var avg = terminsavgifter(reg, termin).avgifter;
+    var poster = [], familjTagen = false;
+    medlemmar.forEach(function (m) {
+      var t = 0;
+      if (m.kategori === 'familj') { t = familjTagen ? 0 : (avg.familj || 0); familjTagen = true; }
+      else if (m.kategori !== 'funktionar') t = avg[m.kategori] || 0;
+      if (m.kategori !== 'funktionar' || t) poster.push({ medlem: m.id, typ: 'termin', belopp: t });
+      if (medArsavgift && (medArsavgift !== 'forsta' || m === medlemmar[0]) && !harBetaltArsavgift(reg, m.id, kalenderarForTermin(termin), arMap)) {
+        var a = arsavgiftFor(reg, m);
+        if (a) poster.push({ medlem: m.id, typ: 'arsavgift', belopp: a });
+      }
+    });
+    return poster;
+  }
+
+  function summaPoster(poster) { return poster.reduce(function (s, p) { return s + p.belopp; }, 0); }
+
+  // Förslag på hur en inbetalning fördelas: vilka medlemmar, vilken termin och årsavgift eller inte.
+  // Prövar alla betalarens medlemmar först, sedan färre, med och utan årsavgift.
+  function avgiftsforslag(reg, inbetalning, arMap) {
+    var termin = inbetalning.termin || terminForDatum(inbetalning.datum);
+    var betalare = inbetalning.nyckel ? hittaBetalare(reg, inbetalning.nyckel) : null;
+    var ids = inbetalning.medlemIds || (betalare ? betalare.medlemmar : []);
+    var medlemmar = ids.map(function (id) { return reg.medlemmar.find(function (m) { return m.id === id; }); }).filter(Boolean);
+    var ut = { termin: termin, poster: [], summa: 0, stammer: false, tvetydig: false, kand: !!betalare, medlemIds: medlemmar.map(function (m) { return m.id; }) };
+    if (!medlemmar.length) return ut;
+    var delmangder = [];
+    var n = Math.min(medlemmar.length, 6);
+    for (var mask = (1 << n) - 1; mask > 0; mask--) {
+      var urval = medlemmar.slice(0, n).filter(function (m, i) { return mask & (1 << i); });
+      delmangder.push(urval);
+    }
+    delmangder.sort(function (a, b) { return b.length - a.length; });
+    var traffar = [];
+    delmangder.forEach(function (urval) {
+      (urval.length > 1 ? [true, 'forsta', false] : [true, false]).forEach(function (medArs) {
+        var poster = posterFor(reg, termin, urval, medArs, arMap);
+        if (summaPoster(poster) === inbetalning.belopp && !traffar.some(function (t) { return t.storlek > urval.length; })) {
+          if (!traffar.some(function (t) { return JSON.stringify(t.poster) === JSON.stringify(poster); })) traffar.push({ storlek: urval.length, poster: poster, medArs: medArs });
+        }
+      });
+    });
+    if (traffar.length) {
+      var basta = traffar.filter(function (t) { return t.storlek === traffar[0].storlek; });
+      var medArsTraff = basta.filter(function (t) { return t.medArs === true; });
+      if (!medArsTraff.length) medArsTraff = basta.filter(function (t) { return t.medArs === 'forsta'; });
+      var val = (medArsTraff.length ? medArsTraff : basta);
+      ut.poster = val[0].poster;
+      ut.tvetydig = val.length > 1;
+      ut.stammer = true;
+    } else {
+      ut.poster = posterFor(reg, termin, medlemmar, true, arMap);
+    }
+    ut.summa = summaPoster(ut.poster);
+    return ut;
+  }
+
+  function avgiftstext(reg, termin, poster) {
+    var namn = [];
+    poster.forEach(function (p) {
+      var m = reg.medlemmar.find(function (x) { return x.id === p.medlem; });
+      if (m && namn.indexOf(m.namn) < 0) namn.push(m.namn);
+    });
+    var harArs = poster.some(function (p) { return p.typ === 'arsavgift' && p.belopp; });
+    var harTermin = poster.some(function (p) { return p.typ === 'termin' && p.belopp; });
+    var rubrik = harArs && harTermin ? 'Medlems- och terminsavgift ' + termin : harArs ? 'Medlemsavgift ' + kalenderarForTermin(termin) : 'Terminsavgift ' + termin;
+    return rubrik + (namn.length ? ': ' + namn.join(', ') : '');
+  }
+
+  // Verifikationsrader för en avgiftsbetalning: bankkontot mot terminsavgift och medlemsavgift.
+  function avgiftsrader(reg, poster, bankkonto, belopp) {
+    if (summaPoster(poster) !== belopp) throw BokforingsFel('Avgifterna (' + formatBelopp(summaPoster(poster)) + ' kr) stämmer inte med beloppet ' + formatBelopp(belopp) + ' kr.');
+    var termin = 0, ars = 0;
+    poster.forEach(function (p) { if (p.typ === 'arsavgift') ars += p.belopp; else termin += p.belopp; });
+    if ((termin && !reg.konton.terminsavgift) || (ars && !reg.konton.medlemsavgift)) throw BokforingsFel('Välj konton för terminsavgift och medlemsavgift under Medlemmar, Avgifter.');
+    var rader = [{ konto: bankkonto, belopp: belopp }];
+    if (termin) rader.push({ konto: reg.konton.terminsavgift, belopp: -termin });
+    if (ars) rader.push({ konto: reg.konton.medlemsavgift, belopp: -ars });
+    return rader;
+  }
+
+  function registreraBetalning(reg, b) {
+    if (!giltigtTerminId(b.termin)) throw BokforingsFel('Ogiltig termin.');
+    if (!arGiltigtDatum(b.datum)) throw BokforingsFel('Ogiltigt datum.');
+    if (!b.poster || !b.poster.length) throw BokforingsFel('Välj minst en medlem.');
+    b.poster.forEach(function (p) {
+      if (!reg.medlemmar.some(function (m) { return m.id === p.medlem; })) throw BokforingsFel('Medlemmen finns inte.');
+      if (!arHeltal(p.belopp) || p.belopp < 0) throw BokforingsFel('Ogiltigt belopp.');
+    });
+    if (summaPoster(b.poster) !== b.belopp) throw BokforingsFel('Fördelningen (' + formatBelopp(summaPoster(b.poster)) + ' kr) stämmer inte med beloppet ' + formatBelopp(b.belopp) + ' kr.');
+    if (b.bankradId && reg.betalningar.some(function (x) { return x.bankradId === b.bankradId && x.arId === b.arId; })) throw BokforingsFel('Betalningen är redan kopplad till medlemmar.');
+    var post = {
+      id: nyttRegisterId(reg.betalningar, 'b'), datum: b.datum, belopp: b.belopp, termin: b.termin,
+      nyckel: b.nyckel || '', arId: b.arId || null, ver: b.ver == null ? null : b.ver, bankradId: b.bankradId || null,
+      poster: b.poster.map(function (p) { return { medlem: p.medlem, typ: p.typ === 'arsavgift' ? 'arsavgift' : 'termin', belopp: p.belopp }; })
+    };
+    return Object.assign({}, reg, { betalningar: reg.betalningar.concat([post]) });
+  }
+
+  function taBortBetalning(reg, id) {
+    return Object.assign({}, reg, { betalningar: reg.betalningar.filter(function (b) { return b.id !== id; }) });
+  }
+
+  // Bokförda inbetalningar med en känd sorts betalare som inte är kopplade till någon medlem.
+  function okoppladeInbetalningar(reg, ar, arId) {
+    var kopplade = {};
+    reg.betalningar.forEach(function (b) { if (b.arId === arId && b.bankradId) kopplade[b.bankradId] = true; });
+    return (ar.bankrader || []).filter(function (r) {
+      if (r.belopp <= 0 || r.verifikation == null || kopplade[r.id] || reg.ignorerade.indexOf(arId + '|' + r.id) >= 0) return false;
+      if (rattadAv(ar, r.verifikation)) return false;
+      var b = tolkaBetalare(r);
+      return b && b.typ === 'swish';
+    });
+  }
+
+  function terminerMedData(reg) {
+    var ids = {};
+    reg.terminer.forEach(function (t) { ids[t.id] = true; });
+    reg.betalningar.forEach(function (b) { ids[b.termin] = true; });
+    return Object.keys(ids).sort(function (a, b) { return terminSortering(a) < terminSortering(b) ? -1 : 1; });
+  }
+
+  // Statistik för en termin: vilka som betalat, per kategori, och vilka som betalade förra terminen men inte nu.
+  function terminsstatistik(reg, termin, arMap) {
+    var giltiga = giltigaBetalningar(reg, arMap);
+    var perMedlem = function (t) {
+      var ut = {};
+      giltiga.filter(function (b) { return b.termin === t; }).forEach(function (b) {
+        b.poster.forEach(function (p) {
+          var x = ut[p.medlem] || (ut[p.medlem] = { termin: 0, arsavgift: 0, datum: [] });
+          if (p.typ === 'arsavgift') x.arsavgift += p.belopp; else x.termin += p.belopp;
+          if (x.datum.indexOf(b.datum) < 0) x.datum.push(b.datum);
+        });
+      });
+      return ut;
+    };
+    var nu = perMedlem(termin), fore = perMedlem(foregaendeTermin(termin));
+    var medlem = function (id) { return reg.medlemmar.find(function (m) { return m.id === id; }) || { id: id, namn: '(borttagen)', kategori: '' }; };
+    var avg = terminsavgifter(reg, termin).avgifter;
+    var perKategori = {};
+    KATEGORIER.forEach(function (k) { perKategori[k[0]] = { antal: 0, termin: 0, arsavgift: 0 }; });
+    var betalande = Object.keys(nu).map(function (id) {
+      var m = medlem(id), x = nu[id];
+      var k = perKategori[m.kategori] || (perKategori[m.kategori] = { antal: 0, termin: 0, arsavgift: 0 });
+      k.antal++; k.termin += x.termin; k.arsavgift += x.arsavgift;
+      var forvantat = m.kategori === 'familj' || m.kategori === 'funktionar' ? null : avg[m.kategori];
+      return { medlem: m.id, namn: m.namn, kategori: m.kategori, termin: x.termin, arsavgift: x.arsavgift, datum: x.datum.sort(), forvantat: forvantat == null ? null : forvantat };
+    }).sort(function (a, b) { return a.namn.localeCompare(b.namn, 'sv'); });
+    var totalt = { antal: betalande.length, termin: 0, arsavgift: 0 };
+    betalande.forEach(function (b) { totalt.termin += b.termin; totalt.arsavgift += b.arsavgift; });
+    totalt.summa = totalt.termin + totalt.arsavgift;
+    return {
+      termin: termin,
+      avgifter: avg,
+      perKategori: perKategori,
+      totalt: totalt,
+      betalande: betalande,
+      forLite: betalande.filter(function (b) { return b.forvantat != null && b.termin < b.forvantat; }),
+      slutat: Object.keys(fore).filter(function (id) { return !nu[id]; }).map(function (id) { var m = medlem(id); return { medlem: id, namn: m.namn, kategori: m.kategori }; })
+        .sort(function (a, b) { return a.namn.localeCompare(b.namn, 'sv'); })
+    };
+  }
+
+  function terminshistorik(reg, arMap) {
+    return terminerMedData(reg).map(function (t) {
+      var s = terminsstatistik(reg, t, arMap);
+      var rad = { termin: t, antal: s.totalt.antal, summa: s.totalt.summa };
+      KATEGORIER.forEach(function (k) { rad[k[0]] = s.perKategori[k[0]].antal; });
+      return rad;
+    }).filter(function (r) { return r.antal > 0; });
+  }
+
+  // Två lediga intäktskonton att föreslå om föreningen inte redan har konton för avgifterna.
+  function foreslaAvgiftskonton(ar) {
+    var hitta = function (re) { var k = ar.kontoplan.find(function (x) { return Number(x.nr) >= 3000 && Number(x.nr) < 4000 && re.test(x.namn); }); return k ? k.nr : ''; };
+    var ledigt = function (fran, upptaget) {
+      for (var n = fran; n < 3100; n++) { var nr = String(n); if (nr !== upptaget && !ar.kontoplan.some(function (k) { return k.nr === nr; })) return nr; }
+      return '';
+    };
+    var medl = hitta(/medlemsavgift/i), term = hitta(/termins|tränings|traenings|deltagaravgift|kursavgift/i);
+    return {
+      medlemsavgift: medl || ledigt(3010, term), terminsavgift: term || ledigt(3020, medl),
+      finnsMedlemsavgift: !!medl, finnsTerminsavgift: !!term
+    };
   }
 
   // ---------- Sökvägar i OneDrive ----------
@@ -2060,6 +2481,42 @@ var VERSIONER = [
     namnFranBanktext: namnFranBanktext,
     slaIhopForening: slaIhopForening,
     sakertNamn: sakertNamn,
+    KATEGORIER: KATEGORIER,
+    KATEGORI_KORT: KATEGORI_KORT,
+    tomtRegister: tomtRegister,
+    normaliseraRegister: normaliseraRegister,
+    kategorinamn: kategorinamn,
+    hittaMobilnummer: hittaMobilnummer,
+    visaMobilnummer: visaMobilnummer,
+    tolkaBetalare: tolkaBetalare,
+    terminForDatum: terminForDatum,
+    terminSortering: terminSortering,
+    terminNamn: terminNamn,
+    foregaendeTermin: foregaendeTermin,
+    nastaTermin: nastaTermin,
+    giltigtTerminId: giltigtTerminId,
+    terminsavgifter: terminsavgifter,
+    sattTermin: sattTermin,
+    taBortTermin: taBortTermin,
+    laggTillMedlem: laggTillMedlem,
+    andraMedlem: andraMedlem,
+    taBortMedlem: taBortMedlem,
+    hittaBetalare: hittaBetalare,
+    kopplaBetalare: kopplaBetalare,
+    andraBetalare: andraBetalare,
+    taBortBetalare: taBortBetalare,
+    giltigaBetalningar: giltigaBetalningar,
+    harBetaltArsavgift: harBetaltArsavgift,
+    avgiftsforslag: avgiftsforslag,
+    avgiftstext: avgiftstext,
+    avgiftsrader: avgiftsrader,
+    registreraBetalning: registreraBetalning,
+    taBortBetalning: taBortBetalning,
+    okoppladeInbetalningar: okoppladeInbetalningar,
+    terminerMedData: terminerMedData,
+    terminsstatistik: terminsstatistik,
+    terminshistorik: terminshistorik,
+    foreslaAvgiftskonton: foreslaAvgiftskonton,
     arMapp: arMapp,
     underlagSokvag: underlagSokvag,
     kvittoSokvag: kvittoSokvag
@@ -2081,7 +2538,7 @@ var VERSIONER = [
   var SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.4.0/+esm';
   var MODELL = 'claude-opus-5-5';
 
-  var store = { format: 1, forening: { namn: '', orgnr: '' }, ar: {}, aktivt: null, regler: [], motpartsregler: [] };
+  var store = { format: 1, forening: { namn: '', orgnr: '' }, ar: {}, aktivt: null, regler: [], motpartsregler: [], medlemsregister: K.tomtRegister() };
   var LISTNYCKLAR = ['adresser', 'kontakter', 'artiklar', 'mottagare', 'dokument'];
   var dokUtkast = null;
   var dokVisas = null;
@@ -2091,6 +2548,9 @@ var VERSIONER = [
   var logg = [];
   var arbetar = null;
   var rapportVy = 'rr';
+  var medlemVy = 'statistik';
+  var valdTermin = null;
+  var avgiftUtkast = {};
   var oppenVer = null;
   var valtKonto = '1930';
   var meddelande = null;
@@ -2107,6 +2567,7 @@ var VERSIONER = [
         if (!store.regler) store.regler = [];
         if (!store.motpartsregler) store.motpartsregler = [];
         LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
+        store.medlemsregister = K.normaliseraRegister(store.medlemsregister);
       }
     } catch (e) { /* tom lagring är okej */ }
   }
@@ -2602,6 +3063,7 @@ var VERSIONER = [
     if (!store.regler) store.regler = [];
     if (!store.motpartsregler) store.motpartsregler = [];
     LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
+    store.medlemsregister = K.normaliseraRegister(store.medlemsregister);
     if (aktivtNu && store.ar[aktivtNu]) store.aktivt = aktivtNu;
     if (!store.ar[store.aktivt]) store.aktivt = Object.keys(store.ar).sort().pop() || null;
     od.eTag = meta.eTag;
@@ -2937,6 +3399,19 @@ var VERSIONER = [
     if (val.text != null) f.text = val.text;
     // Inbetalningar och bankavgifter syns i bankutdraget och behöver inget eget underlag.
     if (!f.underlagIds.length && f.rader.length === 2 && (rad.belopp > 0 || f.rader[1].konto === '6570')) f.underlagKommentar = 'Bankutdrag';
+    // Terminsavgift: ett känt Swish-nummer med rätt belopp, eller det du valt i panelen.
+    var a = val.konto == null && f.kalla !== 'underlag' ? avgiftForRad(rad) : null;
+    if (a && a.poster) {
+      try {
+        if (!K.giltigtTerminId(a.termin)) throw new Error('Terminen ska skrivas som VT-27 eller HT-26.');
+        f.rader = K.avgiftsrader(reg(), a.poster, rad.konto, rad.belopp);
+        f.text = val.text != null ? val.text : K.avgiftstext(reg(), a.termin, a.poster);
+        f.kalla = 'avgift';
+        f.underlagIds = [];
+        f.underlagKommentar = 'Bankutdrag';
+        f.avgift = a;
+      } catch (e) { f.avgiftFel = e.fel ? e.fel.join(' ') : e.message; if (a.manuell) f.rader = [f.rader[0], { konto: '', belopp: -rad.belopp }]; }
+    }
     f.komplett = f.rader.every(function (r) { return ar.kontoplan.some(function (k) { return k.nr === r.konto; }); });
     return f;
   }
@@ -2951,7 +3426,15 @@ var VERSIONER = [
     var res = K.bokforKopplat(ar, {
       datum: f.datum, text: f.text, rader: f.rader, underlagKommentar: f.underlagKommentar, registrerad: new Date().toISOString()
     }, { bankradId: rad.id, underlagIds: f.underlagIds });
-    larAv(rad, f.rader);
+    if (f.avgift) {
+      var r = K.registreraBetalning(reg(), {
+        datum: rad.datum, belopp: rad.belopp, termin: f.avgift.termin, nyckel: f.avgift.betalare.nyckel,
+        arId: store.aktivt, ver: res.verifikation.nr, bankradId: rad.id, poster: f.avgift.poster
+      });
+      if (f.avgift.komIhag) r = K.kopplaBetalare(r, f.avgift.betalare, f.avgift.poster.map(function (p) { return p.medlem; }));
+      store.medlemsregister = r;
+      delete avgiftUtkast[rad.id];
+    } else larAv(rad, f.rader);
     store.ar[store.aktivt] = res.ar;
     larAvUnderlag(res.ar, f.underlagIds, f.rader);
     res.ar = K.tillampaMotpartsregler(res.ar, store.motpartsregler);
@@ -3441,7 +3924,7 @@ var VERSIONER = [
     var doc = nyPdf(await laddaJsPdf());
     var f = store.forening;
     var V = 15, H = 195, NED = 278;
-    var titel = RAPPORTTITLAR[typ] + (typ === 'hb' ? ' ' + konto + ' ' + K.kontonamn(ar, konto) : '');
+    var titel = typ === 'medl' ? 'Terminsavgifter ' + konto : RAPPORTTITLAR[typ] + (typ === 'hb' ? ' ' + konto + ' ' + K.kontonamn(ar, konto) : '');
     var y;
     // Sidhuvud
     var logoH = ritaLogo(doc, V, 12, 18, 16);
@@ -3451,7 +3934,7 @@ var VERSIONER = [
     doc.setFont('helvetica', 'bold'); doc.setFontSize(typ === 'hb' ? 14 : 18); doc.setTextColor.apply(doc, SKIFFER);
     doc.text(pt(titel), H, 20, { align: 'right' });
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(26, 26, 26);
-    doc.text('Räkenskapsår ' + ar.start + ' - ' + ar.slut + (ar.lastTom === ar.slut ? '' : ' (preliminär)'), H, 26, { align: 'right' });
+    doc.text(typ === 'medl' ? pt(K.terminNamn(konto)) : 'Räkenskapsår ' + ar.start + ' - ' + ar.slut + (ar.lastTom === ar.slut ? '' : ' (preliminär)'), H, 26, { align: 'right' });
     doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
     doc.text('Utskriven ' + idag(), H, 30.5, { align: 'right' });
     doc.setTextColor(26, 26, 26);
@@ -3540,6 +4023,37 @@ var VERSIONER = [
       rad([ar.start, '', 'Ingående balans', '', '', kr(hb.ib)], 'grupp');
       hb.rader.forEach(function (r) { rad([r.datum, String(r.nr), r.text, r.belopp > 0 ? kr(r.belopp) : '', r.belopp < 0 ? kr(-r.belopp) : '', kr(r.saldo)]); });
       rad(['', '', 'Utgående balans', '', '', kr(hb.ub)], 'total');
+    } else if (typ === 'medl') {
+      var s = K.terminsstatistik(reg(), konto, store.ar);
+      kol = [{ r: 'Kategori', x: V, w: 60 }, { r: 'Antal', x: 95, align: R }, { r: 'Avgift', x: 125, align: R }, { r: 'Terminsavgifter', x: 162, align: R }, { r: 'Årsavgifter', x: H, align: R }];
+      kolumnrubriker();
+      K.KATEGORIER.forEach(function (k) {
+        var x = s.perKategori[k[0]];
+        if (x.antal) rad([k[1], String(x.antal), s.avgifter[k[0]] ? kr(s.avgifter[k[0]]) : '', kr(x.termin), kr(x.arsavgift)]);
+      });
+      rad(['Totalt', String(s.totalt.antal), '', kr(s.totalt.termin), kr(s.totalt.arsavgift)], 'total');
+      kol = null;
+      avsnitt('Har betalat (' + s.betalande.length + ')');
+      if (s.betalande.length) {
+        kol = [{ r: 'Namn', x: V, w: 62 }, { r: 'Kategori', x: 80, w: 28 }, { r: 'Datum', x: 110, w: 30 }, { r: 'Terminsavgift', x: 168, align: R }, { r: 'Årsavgift', x: H, align: R }];
+        kolumnrubriker();
+        s.betalande.forEach(function (b) { rad([b.namn, K.KATEGORI_KORT[b.kategori] || '', b.datum.join(', '), kr(b.termin), b.arsavgift ? kr(b.arsavgift) : '']); });
+        kol = null;
+      } else text('Inga registrerade betalningar.');
+      if (s.forLite.length) {
+        avsnitt('Har betalat mindre än avgiften (' + s.forLite.length + ')');
+        s.forLite.forEach(function (b) { text(b.namn + ': ' + kr(b.termin) + ' av ' + kr(b.forvantat) + ' kr'); });
+      }
+      avsnitt('Betalade ' + K.foregaendeTermin(konto) + ' men inte ' + konto + ' (' + s.slutat.length + ')');
+      s.slutat.length ? s.slutat.forEach(function (m) { text(m.namn + (m.kategori ? ' (' + (K.KATEGORI_KORT[m.kategori] || '') + ')' : '')); }) : text('Inga.');
+      var hist = K.terminshistorik(reg(), store.ar);
+      if (hist.length) {
+        avsnitt('Utveckling');
+        var x0 = 40, steg = (H - 25 - x0) / K.KATEGORIER.length;
+        kol = [{ r: 'Termin', x: V }].concat(K.KATEGORIER.map(function (k, i) { return { r: K.KATEGORI_KORT[k[0]], x: x0 + steg * (i + 1) - 2, align: R }; })).concat([{ r: 'Summa', x: H, align: R }]);
+        kolumnrubriker();
+        hist.slice().reverse().forEach(function (h) { rad([h.termin].concat(K.KATEGORIER.map(function (k) { return h[k[0]] ? String(h[k[0]]) : ''; })).concat([kr(h.summa)])); });
+      }
     } else if (typ === 'bank') {
       var sista = (ar.bankrader || []).reduce(function (m, r) { return r.datum.slice(0, 7) > m ? r.datum.slice(0, 7) : m; }, '');
       kol = [{ r: 'Månad', x: V, w: 40 }, { r: 'Banken', x: 95, align: R }, { r: 'Bokfört', x: 125, align: R }, { r: 'Skillnad', x: 155, align: R }, { r: 'Status', x: 160, w: 35 }];
@@ -3573,11 +4087,11 @@ var VERSIONER = [
     for (var i = 1; i <= sidor; i++) {
       doc.setPage(i);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
-      doc.text(pt((f.namn || '') + ' · ' + titel + ' ' + K.arNamn(ar)), V, 290);
+      doc.text(pt((f.namn || '') + ' · ' + titel + (typ === 'medl' ? '' : ' ' + K.arNamn(ar))), V, 290);
       doc.text('Sida ' + i + ' av ' + sidor, H, 290, { align: 'right' });
       doc.setTextColor(26, 26, 26);
     }
-    doc.setProperties({ title: titel + ' ' + K.arNamn(ar), author: f.namn || '', creator: 'Föreningsbokföring' });
+    doc.setProperties({ title: titel + (typ === 'medl' ? '' : ' ' + K.arNamn(ar)), author: f.namn || '', creator: 'Föreningsbokföring' });
     return doc.output('blob');
   }
 
@@ -3749,6 +4263,7 @@ var VERSIONER = [
     ['verifikationer', 'Verifikationer'],
     ['ny', 'Ny verifikation'],
     ['dokument', 'Fakturor och kvitton'],
+    ['medlemmar', 'Medlemmar'],
     ['huvudbok', 'Huvudbok'],
     ['rapporter', 'Rapporter'],
     ['bokslut', 'Bokslut'],
@@ -3784,6 +4299,7 @@ var VERSIONER = [
       verifikationer: vyVerifikationer,
       ny: vyNy,
       dokument: vyDokument,
+      medlemmar: vyMedlemmar,
       huvudbok: vyHuvudbok,
       rapporter: vyRapporter,
       bokslut: vyBokslut,
@@ -3889,7 +4405,7 @@ var VERSIONER = [
       var r = x.rad, f = x.f;
       var us = f.underlagIds.map(function (id) { return ar.underlag.find(function (u) { return u.id === id; }); });
       var kallor = us.map(kontoKallaText).filter(Boolean);
-      var kalla = f.kalla === 'underlag' ? '<span class="tag ok">' + esc(kallor.length && kallor.every(function (k) { return k === kallor[0]; }) ? kallor[0] : 'från underlag') + '</span>' : f.kalla === 'regel' ? '<span class="tag">som förra gången</span>' : '<span class="tag varning">välj konto</span>';
+      var kalla = f.kalla === 'avgift' ? '<span class="tag ok">' + (f.avgift.manuell ? 'ditt val' : 'känd betalare') + '</span>' : f.kalla === 'underlag' ? '<span class="tag ok">' + esc(kallor.length && kallor.every(function (k) { return k === kallor[0]; }) ? kallor[0] : 'från underlag') + '</span>' : f.kalla === 'regel' ? '<span class="tag">som förra gången</span>' : '<span class="tag varning">välj konto</span>';
       html += '<div class="card bankrad">' +
         '<div class="row" style="justify-content:space-between"><div><strong>' + esc(r.datum) + '</strong> ' + esc(r.text) +
         (r.referens ? ' <span class="faint">' + esc(r.referens) + '</span>' : '') + '</div>' +
@@ -3921,6 +4437,7 @@ var VERSIONER = [
             '<button class="btn btn-secondary btn-small" data-action="koppla-trolig" data-id="' + esc(r.id) + '" data-u="' + esc(u.id) + '" data-ar="' + esc(t.arId || '') + '">Koppla</button></div>';
         });
       }
+      html += avgiftIInkorg(r, f);
       html += '<div class="row" style="margin-top:8px">' +
         '<button class="btn btn-small" data-action="bokfor-rad" data-id="' + esc(r.id) + '"' + (f.komplett ? '' : ' disabled') + '>Bokför</button>' +
         '<button class="btn btn-secondary btn-small" data-action="redigera-rad" data-id="' + esc(r.id) + '">Dela upp eller ändra…</button></div></div>';
@@ -4638,9 +5155,358 @@ var VERSIONER = [
     return html;
   }
 
+
+  // ---------- Medlemmar och terminsavgifter ----------
+
+  function reg() { return store.medlemsregister || (store.medlemsregister = K.tomtRegister()); }
+  function sparaReg(r) { store.medlemsregister = r; spara(); }
+  function medlemAv(id) { return reg().medlemmar.find(function (m) { return m.id === id; }) || null; }
+  function sorteradeMedlemmar() { return reg().medlemmar.slice().sort(function (a, b) { return a.namn.localeCompare(b.namn, 'sv'); }); }
+  function arsavgiftFor(m) { return m.kategori === 'funktionar' ? (reg().arsavgift.funktionar || 0) : (reg().arsavgift.vanlig || 0); }
+
+  // Avgiften för en bankrad: det du valt i panelen, eller förslaget för en känd betalare när beloppet stämmer.
+  function avgiftForRad(rad) {
+    if (rad.belopp <= 0 || (inkorgVal[rad.id] || {}).ejAvgift) return null;
+    var betalare = K.tolkaBetalare(rad);
+    var u = avgiftUtkast[rad.id];
+    if (u) {
+      var poster = posterFranUtkast(u);
+      return { betalare: betalare || { nyckel: '', visning: '' }, termin: u.termin, poster: poster, manuell: true, komIhag: u.komIhag && !!betalare };
+    }
+    if (!betalare) return null;
+    var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: betalare.nyckel }, store.ar);
+    if (f.stammer && !f.tvetydig) return { betalare: betalare, termin: f.termin, poster: f.poster, forslag: f };
+    return null;
+  }
+
+  function posterFranUtkast(u) {
+    var poster = [];
+    u.rader.forEach(function (r) {
+      var t = 0, a = 0;
+      try { t = r.termin.trim() ? Math.abs(K.parseBelopp(r.termin)) : 0; } catch (e) { t = NaN; }
+      try { a = r.ars.trim() ? Math.abs(K.parseBelopp(r.ars)) : 0; } catch (e) { a = NaN; }
+      var m = medlemAv(r.medlem);
+      if (!m) return;
+      if (t || m.kategori !== 'funktionar') poster.push({ medlem: r.medlem, typ: 'termin', belopp: t });
+      if (a) poster.push({ medlem: r.medlem, typ: 'arsavgift', belopp: a });
+    });
+    return poster;
+  }
+
+  function oppnaAvgift(rad) {
+    var betalare = K.tolkaBetalare(rad);
+    var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: betalare ? betalare.nyckel : '' }, store.ar);
+    avgiftUtkast[rad.id] = {
+      termin: f.termin, komIhag: true,
+      rader: f.medlemIds.filter(function (id) { return f.poster.some(function (p) { return p.medlem === id; }); }).map(function (id) {
+        var t = 0, a = 0;
+        f.poster.forEach(function (p) { if (p.medlem === id) { if (p.typ === 'arsavgift') a += p.belopp; else t += p.belopp; } });
+        return { medlem: id, termin: t ? K.formatBelopp(t) : '', ars: a ? K.formatBelopp(a) : '' };
+      })
+    };
+  }
+
+  function standardRad(medlemId, termin) {
+    var m = medlemAv(medlemId);
+    var u = { medlem: medlemId, termin: '', ars: '' };
+    if (!m) return u;
+    var avg = K.terminsavgifter(reg(), termin).avgifter;
+    if (m.kategori !== 'funktionar' && avg[m.kategori]) u.termin = K.formatBelopp(avg[m.kategori]);
+    if (!K.harBetaltArsavgift(reg(), m.id, '20' + termin.slice(3, 5), store.ar) && arsavgiftFor(m)) u.ars = K.formatBelopp(arsavgiftFor(m));
+    return u;
+  }
+
+  function kontonSaknas() { return !reg().konton.medlemsavgift || !reg().konton.terminsavgift; }
+
+  // Panelen där man väljer vem en betalning gäller. laege: 'bokfor' (inläsning) eller 'koppla' (redan bokförd).
+  function avgiftPanel(rad, laege) {
+    var u = avgiftUtkast[rad.id];
+    var id = esc(rad.id);
+    var betalare = K.tolkaBetalare(rad);
+    var poster = posterFranUtkast(u);
+    var summa = poster.reduce(function (s, p) { return s + p.belopp; }, 0);
+    var html = '<div class="avgift-panel"><div class="row"><strong>Vem gäller betalningen?</strong>' +
+      '<label style="margin:0 0 0 auto">Termin <input data-avg="termin" data-id="' + id + '" value="' + esc(u.termin) + '" style="width:80px;display:inline-block" aria-label="Termin, t.ex. HT-26"></label></div>';
+    if (u.rader.length) {
+      html += '<div class="scroll"><table><thead><tr><th>Medlem</th><th class="num">Terminsavgift</th><th class="num">Årsavgift</th><th></th></tr></thead><tbody>' +
+        u.rader.map(function (r, i) {
+          var m = medlemAv(r.medlem) || { namn: '?', kategori: '' };
+          return '<tr><td>' + esc(m.namn) + ' <span class="faint">' + esc(K.KATEGORI_KORT[m.kategori] || '') + '</span></td>' +
+            '<td class="num"><input class="num" inputmode="decimal" data-avg="tb" data-i="' + i + '" data-id="' + id + '" value="' + esc(r.termin) + '" aria-label="Terminsavgift"></td>' +
+            '<td class="num"><input class="num" inputmode="decimal" data-avg="ab" data-i="' + i + '" data-id="' + id + '" value="' + esc(r.ars) + '" aria-label="Årsavgift"></td>' +
+            '<td><button class="btn btn-secondary btn-small" data-action="avg-ta-bort" data-i="' + i + '" data-id="' + id + '" aria-label="Ta bort">×</button></td></tr>';
+        }).join('') + '</tbody></table></div>';
+    } else html += '<p class="faint" style="margin:6px 0">Välj en eller flera medlemmar, eller lägg till en ny.</p>';
+    var valda = u.rader.map(function (r) { return r.medlem; });
+    var kvar = sorteradeMedlemmar().filter(function (m) { return valda.indexOf(m.id) < 0; });
+    html += '<div class="row" style="margin-top:6px">';
+    if (kvar.length) html += '<select data-avg="lagg-till" data-id="' + id + '" style="width:auto;max-width:100%"><option value="">Lägg till medlem…</option>' +
+      kvar.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.namn) + ' (' + esc(K.KATEGORI_KORT[m.kategori]) + ')</option>'; }).join('') + '</select>';
+    html += '<input data-avg="nynamn" data-id="' + id + '" placeholder="Ny medlem: namn" style="width:auto;flex:1 1 140px" value="' + esc(u.nyNamn || '') + '">' +
+      '<select data-avg="nykategori" data-id="' + id + '" style="width:auto">' + K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '"' + ((u.nyKategori || 'barn') === k[0] ? ' selected' : '') + '>' + esc(K.KATEGORI_KORT[k[0]]) + '</option>'; }).join('') + '</select>' +
+      '<button class="btn btn-secondary btn-small" data-action="avg-ny-medlem" data-id="' + id + '">Lägg till ny</button></div>';
+    var stammer = summa === rad.belopp && poster.length > 0 && !isNaN(summa);
+    html += '<p style="margin:8px 0 4px" data-avgsumma="' + id + '">' + summaText(summa, rad.belopp) + '</p>';
+    if (betalare) html += '<label style="font-weight:normal;display:flex;gap:6px;align-items:center"><input type="checkbox" data-avg="komihag" data-id="' + id + '"' + (u.komIhag ? ' checked' : '') + ' style="width:auto"> Kom ihåg att ' + esc(betalare.visning) + ' betalar för ' + (u.rader.length === 1 ? 'den här medlemmen' : 'de här medlemmarna') + '</label>';
+    if (laege === 'bokfor' && kontonSaknas()) html += '<p class="fel">Välj konton för medlemsavgift och terminsavgift först. <button class="btn btn-secondary btn-small" data-action="medl-vy" data-mvy="avgifter">Gå till Avgifter</button></p>';
+    html += '<div class="row" style="margin-top:6px">' +
+      (laege === 'koppla' ? '<button class="btn btn-small" data-action="avg-koppla" data-id="' + id + '"' + (stammer ? '' : ' disabled') + '>Koppla till medlemmarna</button>' : '') +
+      '<button class="btn btn-secondary btn-small" data-action="avg-avbryt" data-id="' + id + '">' + (laege === 'koppla' ? 'Avbryt' : 'Inte en medlemsavgift') + '</button></div></div>';
+    return html;
+  }
+
+  function summaText(summa, belopp) {
+    var stammer = summa === belopp && !isNaN(summa);
+    return 'Summa <strong>' + (isNaN(summa) ? '?' : kr(summa)) + '</strong> av ' + kr(belopp) + ' kr ' + (stammer ? '<span class="ok">stämmer</span>' : '<span class="fel">stämmer inte</span>');
+  }
+
+  // Uppdaterar summan och knapparna medan man skriver, utan att rita om sidan (då tappas klicket på knappen).
+  function uppdateraAvgiftSumma(id) {
+    var ar = aktivt();
+    var rad = ar.bankrader.find(function (r) { return r.id === id; });
+    var u = avgiftUtkast[id];
+    if (!rad || !u) return;
+    var poster = posterFranUtkast(u);
+    var summa = poster.reduce(function (s, p) { return s + p.belopp; }, 0);
+    var ok = summa === rad.belopp && poster.length > 0 && K.giltigtTerminId(u.termin);
+    document.querySelectorAll('[data-avgsumma]').forEach(function (el) { if (el.dataset.avgsumma === id) el.innerHTML = summaText(summa, rad.belopp); });
+    document.querySelectorAll('[data-action="avg-koppla"]').forEach(function (b) { if (b.dataset.id === id) b.disabled = !ok; });
+    document.querySelectorAll('[data-action="bokfor-rad"]').forEach(function (b) { if (b.dataset.id === id) b.disabled = !forslagMedVal(ar, rad).komplett; });
+  }
+
+  function avgiftIInkorg(r, f) {
+    if (r.belopp <= 0) return '';
+    if (avgiftUtkast[r.id]) return avgiftPanel(r, 'bokfor') + (f.avgiftFel ? '<p class="fel" style="margin:4px 0 0">' + esc(f.avgiftFel) + '</p>' : '');
+    var namn = function (poster) {
+      var ut = [];
+      poster.forEach(function (p) { var m = medlemAv(p.medlem); if (m && ut.indexOf(m.namn) < 0) ut.push(m.namn); });
+      return ut.join(', ');
+    };
+    if (f.kalla === 'avgift') {
+      var t = 0, a = 0;
+      f.avgift.poster.forEach(function (p) { if (p.typ === 'arsavgift') a += p.belopp; else t += p.belopp; });
+      return '<div class="row trolig" style="margin-top:8px"><span><strong>' + esc(f.avgift.termin) + ':</strong> ' + esc(namn(f.avgift.poster)) +
+        ' <span class="faint">(' + (t ? 'terminsavgift ' + kr(t) : '') + (t && a ? ' + ' : '') + (a ? 'årsavgift ' + kr(a) : '') + ')</span></span>' +
+        '<span><button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(r.id) + '">Ändra…</button> ' +
+        '<button class="btn btn-secondary btn-small" data-action="inte-avgift" data-id="' + esc(r.id) + '">Inte en avgift</button></span></div>';
+    }
+    if ((inkorgVal[r.id] || {}).ejAvgift) return '';
+    var b = K.tolkaBetalare(r);
+    if (!b && !/swish|bankgiro/i.test(r.text)) return '';
+    var kand = b ? K.hittaBetalare(reg(), b.nyckel) : null;
+    var tips = kand && kand.medlemmar.length ? 'Betalar för ' + kand.medlemmar.map(function (id) { var m = medlemAv(id); return m ? m.namn : '?'; }).join(', ') + '. Beloppet stämmer inte, eller så är det oklart vem.' : '';
+    return '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(r.id) + '">Terminsavgift…</button>' +
+      (tips ? '<span class="faint">' + esc(tips) + '</span>' : '') + '</div>';
+  }
+
+  var MEDLEMVYER = [['statistik', 'Statistik'], ['koppla', 'Att koppla'], ['lista', 'Medlemmar'], ['betalare', 'Betalare'], ['avgifter', 'Avgifter']];
+
+  function vyMedlemmar(ar) {
+    var r = reg();
+    var okopplade = K.okoppladeInbetalningar(r, ar, store.aktivt);
+    var html = '<div class="row" style="margin-top:12px">' + MEDLEMVYER.map(function (v) {
+      var n = v[0] === 'koppla' && okopplade.length ? ' (' + okopplade.length + ')' : '';
+      return '<button class="btn ' + (medlemVy === v[0] ? '' : 'btn-secondary') + ' btn-small" data-action="medl-vy" data-mvy="' + v[0] + '">' + v[1] + n + '</button>';
+    }).join('') + '</div>';
+    if (medlemVy === 'koppla') return html + vyMedlemKoppla(ar, okopplade);
+    if (medlemVy === 'lista') return html + vyMedlemLista();
+    if (medlemVy === 'betalare') return html + vyBetalare();
+    if (medlemVy === 'avgifter') return html + vyAvgifter(ar);
+    return html + vyMedlemStatistik(ar);
+  }
+
+  function aktuellTermin(ar) {
+    var t = K.terminForDatum(idag() >= ar.start && idag() <= ar.slut ? idag() : ar.slut);
+    return t;
+  }
+
+  function vyMedlemStatistik(ar) {
+    var r = reg();
+    var terminer = K.terminerMedData(r);
+    var nu = aktuellTermin(ar);
+    if (terminer.indexOf(nu) < 0) terminer.push(nu);
+    terminer.sort(function (a, b) { return K.terminSortering(a) < K.terminSortering(b) ? -1 : 1; });
+    if (!valdTermin || terminer.indexOf(valdTermin) < 0) valdTermin = nu;
+    var s = K.terminsstatistik(r, valdTermin, store.ar);
+    var html = '<div class="card"><div class="row"><label for="mTermin" style="margin:0">Termin</label><select id="mTermin" style="width:auto">' +
+      terminer.slice().reverse().map(function (t) { return '<option value="' + t + '"' + (t === valdTermin ? ' selected' : '') + '>' + esc(K.terminNamn(t)) + ' (' + t + ')</option>'; }).join('') + '</select></div>' +
+      medlPdfKnappar(valdTermin);
+    if (!r.medlemmar.length) {
+      html += '<p class="muted">Inga medlemmar ännu. När du bokför en Swish-inbetalning under Läs in kan du välja <strong>Terminsavgift…</strong> och lägga till medlemmen där. ' +
+        'Betalningar som redan är bokförda kopplar du under <strong>Att koppla</strong>. Ange först avgifterna under <strong>Avgifter</strong>.</p>';
+    }
+    html += '<div class="nyckeltal"><div><span class="faint">Betalande</span><strong>' + s.totalt.antal + '</strong></div>' +
+      '<div><span class="faint">Terminsavgifter</span><strong>' + kr(s.totalt.termin) + '</strong></div>' +
+      '<div><span class="faint">Årsavgifter</span><strong>' + kr(s.totalt.arsavgift) + '</strong></div>' +
+      '<div><span class="faint">Slutat sedan förra terminen</span><strong>' + s.slutat.length + '</strong></div></div>';
+    html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Kategori</th><th class="num">Antal</th><th class="num">Avgift</th><th class="num">Terminsavgifter</th><th class="num">Årsavgifter</th></tr></thead><tbody>' +
+      K.KATEGORIER.filter(function (k) { return s.perKategori[k[0]].antal; }).map(function (k) {
+        var x = s.perKategori[k[0]];
+        return '<tr><td><strong>' + esc(K.KATEGORI_KORT[k[0]]) + '</strong></td><td class="num" data-etikett="Antal">' + x.antal + '</td>' +
+          '<td class="num"' + (s.avgifter[k[0]] ? ' data-etikett="Avgift">' + kr(s.avgifter[k[0]]) : '>') + '</td>' +
+          '<td class="num" data-etikett="Terminsavgifter">' + kr(x.termin) + '</td><td class="num" data-etikett="Årsavgifter">' + kr(x.arsavgift) + '</td></tr>';
+      }).join('') +
+      '<tr class="total"><td>Totalt</td><td class="num" data-etikett="Antal">' + s.totalt.antal + '</td><td></td><td class="num" data-etikett="Terminsavgifter">' + kr(s.totalt.termin) + '</td><td class="num" data-etikett="Årsavgifter">' + kr(s.totalt.arsavgift) + '</td></tr></tbody></table></div></div>';
+    html += '<h2>Har betalat (' + s.betalande.length + ')</h2>';
+    html += s.betalande.length ? '<div class="scroll"><table class="kortlista"><thead><tr><th>Namn</th><th>Kategori</th><th>Datum</th><th class="num">Terminsavgift</th><th class="num">Årsavgift</th></tr></thead><tbody>' +
+      s.betalande.map(function (b) {
+        var lite = b.forvantat != null && b.termin < b.forvantat;
+        return '<tr><td><strong>' + esc(b.namn) + '</strong></td><td data-etikett="Kategori">' + esc(K.KATEGORI_KORT[b.kategori] || '') + '</td><td data-etikett="Datum">' + esc(b.datum.join(', ')) + '</td>' +
+          '<td class="num' + (lite ? ' fel' : '') + '" data-etikett="Terminsavgift">' + kr(b.termin) + '</td><td class="num"' + (b.arsavgift ? ' data-etikett="Årsavgift">' + kr(b.arsavgift) : '>') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<p class="muted">Inga registrerade betalningar för terminen.</p>';
+    if (s.forLite.length) html += '<h2>Har betalat mindre än avgiften (' + s.forLite.length + ')</h2><ul>' + s.forLite.map(function (b) { return '<li>' + esc(b.namn) + ': ' + kr(b.termin) + ' av ' + kr(b.forvantat) + ' kr</li>'; }).join('') + '</ul>';
+    html += '<h2>Betalade ' + esc(K.foregaendeTermin(valdTermin)) + ' men inte ' + esc(valdTermin) + ' (' + s.slutat.length + ')</h2>';
+    html += s.slutat.length ? '<ul>' + s.slutat.map(function (m) { return '<li>' + esc(m.namn) + ' <span class="faint">' + esc(K.KATEGORI_KORT[m.kategori] || '') + '</span></li>'; }).join('') + '</ul>' : '<p class="muted">Inga.</p>';
+    var h = K.terminshistorik(r, store.ar);
+    if (h.length) {
+      html += '<h2>Utveckling</h2><div class="scroll"><table class="kortlista"><thead><tr><th>Termin</th>' + K.KATEGORIER.map(function (k) { return '<th class="num">' + esc(K.KATEGORI_KORT[k[0]]) + '</th>'; }).join('') + '<th class="num">Totalt</th><th class="num">Summa</th></tr></thead><tbody>' +
+        h.slice().reverse().map(function (x) {
+          return '<tr><td><strong>' + esc(x.termin) + '</strong></td>' + K.KATEGORIER.map(function (k) { return '<td class="num"' + (x[k[0]] ? ' data-etikett="' + esc(K.KATEGORI_KORT[k[0]]) + '">' + x[k[0]] : '>') + '</td>'; }).join('') +
+            '<td class="num" data-etikett="Totalt">' + x.antal + '</td><td class="num" data-etikett="Summa">' + kr(x.summa) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    return html;
+  }
+
+  function vyMedlemKoppla(ar, okopplade) {
+    var html = '<p class="muted">Swish-inbetalningar i ' + esc(store.aktivt) + ' som redan är bokförda men inte kopplade till någon medlem. Kopplingen ändrar inte bokföringen, den används bara för statistiken.</p>';
+    if (!okopplade.length) return html + '<p class="ok">Alla är kopplade.</p>';
+    okopplade.forEach(function (rad) {
+      var b = K.tolkaBetalare(rad);
+      var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: b.nyckel }, store.ar);
+      html += '<div class="card bankrad"><div class="row" style="justify-content:space-between"><div><strong>' + esc(rad.datum) + '</strong> ' + esc(b.visning) +
+        ' <button class="tag knapp-tag" data-action="oppna-ver" data-nr="' + rad.verifikation + '">Ver ' + rad.verifikation + '</button></div><div class="belopp ok">' + kr(rad.belopp) + '</div></div>';
+      if (avgiftUtkast[rad.id]) html += avgiftPanel(rad, 'koppla');
+      else {
+        html += '<div class="row" style="margin-top:8px">';
+        if (f.stammer && !f.tvetydig) {
+          var namn = [];
+          f.poster.forEach(function (p) { var m = medlemAv(p.medlem); if (m && namn.indexOf(m.namn) < 0) namn.push(m.namn); });
+          html += '<span><strong>' + esc(f.termin) + ':</strong> ' + esc(namn.join(', ')) + '</span><button class="btn btn-small" data-action="avg-koppla-forslag" data-id="' + esc(rad.id) + '">Koppla</button>';
+        }
+        html += '<button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(rad.id) + '">' + (f.stammer && !f.tvetydig ? 'Ändra…' : 'Välj medlemmar…') + '</button>' +
+          '<button class="btn btn-secondary btn-small" data-action="avg-ignorera" data-id="' + esc(rad.id) + '">Inte en avgift</button></div>';
+      }
+      html += '</div>';
+    });
+    return html;
+  }
+
+  function vyMedlemLista() {
+    var r = reg();
+    var betalareFor = function (id) { return r.betalare.filter(function (b) { return b.medlemmar.indexOf(id) >= 0; }).map(function (b) { return b.namn || b.visning; }); };
+    var senast = {};
+    K.giltigaBetalningar(r, store.ar).forEach(function (b) { b.poster.forEach(function (p) { if (!senast[p.medlem] || K.terminSortering(b.termin) > K.terminSortering(senast[p.medlem])) senast[p.medlem] = b.termin; }); });
+    var html = '<div class="card"><h2 style="margin-top:0">Ny medlem</h2><div class="row"><input id="nyMedlemNamn" placeholder="Namn" style="flex:1 1 180px;width:auto">' +
+      '<select id="nyMedlemKategori" style="width:auto">' + K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '">' + esc(k[1]) + '</option>'; }).join('') + '</select>' +
+      '<button class="btn btn-small" data-action="medlem-ny">Lägg till</button></div>' +
+      '<p class="faint">Medlemsregistret sparas tillsammans med bokföringen i föreningens OneDrive och i säkerhetskopian, aldrig någon annanstans.</p></div>';
+    html += '<h2>Medlemmar (' + r.medlemmar.length + ')</h2>';
+    if (!r.medlemmar.length) return html + '<p class="muted">Inga medlemmar ännu.</p>';
+    html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Namn</th><th>Kategori</th><th>Betalare</th><th>Senast betalt</th><th></th></tr></thead><tbody>' +
+      sorteradeMedlemmar().map(function (m) {
+        return '<tr><td data-etikett="Namn"><input data-medl="namn" data-id="' + esc(m.id) + '" value="' + esc(m.namn) + '" aria-label="Namn"></td>' +
+          '<td data-etikett="Kategori"><select data-medl="kategori" data-id="' + esc(m.id) + '" aria-label="Kategori">' + K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '"' + (k[0] === m.kategori ? ' selected' : '') + '>' + esc(K.KATEGORI_KORT[k[0]]) + '</option>'; }).join('') + '</select></td>' +
+          '<td data-etikett="Betalare">' + esc(betalareFor(m.id).join(', ')) + '</td><td data-etikett="Senast betalt">' + esc(senast[m.id] || '') + '</td>' +
+          '<td><button class="btn btn-secondary btn-small" data-action="medlem-ta-bort" data-id="' + esc(m.id) + '" aria-label="Ta bort ' + esc(m.namn) + '">×</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    return html;
+  }
+
+  function vyBetalare() {
+    var r = reg();
+    var html = '<p class="muted">Ett Swish-nummer eller en bankgiroreferens som appen känner igen. Samma medlem kan ha flera betalare, till exempel båda föräldrarna, och en betalare kan betala för flera. Ge gärna betalaren ett namn, till exempel "Fritidskortet".</p>';
+    if (!r.betalare.length) return html + '<p class="muted">Inga betalare ännu. De läggs till när du kopplar en betalning till en medlem.</p>';
+    r.betalare.slice().sort(function (a, b) { return (a.namn || a.visning).localeCompare(b.namn || b.visning, 'sv'); }).forEach(function (b) {
+      var n = esc(b.nyckel);
+      var kvar = sorteradeMedlemmar().filter(function (m) { return b.medlemmar.indexOf(m.id) < 0; });
+      html += '<div class="card"><div class="row" style="justify-content:space-between"><strong>' + esc(b.visning) + '</strong>' +
+        '<button class="btn btn-secondary btn-small" data-action="betalare-ta-bort" data-nyckel="' + n + '">Ta bort betalaren</button></div>' +
+        '<label>Namn (frivilligt)</label><input data-betn="1" data-nyckel="' + n + '" value="' + esc(b.namn || '') + '" placeholder="t.ex. förälder till …">' +
+        '<div class="row" style="margin-top:8px">Betalar för: ' + (b.medlemmar.length ? b.medlemmar.map(function (id) {
+          var m = medlemAv(id);
+          return '<span class="tag">' + esc(m ? m.namn : '?') + ' <button class="knapp-tag" style="border:0;padding:0 2px" data-action="betalare-slapp" data-nyckel="' + n + '" data-id="' + esc(id) + '" aria-label="Ta bort koppling">×</button></span>';
+        }).join(' ') : '<span class="faint">ingen</span>') +
+        (kvar.length ? '<select data-betl="1" data-nyckel="' + n + '" style="width:auto"><option value="">Lägg till…</option>' + kvar.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.namn) + '</option>'; }).join('') + '</select>' : '') + '</div></div>';
+    });
+    return html;
+  }
+
+  function kontoNamnIAr(nr) {
+    var namn = '';
+    Object.keys(store.ar).forEach(function (id) { var k = store.ar[id].kontoplan.find(function (x) { return x.nr === nr; }); if (k && !namn) namn = k.namn; });
+    return namn;
+  }
+
+  // Lägger in kontot i alla öppna år där det saknas, så att avgifterna kan bokföras där.
+  function sakerstallKonto(nr, standardnamn) {
+    var namn = kontoNamnIAr(nr) || standardnamn;
+    Object.keys(store.ar).forEach(function (id) {
+      var a = store.ar[id];
+      if (a.lastTom === a.slut || a.kontoplan.some(function (k) { return k.nr === nr; })) return;
+      store.ar[id] = K.laggTillKonto(a, nr, namn);
+    });
+  }
+
+  function vyAvgifter(ar) {
+    var r = reg();
+    var forslag = K.foreslaAvgiftskonton(ar);
+    var kontoFalt = function (typ, rubrik, standard) {
+      var nr = r.konton[typ];
+      return '<div><label>' + rubrik + '</label><input list="intaktskonton" inputmode="numeric" data-mkonto="' + typ + '" value="' + esc(nr) + '" placeholder="' + esc(forslag[typ]) + '">' +
+        '<div class="faint">' + (nr ? esc(kontoNamnIAr(nr) || standard) : 'Förslag: ' + esc(forslag[typ]) + ' ' + esc(kontoNamnIAr(forslag[typ]) || standard)) + '</div></div>';
+    };
+    var html = '<div class="card"><h2 style="margin-top:0">Konton</h2><datalist id="intaktskonton">' + ar.kontoplan.filter(function (k) { return k.nr[0] === '3'; }).map(function (k) { return '<option value="' + k.nr + '">' + esc(k.namn) + '</option>'; }).join('') + '</datalist>' +
+      '<div class="grid2">' + kontoFalt('medlemsavgift', 'Medlemsavgifter (årsavgiften)', 'Medlemsavgifter') + kontoFalt('terminsavgift', 'Terminsavgifter', 'Terminsavgifter') + '</div>' +
+      (kontonSaknas() ? '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="avgiftskonton-forslag">Använd förslagen</button></div>' : '') +
+      '<p class="faint">Finns kontot inte i kontoplanen läggs det till i alla år som inte är låsta.</p></div>';
+    html += '<div class="card"><h2 style="margin-top:0">Årsavgift</h2><p class="faint" style="margin-top:0">Tas ut första gången under kalenderåret som en medlem betalar terminsavgift.</p><div class="grid2">' +
+      '<div><label>Aktiv medlem</label><input class="num" inputmode="decimal" data-mars="vanlig" value="' + (r.arsavgift.vanlig ? kr(r.arsavgift.vanlig) : '') + '" placeholder="0,00"></div>' +
+      '<div><label>Funktionär, tränare eller stödmedlem</label><input class="num" inputmode="decimal" data-mars="funktionar" value="' + (r.arsavgift.funktionar ? kr(r.arsavgift.funktionar) : '') + '" placeholder="0,00"></div></div></div>';
+    var kats = K.KATEGORIER.filter(function (k) { return k[0] !== 'funktionar'; });
+    html += '<div class="card"><h2 style="margin-top:0">Terminsavgifter</h2>';
+    if (r.terminer.length) {
+      html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Termin</th>' + kats.map(function (k) { return '<th class="num">' + esc(k[1]) + '</th>'; }).join('') + '<th></th></tr></thead><tbody>' +
+        r.terminer.slice().reverse().map(function (t) {
+          return '<tr><td><strong>' + esc(t.id) + '</strong></td>' + kats.map(function (k) {
+            var v = t.avgifter[k[0]];
+            return '<td class="num" data-etikett="' + esc(k[1]) + '"><input class="num" style="width:100px" inputmode="decimal" data-mtermin="' + esc(t.id) + '" data-kat="' + k[0] + '" value="' + (v != null ? kr(v) : '') + '" aria-label="' + esc(k[1]) + ' ' + esc(t.id) + '"></td>';
+          }).join('') + '<td><button class="btn btn-secondary btn-small" data-action="termin-ta-bort" data-id="' + esc(t.id) + '" aria-label="Ta bort ' + esc(t.id) + '">×</button></td></tr>';
+        }).join('') + '</tbody></table></div>';
+    } else html += '<p class="muted">Inga terminer ännu. Lägg till den första och fyll i avgifterna, eller läs in dem från en fil med föreningsuppgifter under År och arkiv.</p>';
+    html += '<div class="row" style="margin-top:8px"><input id="nyTermin" placeholder="' + esc(nyTerminForslag(ar)) + '" value="' + esc(nyTerminForslag(ar)) + '" style="width:100px"><button class="btn btn-secondary btn-small" data-action="termin-ny">Lägg till termin</button></div>' +
+      '<p class="faint">Saknas en termin används avgifterna från den senaste terminen före. Om familjer: appen föreslår årsavgift för alla, och du ändrar från fall till fall.</p></div>';
+    html += '<div class="card"><h2 style="margin-top:0">Rensa medlemsregistret</h2><p class="faint" style="margin-top:0">Tar bort alla medlemmar, betalare och kopplade betalningar. Bokföringen påverkas inte. Avgifter och konton finns kvar.</p>' +
+      '<button class="btn btn-secondary btn-small" data-action="register-rensa">Rensa medlemsregistret</button></div>';
+    return html;
+  }
+
+  function nyTerminForslag(ar) {
+    var r = reg();
+    if (!r.terminer.length) return aktuellTermin(ar);
+    return K.nastaTermin(r.terminer[r.terminer.length - 1].id);
+  }
+
+  // Kopplar en redan bokförd inbetalning till medlemmar, utan att ändra bokföringen.
+  function kopplaBokford(radId, termin, poster, komIhag) {
+    var rad = aktivt().bankrader.find(function (r) { return r.id === radId; });
+    var b = K.tolkaBetalare(rad);
+    var r = K.registreraBetalning(reg(), { datum: rad.datum, belopp: rad.belopp, termin: termin, nyckel: b ? b.nyckel : '', arId: store.aktivt, ver: rad.verifikation, bankradId: rad.id, poster: poster });
+    if (komIhag && b) r = K.kopplaBetalare(r, b, poster.map(function (p) { return p.medlem; }));
+    sparaReg(r);
+    visa('Betalningen ' + rad.datum + ' är kopplad.');
+  }
+
+  function medlPdfKnappar(termin) {
+    var namn = K.sakertNamn('Terminsavgifter ' + termin + '.pdf');
+    var nyckel = 'medl-' + termin + '-' + datastampel(reg(), JSON.stringify(Object.keys(store.ar).map(function (id) { return store.ar[id].verifikationer.length; })) + (store.forening.namn || '') + (logoUrl ? logoUrl.length : 0)) + '|' + namn;
+    forbered(nyckel, function () { return skapaRapportPdf(aktivt(), 'medl', termin); });
+    return '<div class="row ej-utskrift" style="margin:10px 0">' + pdfKnappar(nyckel, 'skriv-ut') + '</div>';
+  }
+
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport]');
@@ -4666,6 +5532,14 @@ var VERSIONER = [
     if (t.dataset.inkorg) {
       inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { [t.dataset.inkorg]: t.value });
     }
+    if (t.dataset.avg && avgiftUtkast[t.dataset.id]) {
+      var au = avgiftUtkast[t.dataset.id];
+      if (t.dataset.avg === 'tb') au.rader[Number(t.dataset.i)].termin = t.value;
+      if (t.dataset.avg === 'ab') au.rader[Number(t.dataset.i)].ars = t.value;
+      if (t.dataset.avg === 'termin') au.termin = t.value.trim().toUpperCase();
+      if (t.dataset.avg === 'nynamn') au.nyNamn = t.value;
+      if (t.dataset.avg !== 'nynamn') uppdateraAvgiftSumma(t.dataset.id);
+    }
     if (dokUtkast && t.dataset.dok) { dokUtkast[t.dataset.dok] = t.value; uppdateraDokStatus(); }
     if (dokUtkast && t.dataset.dokm) { dokUtkast.mottagare[t.dataset.dokm] = t.value; uppdateraDokStatus(); }
     if (dokUtkast && t.dataset.dokrad != null && t.dataset.f !== 'artikelId') { dokUtkast.rader[Number(t.dataset.dokrad)][t.dataset.f] = t.value; uppdateraDokStatus(); }
@@ -4674,6 +5548,7 @@ var VERSIONER = [
   document.addEventListener('change', function (e) {
     if (e.target.id === 'valjAr') { store.aktivt = e.target.value; spara(); meddelande = null; utkast = nyttUtkast(); render(); }
     if (e.target.id === 'hbKonto') { valtKonto = e.target.value; render(); }
+    if (e.target.id === 'mTermin') { valdTermin = e.target.value; render(); }
     var t = e.target;
     if (t.dataset.inkorg === 'konto') render();
     if (dokUtkast && t.dataset.dok) { dokUtkast[t.dataset.dok] = t.value; uppdateraDokStatus(); }
@@ -4694,7 +5569,38 @@ var VERSIONER = [
       }
       render();
     }
-    if (lasLage() && (t.dataset.forening || t.dataset.lista || t.dataset.underlag || t.dataset.arsmote)) { visa('Endast läsning.', true); return; }
+    if (lasLage() && (t.dataset.forening || t.dataset.lista || t.dataset.underlag || t.dataset.arsmote || t.dataset.avg || t.dataset.medl || t.dataset.betn || t.dataset.betl || t.dataset.mkonto || t.dataset.mars || t.dataset.mtermin)) { visa('Endast läsning.', true); return; }
+    if (t.dataset.avg && avgiftUtkast[t.dataset.id]) {
+      var au2 = avgiftUtkast[t.dataset.id];
+      if (t.dataset.avg === 'lagg-till' && t.value) au2.rader.push(standardRad(t.value, K.giltigtTerminId(au2.termin) ? au2.termin : K.terminForDatum(idag())));
+      if (t.dataset.avg === 'nykategori') au2.nyKategori = t.value;
+      if (t.dataset.avg === 'komihag') au2.komIhag = t.checked;
+      if (t.dataset.avg === 'termin' && !K.giltigtTerminId(au2.termin)) visa('Terminen ska skrivas som VT-27 eller HT-26.', true);
+      else if (['lagg-till', 'nykategori', 'komihag'].indexOf(t.dataset.avg) >= 0) render();
+      return;
+    }
+    try {
+      if (t.dataset.medl) { var andr = {}; andr[t.dataset.medl] = t.value; sparaReg(K.andraMedlem(reg(), t.dataset.id, andr)); if (t.dataset.medl === 'kategori') render(); return; }
+      if (t.dataset.betn) { sparaReg(K.andraBetalare(reg(), t.dataset.nyckel, { namn: t.value })); return; }
+      if (t.dataset.betl && t.value) { var bet = K.hittaBetalare(reg(), t.dataset.nyckel); sparaReg(K.kopplaBetalare(reg(), bet, [t.value])); render(); return; }
+      if (t.dataset.mkonto) {
+        var nr = t.value.trim();
+        if (nr && !K.giltigtKontonummer(nr)) throw new Error('Kontot ska vara fyra siffror, t.ex. 3010.');
+        if (nr) sakerstallKonto(nr, t.dataset.mkonto === 'medlemsavgift' ? 'Medlemsavgifter' : 'Terminsavgifter');
+        var rk = reg(); rk.konton = Object.assign({}, rk.konton); rk.konton[t.dataset.mkonto] = nr;
+        sparaReg(rk); render(); return;
+      }
+      if (t.dataset.mars) {
+        var ra = reg(); ra.arsavgift = Object.assign({}, ra.arsavgift); ra.arsavgift[t.dataset.mars] = t.value.trim() ? Math.abs(K.parseBelopp(t.value)) : 0;
+        sparaReg(ra); return;
+      }
+      if (t.dataset.mtermin) {
+        var rt = reg(); var term = rt.terminer.find(function (x) { return x.id === t.dataset.mtermin; });
+        var avg = Object.assign({}, term.avgifter);
+        if (t.value.trim()) avg[t.dataset.kat] = Math.abs(K.parseBelopp(t.value)); else delete avg[t.dataset.kat];
+        sparaReg(K.sattTermin(rt, term.id, avg)); return;
+      }
+    } catch (err) { visa(err.fel ? err.fel.join(' ') : err.message, true); return; }
     if (t.dataset.arsmote) {
       var arA = aktivt();
       var am = arsmoteData(arA);
@@ -4844,6 +5750,90 @@ var VERSIONER = [
     },
     'rensa-logg': function () { logg = []; render(); },
     'visa-fil': function (t) { visaFil(t.dataset.id); },
+    'medl-vy': function (t) { vy = 'medlemmar'; medlemVy = t.dataset.mvy; meddelande = null; render(); },
+    'avg-oppna': function (t) {
+      var rad = aktivt().bankrader.find(function (r) { return r.id === t.dataset.id; });
+      inkorgVal[rad.id] = Object.assign({}, inkorgVal[rad.id], { ejAvgift: false });
+      oppnaAvgift(rad);
+      render();
+    },
+    'avg-avbryt': function (t) {
+      var iInkorg = vy === 'inlasning';
+      delete avgiftUtkast[t.dataset.id];
+      if (iInkorg) inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { ejAvgift: true });
+      render();
+    },
+    'inte-avgift': function (t) { inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { ejAvgift: true }); render(); },
+    'avg-ta-bort': function (t) { avgiftUtkast[t.dataset.id].rader.splice(Number(t.dataset.i), 1); render(); },
+    'avg-ny-medlem': function (t) {
+      var u = avgiftUtkast[t.dataset.id];
+      var res = K.laggTillMedlem(reg(), { namn: u.nyNamn, kategori: u.nyKategori || 'barn' });
+      sparaReg(res.reg);
+      u.rader.push(standardRad(res.medlem.id, u.termin));
+      u.nyNamn = '';
+      render();
+    },
+    'avg-koppla': function (t) {
+      var u = avgiftUtkast[t.dataset.id];
+      kopplaBokford(t.dataset.id, u.termin, posterFranUtkast(u), u.komIhag);
+      delete avgiftUtkast[t.dataset.id];
+    },
+    'avg-koppla-forslag': function (t) {
+      var rad = aktivt().bankrader.find(function (r) { return r.id === t.dataset.id; });
+      var b = K.tolkaBetalare(rad);
+      var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: b.nyckel }, store.ar);
+      kopplaBokford(rad.id, f.termin, f.poster, false);
+    },
+    'avg-ignorera': function (t) {
+      var r = reg();
+      sparaReg(Object.assign({}, r, { ignorerade: r.ignorerade.concat([store.aktivt + '|' + t.dataset.id]) }));
+      render();
+    },
+    'medlem-ny': function () {
+      var res = K.laggTillMedlem(reg(), { namn: document.getElementById('nyMedlemNamn').value, kategori: document.getElementById('nyMedlemKategori').value });
+      sparaReg(res.reg);
+      visa(res.medlem.namn + ' är tillagd.');
+    },
+    'medlem-ta-bort': function (t) {
+      var m = medlemAv(t.dataset.id);
+      if (!window.confirm('Ta bort ' + m.namn + ' ur medlemsregistret?')) return;
+      sparaReg(K.taBortMedlem(reg(), t.dataset.id));
+      render();
+    },
+    'betalare-ta-bort': function (t) {
+      if (!window.confirm('Ta bort betalaren? Registrerade betalningar finns kvar.')) return;
+      sparaReg(K.taBortBetalare(reg(), t.dataset.nyckel));
+      render();
+    },
+    'betalare-slapp': function (t) { sparaReg(K.andraBetalare(reg(), t.dataset.nyckel, { taBortMedlem: t.dataset.id })); render(); },
+    'avgiftskonton-forslag': function () {
+      var f = K.foreslaAvgiftskonton(aktivt());
+      var r = reg();
+      if (!r.konton.medlemsavgift) { sakerstallKonto(f.medlemsavgift, 'Medlemsavgifter'); r.konton.medlemsavgift = f.medlemsavgift; }
+      if (!r.konton.terminsavgift) { sakerstallKonto(f.terminsavgift, 'Terminsavgifter'); r.konton.terminsavgift = f.terminsavgift; }
+      sparaReg(r);
+      visa('Avgifterna bokförs på ' + r.konton.medlemsavgift + ' och ' + r.konton.terminsavgift + '.');
+    },
+    'termin-ny': function () {
+      var id = document.getElementById('nyTermin').value.trim().toUpperCase();
+      var r = reg();
+      if (r.terminer.some(function (x) { return x.id === id; })) throw new Error('Terminen ' + id + ' finns redan.');
+      sparaReg(K.sattTermin(r, id, K.terminsavgifter(r, id).avgifter));
+      render();
+    },
+    'termin-ta-bort': function (t) {
+      if (!window.confirm('Ta bort avgifterna för ' + t.dataset.id + '?')) return;
+      sparaReg(K.taBortTermin(reg(), t.dataset.id));
+      render();
+    },
+    'register-rensa': function () {
+      if (!window.confirm('Ta bort alla medlemmar, betalare och kopplade betalningar? Bokföringen påverkas inte.')) return;
+      if (!window.confirm('Är du säker? Det går inte att ångra, utom genom att läsa in en säkerhetskopia.')) return;
+      var r = reg();
+      sparaReg(Object.assign(K.tomtRegister(), { terminer: r.terminer, arsavgift: r.arsavgift, konton: r.konton }));
+      avgiftUtkast = {};
+      visa('Medlemsregistret är rensat.');
+    },
     'bokfor-rad': function (t) {
       var ar = aktivt();
       var rad = ar.bankrader.find(function (r) { return r.id === t.dataset.id; });
@@ -5236,7 +6226,7 @@ var VERSIONER = [
           return logo.then(function (medLogo) {
             spara();
             var a = res.antal;
-            visa('Inläst: ' + a.uppgifter + ' uppgifter, ' + a.adresser + ' adresser, ' + a.kontakter + ' kontaktpersoner och ' + a.artiklar + ' artiklar' + (medLogo ? ' samt logotypen' : '') + '. Uppgifter som redan var ifyllda har behållits.');
+            visa('Inläst: ' + a.uppgifter + ' uppgifter, ' + a.adresser + ' adresser, ' + a.kontakter + ' kontaktpersoner och ' + a.artiklar + ' artiklar' + (a.terminer ? ', ' + a.terminer + ' avgifter för medlemmar' : '') + (medLogo ? ' samt logotypen' : '') + '. Uppgifter som redan var ifyllda har behållits.');
           });
         }).catch(function (err) { visa(err.fel ? err.fel.join(' ') : 'Filen kunde inte läsas: ' + err.message, true); });
       };
@@ -5273,6 +6263,10 @@ var VERSIONER = [
           if (fel.length) throw new Error('Säkerhetskopian har fel: ' + fel.slice(0, 5).join(' '));
           if (Object.keys(store.ar).length && !window.confirm('Ersätta all bokföring i webbläsaren med säkerhetskopian?')) return;
           store = d;
+          if (!store.regler) store.regler = [];
+          if (!store.motpartsregler) store.motpartsregler = [];
+          LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
+          store.medlemsregister = K.normaliseraRegister(store.medlemsregister);
           if (!store.ar[store.aktivt]) store.aktivt = Object.keys(store.ar).sort().pop() || null;
           spara();
           vy = 'verifikationer';
