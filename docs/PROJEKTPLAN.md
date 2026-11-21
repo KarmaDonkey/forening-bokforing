@@ -66,10 +66,15 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Fas 3: tidigare år läses in som låsta arkivkopior från Excel-arbetsböckerna (version 1.14), med avgifterna i medlemsregistret. Nästa steg är att kunna föra över ett år helt, med underlag kopplade till verifikationerna, ett år i taget.
 - Fel som hittas i gamla år: arkivkopian ändras inte. Felet antecknas på arkivkopian och rättas i det öppna året om det påverkar saldona i dag.
 
-## Mappar i OneDrive (från version 1.14)
+## Mappar i OneDrive (från version 1.26)
 
-- Appens mapp, t.ex. `Föreningen/Föreningsbokföring`, med undermapparna `Bokföring och underlag` (bokföringen, logotypen och årsmappar med underlag; kan delas med revisorn) och `Medlemsregister` (delas inte).
-- Föreningens Excel-filer ligger kvar där de är och läses in i appen som arkivkopior.
+- En samlad mapp, t.ex. `Föreningen/Föreningsadministration`, med allt appen arbetar med och en genväg till appen. Andra mappar ligger utanför och rörs inte.
+  - `Bokföring`: bokföringen, rollerna och underlagen per år. Kassör och bokförare ändrar; styrelsen och revisorn läser.
+  - `Medlemsregister`: registret (och `Äldre medlemsregister`). Kassör och bokförare ändrar; styrelsen läser; aldrig revisorn.
+  - `Styrelsearbete`: `Möten` (ÅM 2026, ÅM 2026 extra, SM 2026, SM 2026 konstituerande, eller årsmappar), `Appens filer` och föreningens egna mappar. Styrelsen ändrar; revisorn läser; filen med förtroendeuppdragen delas för sig med valberedningen.
+- Äldre upplägg (bokföringen direkt i en mapp, eller undermappen `Bokföring och underlag`) fungerar fortfarande. Appen kan samla dem i den nya strukturen genom att flytta hela mappar inom OneDrive, så id, delningar och inbjudningar följer med.
+- Föreningens Excel-filer läses in i appen som arkivkopior.
+- På sikt: Microsoft 365 för ideella föreningar, så att föreningen och inte kassören äger mapparna.
 
 ## Roller (från version 1.20)
 
@@ -104,7 +109,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 ## Styrelsen (från version 1.24)
 
-- Undermappen `Styrelsen` med `Styrelsen.json` (protokoll, beslut, uppgifter, ärenden), `Förtroendeuppdrag.json` och `Undertecknade protokoll`. Ingen exklusiv skrivrätt: ändringar slås ihop post för post, och krockar visas.
+- Från 1.26 `Styrelsearbete/Appens filer` (1.24–1.25: undermappen `Styrelsen`) med `Styrelsen.json` (protokoll, beslut, uppgifter, ärenden), `Förtroendeuppdrag.json` och `Undertecknade protokoll`. Ingen exklusiv skrivrätt: ändringar slås ihop post för post, och krockar visas.
 - Roller: ordförande, vice ordförande, sekreterare, ledamot och suppleant läser bokföringen och medlemsregistret och ändrar styrelsens material. Kassör och admin har allt. Bokföraren ser inte styrelsens material. Revisorn läser bokföringen och styrelsens material. Valberedningen läser bara förtroendeuppdragen (filen delas för sig, egen inbjudningslänk). Den gamla rollen Styrelse blir Ledamot.
 - Mötets funktionärer (mötesordförande, mötessekreterare, justerare) väljs per möte och är skilda från rollerna. Styrelsens sekreterare föreslås för styrelsemöten.
 - Underskrift per protokoll: elektroniskt (Microsoft-inloggning, tid och SHA-256-kontrollsumma, signatursida i PDF:en, kontroll i appen) eller papper (PDF med underskriftsrader, inskannat original laddas upp). Den som saknar konto i appen kan bara skriva under på papper.

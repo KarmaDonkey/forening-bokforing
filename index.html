@@ -336,6 +336,17 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.26', datum: '2026-11-21',
+    nyheter: [
+      'Appens mappar kan samlas i en mapp, Föreningsadministration, med Bokföring, Medlemsregister och Styrelsearbete. Hela mappar flyttas inom OneDrive, så delningar och inbjudningar fortsätter att fungera. En genväg till appen läggs i mappen.',
+      'Protokoll och handlingar sparas i Styrelsearbete/Möten, i föreningens mappar: ÅM 2027, ÅM 2027 extra, SM 2027 och SM 2027 konstituerande, med datum först i filnamnet.',
+      'Ett protokoll som alla skrivit under elektroniskt sparas automatiskt i mötets mapp, och det inskannade originalet hamnar där också.',
+      'Tidigare möten visas under Styrelsen, direkt från mapparna under Möten (även årsmappar som 2020).',
+      'Årsmötessidan visar vilka handlingar som finns i ÅM-mappen, med uppladdning, och bockar av dem i checklistan. Föredragningslistan, röstlängden och den ekonomiska redovisningen kan sparas direkt i mappen.',
+      'Hela Styrelsearbete delas med styrelsen och revisorn.'
+    ]
+  },
+  {
     version: '1.25', datum: '2026-11-21',
     nyheter: [
       'De som har appen öppen visas som små cirklar överst, med initialer eller bild, som i Word. Den som har skrivrätten har en guldring.',
@@ -2907,7 +2918,7 @@ var VERSIONER = [
     if (!d || d.format !== ROLLFORMAT || !Array.isArray(d.personer)) throw BokforingsFel('roller.json har ett okänt format.');
     // Rollen Styrelse (före 1.24) blir Ledamot.
     var roll = function (r) { return r === 'styrelse' ? 'ledamot' : r; };
-    return { format: ROLLFORMAT, personer: d.personer.map(function (p) { var x = { epost: normEpost(p.epost), roller: (p.roller || []).map(roll).filter(function (r, i, l) { return l.indexOf(r) === i; }) }; if (p.apelido) x.apelido = String(p.apelido); return x; }), skrivratt: normEpost(d.skrivratt), logg: d.logg || [], regMapp: d.regMapp || null, styrMapp: d.styrMapp || null, uppdragFil: d.uppdragFil || null };
+    return { format: ROLLFORMAT, personer: d.personer.map(function (p) { var x = { epost: normEpost(p.epost), roller: (p.roller || []).map(roll).filter(function (r, i, l) { return l.indexOf(r) === i; }) }; if (p.apelido) x.apelido = String(p.apelido); return x; }), skrivratt: normEpost(d.skrivratt), logg: d.logg || [], regMapp: d.regMapp || null, styrMapp: d.styrMapp || null, styrRot: d.styrRot || null, uppdragFil: d.uppdragFil || null };
   }
 
 
@@ -3097,6 +3108,7 @@ var VERSIONER = [
   function laggTillUppgift(styr, u) {
     if (!String(u.text || '').trim()) throw BokforingsFel('Skriv vad som ska göras.');
     var x = { id: styrId('up'), text: String(u.text).trim(), ansvarig: String(u.ansvarig || '').trim(), datum: arGiltigtDatum(u.datum) ? u.datum : '', klar: false, grupp: u.grupp || '' };
+    if (u.handling) x.handling = u.handling;
     return Object.assign({}, styr, { uppgifter: styr.uppgifter.concat([x]) });
   }
   function andraUppgift(styr, id, andring) {
@@ -3104,17 +3116,69 @@ var VERSIONER = [
   }
   function taBortUppgift(styr, id) { return Object.assign({}, styr, { uppgifter: styr.uppgifter.filter(function (u) { return u.id !== id; }) }); }
 
+  // ---------- Mötesmappar (Styrelsearbete/Möten) ----------
+  // Föreningens mönster: ÅM 2026, ÅM 2023 extra, SM 2026 (alla styrelsemöten under året), SM 2020 konstituerande.
+  function motesmapp(typ, datum) {
+    var ar = String(datum || '').slice(0, 4);
+    if (typ === 'arsmote') return 'ÅM ' + ar;
+    if (typ === 'extra') return 'ÅM ' + ar + ' extra';
+    if (typ === 'konstituerande') return 'SM ' + ar + ' konstituerande';
+    return 'SM ' + ar;
+  }
+  // Datum först, så att filerna sorteras i tidsordning i mappen.
+  function motesfilnamn(datum, text, andelse) { return sakertNamn(datum + ' ' + text + (andelse || '.pdf')); }
+
+  // Tolkar ett mappnamn under Möten. Årsmappar (2020, 2021 …) går också.
+  function tolkaMotesmapp(namn) {
+    var t = String(namn || '').trim(), m;
+    if ((m = t.match(/^(ÅM|AM|SM)\s+(\d{4})(?:\s+(.+))?$/i))) {
+      var am = /^(ÅM|AM)$/i.test(m[1]), till = (m[3] || '').trim();
+      var typ = am ? (/extra/i.test(till) ? 'extra' : 'arsmote') : (/konstituerande/i.test(till) ? 'konstituerande' : 'styrelse');
+      return { typ: typ, ar: m[2], tillagg: till };
+    }
+    if ((m = t.match(/^(\d{4})$/))) return { typ: 'ar', ar: m[1], tillagg: '' };
+    return null;
+  }
+
+  // Handlingar som hör till årsmötet, och ord som känner igen dem i filnamnen i ÅM-mappen.
+  var ARSMOTESHANDLINGAR = [
+    ['kallelse', 'Kallelse', /kallelse/i],
+    ['dagordning', 'Föredragningslista', /föredragningslista|foredragningslista|dagordning/i],
+    ['verksamhet', 'Verksamhetsberättelse', /verksamhetsberättelse|verksamhetsberattelse/i],
+    ['ekonomi', 'Balans- och resultaträkning', /ekonomisk redovisning|resultaträkning|resultatrakning|balansräkning|balansrakning|(^|[^a-zåäö])bor([^a-zåäö]|$)/i],
+    ['revision', 'Revisionsberättelse', /revisionsberättelse|revisionsberattelse/i],
+    ['valberedning', 'Valberedningens förslag', /valberedning/i],
+    ['rostlangd', 'Röstlängd', /röstlängd|rostlangd/i],
+    ['protokoll', 'Protokoll', /protokoll/i]
+  ];
+  function handlingarStatus(filnamn) {
+    return ARSMOTESHANDLINGAR.map(function (h) {
+      return { nyckel: h[0], namn: h[1], filer: (filnamn || []).filter(function (f) { return h[2].test(f); }) };
+    });
+  }
+  // Uppgifterna i checklistan bockas av när handlingen finns i mappen.
+  function bockaAvHandlingar(styr, grupp, status) {
+    var finns = {};
+    status.forEach(function (h) { if (h.filer.length) finns[h.nyckel] = true; });
+    var andrad = false;
+    var upp = styr.uppgifter.map(function (u) {
+      if (u.grupp === grupp && u.handling && finns[u.handling] && !u.klar) { andrad = true; return Object.assign({}, u, { klar: true }); }
+      return u;
+    });
+    return andrad ? Object.assign({}, styr, { uppgifter: upp }) : styr;
+  }
+
   // Checklistan inför årsmötet, med datum räknade från mötesdagen.
   function arsmotesUppgifter(motesdatum) {
     var d = function (n) { return laggTillDagar(motesdatum, n); };
     return [
-      ['Kallelsens text', d(-28)], ['Föredragningslista', d(-28)], ['Verksamhetsberättelse (text och ekonomi)', d(-28)], ['Valberedningens förslag', d(-28)],
-      ['Balans- och resultaträkning', d(-28)], ['Revisionsberättelse', d(-14)], ['Medlemsförteckning', d(-28)],
+      ['Kallelsens text', d(-28), 'kallelse'], ['Föredragningslista', d(-28), 'dagordning'], ['Verksamhetsberättelse (text och ekonomi)', d(-28), 'verksamhet'], ['Valberedningens förslag', d(-28), 'valberedning'],
+      ['Balans- och resultaträkning', d(-28), 'ekonomi'], ['Revisionsberättelse', d(-14), 'revision'], ['Medlemsförteckning', d(-28)],
       ['Publicera kallelsen på hemsidan och i chattgrupperna', d(-14)], ['Påminn dem som inte betalat terminsavgift', d(-14)],
       ['Publicera verksamhetsberättelse, revisionsberättelse och balans- och resultaträkning', d(-7)],
-      ['Röstlängd till mötet', d(-7)], ['Utkast till årsmötesprotokoll', d(-7)], ['Utkast till protokoll för konstituerande styrelsemöte', d(-7)],
+      ['Röstlängd till mötet', d(-7), 'rostlangd'], ['Utkast till årsmötesprotokoll', d(-7)], ['Utkast till protokoll för konstituerande styrelsemöte', d(-7)],
       ['Påminn medlemmarna om årsmötet', d(-7)], ['Registrera årliga handlingar i Idrottsportalen', d(42)]
-    ].map(function (x) { return { text: x[0], datum: x[1] }; });
+    ].map(function (x) { return x[2] ? { text: x[0], datum: x[1], handling: x[2] } : { text: x[0], datum: x[1] }; });
   }
 
   // Ärenden till årsmötet, t.ex. förslag till stadgeändring.
@@ -3772,6 +3836,12 @@ var VERSIONER = [
     taBortUppdrag: taBortUppdrag,
     uppdragSomGarUt: uppdragSomGarUt,
     slaIhopPoster: slaIhopPoster,
+    motesmapp: motesmapp,
+    motesfilnamn: motesfilnamn,
+    tolkaMotesmapp: tolkaMotesmapp,
+    ARSMOTESHANDLINGAR: ARSMOTESHANDLINGAR,
+    handlingarStatus: handlingarStatus,
+    bockaAvHandlingar: bockaAvHandlingar,
     initialer: initialer,
     narvaroFarg: narvaroFarg,
     slaIhopNarvaro: slaIhopNarvaro,
@@ -3823,12 +3893,18 @@ var VERSIONER = [
   var RIKTIG_REG_LAGRING = 'forening-bokforing:medlemsregister';
   var REGFIL = 'Medlemsregister.json';
   // Appens egen mapp innehåller två undermappar: bokföringen (delas med revisorn) och medlemsregistret (delas inte).
-  var DATAMAPP = 'Bokföring och underlag';
+  // Från 1.26 heter mapparna Bokföring, Medlemsregister och Styrelsearbete, samlade i en mapp (t.ex. Föreningsadministration).
+  var DATAMAPP = 'Bokföring';
+  var GAMMAL_DATAMAPP = 'Bokföring och underlag';
   var REGMAPP = 'Medlemsregister';
+  var ADMMAPP = 'Föreningsadministration';
+  var STYRARBETE = 'Styrelsearbete';
+  var APPFILER = 'Appens filer';
+  var MOTEN = 'Möten';
+  var GENVAG = 'Öppna appen.url';
   var senastRegJson = null;
   // Styrelsens material: egen mapp i OneDrive (Styrelsen) och egen lagring i webbläsaren.
   var STYR_LAGRING = OVNING ? 'forening-bokforing:ovning:styrelsen' : 'forening-bokforing:styrelsen';
-  var STYRMAPP = 'Styrelsen';
   var STYRFIL = 'Styrelsen.json';
   var UPPDRAGFIL = 'Förtroendeuppdrag.json';
   var PROTOKOLLMAPP = 'Undertecknade protokoll';
@@ -4422,9 +4498,13 @@ var VERSIONER = [
       od.rot = null;
       od.mapp = { driveId: driveId, id: post.id, namn: post.name, sokvag: sokvag };
     } else {
-      var data = await sakerstallUndermapp(driveId, post.id, DATAMAPP);
+      // Mappar från version 1.14–1.25 heter Bokföring och underlag.
+      var gammal = await graf('/drives/' + driveId + '/items/' + post.id + ':/' + enc(GAMMAL_DATAMAPP + '/' + DATAFIL) + ':', { tillat: [404] });
+      var dnamn = gammal !== 404 ? GAMMAL_DATAMAPP : DATAMAPP;
+      var data = await sakerstallUndermapp(driveId, post.id, dnamn);
       od.rot = { driveId: driveId, id: post.id, namn: post.name, sokvag: sokvag };
-      od.mapp = { driveId: driveId, id: data.id, namn: DATAMAPP, sokvag: sokvag + '/' + DATAMAPP };
+      od.mapp = { driveId: driveId, id: data.id, namn: dnamn, sokvag: sokvag + '/' + dnamn };
+      skapaGenvag(driveId, post.id);
     }
     od.lage = 'agare';
     od.eTag = null; od.senast = null; od.regETag = null; od.regMapp = null; odNu.mappar = {};
@@ -4701,11 +4781,18 @@ var VERSIONER = [
   }
 
   async function sakerstallStyrMapp() {
+    if (odNu.roller && odNu.roller.styrRot && (!od.styrRot || od.styrRot.id !== odNu.roller.styrRot.id)) { od.styrRot = Object.assign({}, odNu.roller.styrRot); sparaOd(); }
     if (od.styrMapp && od.styrMapp.for === od.mapp.id) return;
     if (odNu.roller && odNu.roller.styrMapp) { od.styrMapp = Object.assign({}, odNu.roller.styrMapp, { for: od.mapp.id }); sparaOd(); return; }
     if (od.lage !== 'agare') throw new Error('Styrelsens mapp är inte delad med dig.');
     var foralder, namn;
-    if (od.rot) { foralder = od.rot.id; namn = STYRMAPP; }
+    if (od.rot) {
+      // Styrelsearbete med appens filer i en egen undermapp, och Möten för protokoll och handlingar.
+      var sa = await sakerstallUndermapp(od.mapp.driveId, od.rot.id, STYRARBETE);
+      await sakerstallUndermapp(od.mapp.driveId, sa.id, MOTEN);
+      od.styrRot = { driveId: od.mapp.driveId, id: sa.id, namn: od.rot.namn + '/' + STYRARBETE };
+      foralder = sa.id; namn = APPFILER;
+    }
     else {
       var mapp = await graf('/drives/' + od.mapp.driveId + '/items/' + od.mapp.id + '?$select=id,name,parentReference');
       foralder = mapp.parentReference && mapp.parentReference.id;
@@ -4713,9 +4800,11 @@ var VERSIONER = [
       namn = mapp.name + ' – styrelsen';
     }
     var ny = await sakerstallUndermapp(od.mapp.driveId, foralder, namn);
-    od.styrMapp = { driveId: od.mapp.driveId, id: ny.id, namn: od.rot ? od.rot.namn + '/' + namn : namn, for: od.mapp.id };
+    od.styrMapp = { driveId: od.mapp.driveId, id: ny.id, namn: od.rot ? od.rot.namn + '/' + STYRARBETE + '/' + namn : namn, for: od.mapp.id };
     sparaOd();
-    await uppdateraRollfilMed({ styrMapp: { driveId: od.styrMapp.driveId, id: od.styrMapp.id, namn: od.styrMapp.namn } });
+    var andr = { styrMapp: { driveId: od.styrMapp.driveId, id: od.styrMapp.id, namn: od.styrMapp.namn } };
+    if (od.styrRot) andr.styrRot = { driveId: od.styrRot.driveId, id: od.styrRot.id, namn: od.styrRot.namn };
+    await uppdateraRollfilMed(andr);
   }
 
   async function hamtaStyrFil(k, forsok) {
@@ -4978,89 +5067,163 @@ var VERSIONER = [
     return { driveId: driveId, id: id, namn: delar[delar.length - 1] };
   }
 
-  // Flyttar appens egna filer (bokföringen, logotypen, underlagen, kvittona och medlemsregistret) till en ny mapp
-  // med undermapparna Bokföring och underlag och Medlemsregister. Andra filer i den gamla mappen rörs inte.
-  async function flyttaAppensFiler(sokvag) {
-    sokvag = sokvag.replace(/^\/+|\/+$/g, '');
-    if (!sokvag) throw new Error('Skriv sökvägen till den nya mappen, t.ex. Föreningen/Föreningsbokföring.');
+  async function flyttaMapp(driveId, itemId, foralderId, namn) {
+    return graf('/drives/' + driveId + '/items/' + itemId, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: namn, parentReference: { id: foralderId } })
+    });
+  }
+  async function barnMedNamn(driveId, foralderId, namn) {
+    var x = await graf('/drives/' + driveId + '/items/' + foralderId + ':/' + enc(namn) + ':', { tillat: [404] });
+    return x === 404 ? null : x;
+  }
+  // En genväg till appen i den samlade mappen.
+  function skapaGenvag(driveId, mappId) {
+    return graf('/drives/' + driveId + '/items/' + mappId + ':/' + enc(GENVAG) + ':/content', {
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: '[InternetShortcut]\r\nURL=' + omdirigering() + '\r\n', tillat: [403, 409]
+    }).catch(function () { /* frivilligt */ });
+  }
+
+  function forslagAdministration() {
+    var bas = od.rot ? od.rot.sokvag : (od.mapp.sokvag || '');
+    var foralder = bas.indexOf('/') >= 0 ? bas.slice(0, bas.lastIndexOf('/')) : '';
+    return (foralder ? foralder + '/' : '') + ADMMAPP;
+  }
+
+  // Samlar appens mappar i en mapp: Bokföring, Medlemsregister och Styrelsearbete (med Möten och Appens filer).
+  // Hela mappar flyttas inom OneDrive, så id, innehåll och delningar följer med. Inget tas bort.
+  async function samlaIAdministration(sokvag, opt) {
+    sokvag = String(sokvag || '').replace(/^\/+|\/+$/g, '');
+    if (!sokvag) throw new Error('Skriv sökvägen till den nya mappen, t.ex. ' + forslagAdministration() + '.');
+    if (od.lage !== 'agare') throw new Error('Bara den som äger mapparna kan flytta dem.');
     if (odNu.konflikt || odNu.regKonflikt) throw new Error('Lös krocken med OneDrive först.');
     var gammalSokvag = (od.mapp.sokvag || '').replace(/\/+$/, '');
     if (gammalSokvag && (sokvag === gammalSokvag || sokvag.indexOf(gammalSokvag + '/') === 0)) throw new Error('Den nya mappen kan inte ligga i bokföringsmappen.');
-    if (od.rot && sokvag === od.rot.sokvag) throw new Error('Appens filer ligger redan i ' + sokvag + '.');
     sattStatus('Sparar innan flytten…');
+    laddaNer('sakerhetskopia-fore-flytten-' + idag() + '.json', JSON.stringify({ bokforing: bokforingsdata(), styrelsen: { styrelse: sty.styr.data, uppdrag: sty.upp.data } }, null, 1), 'application/json');
     await synkaUpp();
+    await synkaStyrelsen().catch(function () { /* sparas igen efteråt */ });
     if (od.smutsig || od.regSmutsig) throw new Error('Allt kunde inte sparas i OneDrive. Försök igen.');
+    try { await sakerstallRegMapp(); } catch (e) { /* skapas nedan */ }
+    try { await sakerstallStyrMapp(); } catch (e) { /* skapas nedan */ }
     sattStatus('Flyttar…');
+    var d = od.mapp.driveId;
     var rot = await skapaSokvag(sokvag);
-    var finns = await graf('/drives/' + rot.driveId + '/items/' + rot.id + ':/' + enc(DATAMAPP + '/' + DATAFIL) + ':', { tillat: [404] });
-    if (finns !== 404) throw new Error('Det finns redan en bokföring från appen i ' + sokvag + '.');
-    var data = await sakerstallUndermapp(rot.driveId, rot.id, DATAMAPP);
-    var cache = {};
-    var dir = function (rel) { return rel.indexOf('/') < 0 ? '' : katalog(rel); };
-    var mappI = async function (rel) {
-      if (!rel) return data.id;
-      if (cache[rel]) return cache[rel];
-      var f = await mappI(dir(rel));
-      cache[rel] = (await sakerstallUndermapp(rot.driveId, f, filnamnAv(rel))).id;
-      return cache[rel];
-    };
-    var flyttaTill = async function (itemId, rel) {
-      var f = await mappI(dir(rel));
-      return graf('/drives/' + rot.driveId + '/items/' + itemId, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: filnamnAv(rel), parentReference: { id: f }, '@microsoft.graph.conflictBehavior': 'rename' })
-      });
-    };
-    var antal = 0;
-    var arIds = Object.keys(store.ar);
-    for (var i = 0; i < arIds.length; i++) {
-      var lista = store.ar[arIds[i]].underlag || [];
-      for (var j = 0; j < lista.length; j++) {
-        if (!lista[j].odId) continue;
-        await flyttaTill(lista[j].odId, lista[j].odMal || K.underlagSokvag(arIds[i], lista[j]));
-        antal++;
-      }
+    if (rot.id === od.mapp.id) throw new Error('Välj en ny mapp, inte bokföringsmappen.');
+    var rotMeta = await graf('/drives/' + d + '/items/' + rot.id + '?$select=id,name,parentReference');
+    var foralder = rotMeta.parentReference && rotMeta.parentReference.id;
+    // Kontrollera först, så att inget flyttas om något krockar.
+    var bok = await barnMedNamn(d, rot.id, DATAMAPP);
+    if (bok && bok.id !== od.mapp.id) throw new Error('Det finns redan en mapp ' + DATAMAPP + ' i ' + sokvag + '. Byt namn på den eller välj en annan mapp.');
+    var reg = await barnMedNamn(d, rot.id, REGMAPP);
+    if (reg && od.regMapp && reg.id !== od.regMapp.id) throw new Error('Det finns redan en mapp ' + REGMAPP + ' i ' + sokvag + '. Byt namn på den eller välj en annan mapp.');
+    var gjort = [];
+    if (!bok) { await flyttaMapp(d, od.mapp.id, rot.id, DATAMAPP); gjort.push((od.mapp.sokvag || od.mapp.namn) + ' → ' + sokvag + '/' + DATAMAPP); }
+    var regId;
+    if (od.regMapp) { if (!reg) { await flyttaMapp(d, od.regMapp.id, rot.id, REGMAPP); gjort.push(od.regMapp.namn + ' → ' + sokvag + '/' + REGMAPP); } regId = od.regMapp.id; }
+    else regId = (reg || await sakerstallUndermapp(d, rot.id, REGMAPP)).id;
+    if (opt.aldre && foralder) {
+      var gml = await barnMedNamn(d, foralder, REGMAPP);
+      if (gml && gml.folder && gml.id !== regId && gml.id !== rot.id) { await flyttaMapp(d, gml.id, regId, 'Äldre medlemsregister'); gjort.push(REGMAPP + ' → ' + sokvag + '/' + REGMAPP + '/Äldre medlemsregister'); }
     }
-    for (var k = 0; k < store.dokument.length; k++) {
-      var d = store.dokument[k];
-      if (d.odId) { await flyttaTill(d.odId, K.kvittoSokvag(d)); antal++; }
+    var sa = await barnMedNamn(d, rot.id, STYRARBETE);
+    if (!sa && opt.styrelsearbete && foralder) {
+      var syskon = await barnMedNamn(d, foralder, STYRARBETE);
+      if (syskon && syskon.folder && syskon.id !== rot.id) { await flyttaMapp(d, syskon.id, rot.id, STYRARBETE); sa = syskon; gjort.push(STYRARBETE + ' → ' + sokvag + '/' + STYRARBETE); }
     }
-    if (store.forening.logoOdId) {
-      var logo = await graf('/drives/' + od.mapp.driveId + '/items/' + store.forening.logoOdId, { tillat: [404] });
-      if (logo !== 404) { await flyttaTill(logo.id, logo.name); antal++; }
-    }
-    // Medlemsregistret
-    var regMal = await sakerstallUndermapp(rot.driveId, rot.id, REGMAPP);
-    if (od.regMapp) {
-      var regFil = await graf(iRegMappen(), { tillat: [404] });
-      if (regFil !== 404) {
-        var flyttad = await graf('/drives/' + rot.driveId + '/items/' + regFil.id, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: REGFIL, parentReference: { id: regMal.id } })
-        });
-        od.regETag = flyttad.eTag;
-        // Registret pekas om direkt, så att ett avbrott senare inte gör att det skapas på nytt i den gamla mappen.
-        od.regMapp = { driveId: rot.driveId, id: regMal.id, namn: rot.namn + '/' + REGMAPP, for: od.mapp.id };
-        sparaOd();
-        antal++;
-      }
-    }
-    var rollfil = await graf(iMappen(ROLLFIL), { tillat: [404] });
-    if (rollfil !== 404) { var rf = await flyttaTill(rollfil.id, ROLLFIL); odNu.rollerETag = rf.eTag; antal++; }
-    // Bokföringsfilen sist, så att den gamla mappen gäller tills allt annat är flyttat.
-    var meta = await graf(iMappen(DATAFIL));
-    var nyMeta = await flyttaTill(meta.id, DATAFIL);
-    antal++;
-    var gammal = od.mapp.sokvag || od.mapp.namn;
-    od.rot = { driveId: rot.driveId, id: rot.id, namn: rot.namn, sokvag: sokvag };
-    od.mapp = { driveId: rot.driveId, id: data.id, namn: DATAMAPP, sokvag: sokvag + '/' + DATAMAPP };
-    od.regMapp = { driveId: rot.driveId, id: regMal.id, namn: rot.namn + '/' + REGMAPP, for: data.id };
-    od.eTag = nyMeta.eTag;
-    odNu.mappar = {};
+    if (!sa) sa = await sakerstallUndermapp(d, rot.id, STYRARBETE);
+    var styrId = od.styrMapp ? od.styrMapp.id : null;
+    var af = await barnMedNamn(d, sa.id, APPFILER);
+    if (styrId && (!af || af.id !== styrId)) { await flyttaMapp(d, styrId, sa.id, af ? APPFILER + ' (appen)' : APPFILER); gjort.push('Styrelsens filer från appen → ' + sokvag + '/' + STYRARBETE + '/' + APPFILER); }
+    if (!styrId) styrId = (af || await sakerstallUndermapp(d, sa.id, APPFILER)).id;
+    await sakerstallUndermapp(d, sa.id, MOTEN);
+    await skapaGenvag(d, rot.id);
+    // Appen pekar om till den nya strukturen. Id:n är desamma; bara namnen ändras.
+    od.rot = { driveId: d, id: rot.id, namn: rot.namn, sokvag: sokvag };
+    od.mapp = Object.assign({}, od.mapp, { namn: DATAMAPP, sokvag: sokvag + '/' + DATAMAPP });
+    od.regMapp = { driveId: d, id: regId, namn: rot.namn + '/' + REGMAPP, for: od.mapp.id };
+    od.styrMapp = { driveId: d, id: styrId, namn: rot.namn + '/' + STYRARBETE + '/' + APPFILER, for: od.mapp.id };
+    od.styrRot = { driveId: d, id: sa.id, namn: rot.namn + '/' + STYRARBETE };
+    odNu.mappar = {}; odNu.motesHistorik = null; odNu.amHandlingar = {};
     sparaOd();
     await sparaAppinstallningar({ mapp: od.mapp, rot: od.rot, lage: 'agare', regMapp: od.regMapp }).catch(function () { /* frivilligt */ });
+    var delat = 0;
+    if (odNu.roller) {
+      await hamtaRoller();
+      var ref = function (x) { return { driveId: x.driveId, id: x.id, namn: x.namn }; };
+      await sparaRoller(Object.assign({}, odNu.roller, { regMapp: ref(od.regMapp), styrMapp: ref(od.styrMapp), styrRot: ref(od.styrRot) }));
+      // Styrelsen och revisorn får hela Styrelsearbete; den gamla delningen av appens filer behövs inte längre.
+      var text = 'Mappen ' + STYRARBETE + ' för ' + (store.forening.namn || 'föreningen') + ' är delad med dig. Öppna appen med den här länken och logga in med ditt Microsoft-konto: ' + inbjudningslank();
+      var personer = odNu.roller.personer.filter(function (x) { return x.epost !== mig(); });
+      for (var i = 0; i < personer.length; i++) {
+        var b = K.behorighet(personer[i].roller);
+        if (!b.styr) continue;
+        await sattDelning(od.styrRot, personer[i].epost, b.styr, text);
+        await sattDelning(od.styrMapp, personer[i].epost, null);
+        delat++;
+      }
+    }
     sattStatus('Synkad med OneDrive');
-    return { antal: antal, gammal: gammal };
+    return { gjort: gjort, delat: delat };
+  }
+
+  // ---------- Mötesmappar ----------
+
+  async function allaBarn(driveId, id) {
+    var url = '/drives/' + driveId + '/items/' + id + '/children?$select=id,name,folder,file,webUrl,size&$top=200', ut = [];
+    while (url) { var dd = await graf(url); ut = ut.concat(dd.value || []); url = dd['@odata.nextLink'] || null; }
+    return ut;
+  }
+
+  async function motesmappId(namn) {
+    await sakerstallStyrMapp();
+    if (!od.styrRot) return (await sakerstallUndermapp(od.styrMapp.driveId, od.styrMapp.id, PROTOKOLLMAPP)).id;
+    var moten = await sakerstallUndermapp(od.styrRot.driveId, od.styrRot.id, MOTEN);
+    return (await sakerstallUndermapp(od.styrRot.driveId, moten.id, namn)).id;
+  }
+
+  // Sparar en fil i mötets mapp (Styrelsearbete/Möten/ÅM 2027 …). ersatt: skriv över en äldre version (OneDrive sparar versionerna).
+  async function sparaIMotesmapp(mappnamn, filnamn, blob, ersatt) {
+    var id = await motesmappId(mappnamn);
+    var bas = '/drives/' + od.styrMapp.driveId + '/items/' + id + ':/' + enc(filnamn) + ':';
+    var post;
+    if (blob.size <= 4 * 1024 * 1024) post = await graf(bas + '/content?@microsoft.graph.conflictBehavior=' + (ersatt ? 'replace' : 'rename'), { method: 'PUT', body: blob });
+    else {
+      var session = await graf(bas + '/createUploadSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': ersatt ? 'replace' : 'rename' } }) });
+      var res = await fetch(session.uploadUrl, { method: 'PUT', headers: { 'Content-Range': 'bytes 0-' + (blob.size - 1) + '/' + blob.size }, body: blob });
+      if (!res.ok) throw new Error('Uppladdningen misslyckades.');
+      post = await res.json();
+    }
+    odNu.motesHistorik = null; odNu.amHandlingar = {};
+    return post;
+  }
+
+  async function hamtaMotesHistorik() {
+    odNu.motesHistorik = { status: 'hamtar', mappar: [] };
+    await sakerstallStyrMapp();
+    if (!od.styrRot) { odNu.motesHistorik = { status: 'saknas', mappar: [] }; return; }
+    var moten = await barnMedNamn(od.styrRot.driveId, od.styrRot.id, MOTEN);
+    if (!moten) { odNu.motesHistorik = { status: 'klar', mappar: [] }; return; }
+    var mappar = (await allaBarn(od.styrRot.driveId, moten.id)).filter(function (x) { return x.folder; });
+    var filer = await Promise.all(mappar.map(function (m) { return allaBarn(od.styrRot.driveId, m.id); }));
+    odNu.motesHistorik = { status: 'klar', webUrl: moten.webUrl || null, mappar: mappar.map(function (m, i) {
+      return { namn: m.name, webUrl: m.webUrl || null, tolkat: K.tolkaMotesmapp(m.name), filer: filer[i].map(function (f) { return { namn: f.name, webUrl: f.webUrl || null, mapp: !!f.folder }; }).sort(function (a, b) { return a.namn < b.namn ? -1 : 1; }) };
+    }) };
+  }
+
+  async function hamtaAmHandlingar(mapp, datum) {
+    odNu.amHandlingar = odNu.amHandlingar || {};
+    odNu.amHandlingar[mapp] = { status: 'hamtar' };
+    await sakerstallStyrMapp();
+    var moten = await barnMedNamn(od.styrRot.driveId, od.styrRot.id, MOTEN);
+    var item = moten ? await barnMedNamn(od.styrRot.driveId, moten.id, mapp) : null;
+    var filer = item ? (await allaBarn(od.styrRot.driveId, item.id)).filter(function (x) { return !x.folder; }) : [];
+    var status = K.handlingarStatus(filer.map(function (f) { return f.name; }));
+    odNu.amHandlingar[mapp] = { status: 'klar', handlingar: status, webUrl: item ? item.webUrl || null : null, filer: filer.map(function (f) { return { namn: f.name, webUrl: f.webUrl || null }; }) };
+    if (styrBeh('styr') === 'write') {
+      var ny = K.bockaAvHandlingar(styrData(), 'arsmote-' + datum, status);
+      if (ny !== styrData()) andraStyr('styr', ny, false);
+    }
   }
 
   function kopplaFranOneDrive() {
@@ -6795,7 +6958,7 @@ var VERSIONER = [
       forbered(amNyckel, function () { return skapaArsmotePdf(ar); });
       html += '<div class="card"><div class="row" style="justify-content:space-between"><strong>Förhandsvisning</strong>' +
         '<button class="btn btn-secondary btn-small" data-action="stang-arsmote">Stäng</button></div>' +
-        '<div class="row" style="margin-top:8px">' + pdfKnappar(amNyckel, 'skriv-ut-arsmote-nu') + '</div>' +
+        '<div class="row" style="margin-top:8px">' + pdfKnappar(amNyckel, 'skriv-ut-arsmote-nu') + sparaAmKnapp(amNyckel, arsmoteData(ar).motesdatum, 'Ekonomisk redovisning ' + K.arNamn(ar).replace('/', '-')) + '</div>' +
         '<div class="forhandsvisning" style="margin-top:8px">' + arsmoteInnehall(ar) + '</div></div>';
     }
     return html;
@@ -7042,8 +7205,8 @@ var VERSIONER = [
     if (!od.mapp) {
       html += '<p style="margin-top:0">Inloggad som <strong>' + esc(od.konto || '') + '</strong>. Välj var bokföringen ska ligga.</p>' +
         '<h3>Appens mapp i min OneDrive</h3><p class="faint" style="margin:0">Skriv sökvägen från OneDrive-roten, med snedstreck mellan mapparna. Använd en egen mapp för appen, till exempel <em>Föreningen/Föreningsbokföring</em>. ' +
-        'Appen skapar två undermappar där: <em>' + esc(DATAMAPP) + '</em> (som du kan dela med revisorn) och <em>' + esc(REGMAPP) + '</em> (som du inte delar). Har appen redan använt mappen hittar den bokföringen där.</p>' +
-        '<div class="row" style="margin-top:6px"><input id="odSokvag" placeholder="t.ex. Föreningen/Föreningsbokföring" style="max-width:420px"><button class="btn btn-small" data-action="od-valj-mapp">Använd mappen</button></div>' +
+        'Appen skapar tre undermappar där: <em>' + esc(DATAMAPP) + '</em>, <em>' + esc(REGMAPP) + '</em> och <em>' + esc(STYRARBETE) + '</em>, och delar dem efter rollerna. Har appen redan använt mappen hittar den bokföringen där.</p>' +
+        '<div class="row" style="margin-top:6px"><input id="odSokvag" placeholder="t.ex. Föreningen/' + esc(ADMMAPP) + '" style="max-width:420px"><button class="btn btn-small" data-action="od-valj-mapp">Använd mappen</button></div>' +
         '<h3>En mapp som delats med mig (läsning, t.ex. för revisorn)</h3>';
       if (odNu.delade) {
         html += odNu.delade.length ? odNu.delade.map(function (m, i) {
@@ -7058,13 +7221,19 @@ var VERSIONER = [
     html += '<p style="margin-top:0">' + (lasLage() ? '<strong>Endast läsning.</strong> ' : '') + 'Kopplad till <strong>' + esc(od.rot ? od.rot.sokvag : (od.mapp.sokvag || od.mapp.namn)) + '</strong> som ' + esc(od.konto || '') + '.</p>' +
       '<p class="faint">' + (od.senast ? 'Senast synkad ' + esc(od.senast.slice(0, 16).replace('T', ' ')) + '. ' : '') +
       (lasLage() ? 'Appen hämtar senaste versionen när den startar.' : od.rot
-        ? 'Bokföringen och underlagen ligger i undermappen <strong>' + esc(DATAMAPP) + '</strong>, som du kan dela med revisorn. Medlemsregistret ligger i <strong>' + esc(REGMAPP) + '</strong>, som du inte delar. Ändringar sparas automatiskt.'
+        ? 'Bokföringen och underlagen ligger i <strong>' + esc(od.mapp.namn) + '</strong>, medlemsregistret i <strong>' + esc(REGMAPP) + '</strong>' + (od.styrRot ? ' och styrelsens material i <strong>' + esc(STYRARBETE) + '</strong>' : '') + '. Appen delar mapparna efter rollerna. Ändringar sparas automatiskt.'
         : 'Bokföringen ligger i ' + esc(DATAFIL) + ', underlagen i årsmapparna under Bokföringsunderlag. Ändringar sparas automatiskt.') + '</p>' +
       (!lasLage() && od.regMapp && !od.rot ? '<p class="faint">Medlemsregistret ligger för sig i mappen <strong>' + esc(od.regMapp.namn) + '</strong> bredvid bokföringsmappen. Den mappen följer inte med när du delar bokföringen med revisorn.</p>' : '') +
-      (!lasLage() && od.lage === 'agare' ? '<details style="margin:8px 0"' + (od.rot ? '' : ' open') + '><summary>' + (od.rot ? 'Flytta appens filer till en annan mapp' : 'Flytta appens filer till en egen mapp (rekommenderas)') + '</summary>' +
-        '<p class="faint">Appen flyttar bokföringen, underlagen, kvittona, logotypen och medlemsregistret till den nya mappen, i undermapparna ' + esc(DATAMAPP) + ' och ' + esc(REGMAPP) + '. Andra filer, till exempel dina Excel-filer, rörs inte. ' +
-        'Har du delat bokföringen med revisorn behöver du dela den nya mappen ' + esc(DATAMAPP) + ' och skicka en ny inbjudan efteråt.</p>' +
-        '<div class="row"><input id="odNyMapp" placeholder="t.ex. Föreningen/Föreningsbokföring" style="max-width:420px"><button class="btn btn-small" data-action="od-flytta">Flytta</button></div></details>' : '') +
+      (!lasLage() && od.lage === 'agare' && !(od.rot && od.styrRot) ? '<details style="margin:8px 0" open><summary><strong>Samla appens mappar i en mapp (rekommenderas)</strong></summary>' +
+        '<p class="faint">Appen flyttar mapparna den använder till en gemensam mapp, så att det syns vad som hör till appen. Andra mappar rörs inte.</p><ul class="faint">' +
+        '<li><strong>' + esc(od.mapp.sokvag || od.mapp.namn) + '</strong>, med allt innehåll, blir <em>' + esc(DATAMAPP) + '</em></li>' +
+        (od.regMapp ? '<li><strong>' + esc(od.regMapp.namn) + '</strong> blir <em>' + esc(REGMAPP) + '</em></li>' : '') +
+        '<li>Styrelsens filer från appen hamnar i <em>' + esc(STYRARBETE + '/' + APPFILER) + '</em>, och protokoll och handlingar i <em>' + esc(STYRARBETE + '/' + MOTEN) + '</em></li>' +
+        '<li>En genväg, <em>Öppna appen</em>, läggs i mappen</li></ul>' +
+        '<label style="display:flex;gap:8px;font-weight:normal"><input type="checkbox" id="odFlyttaSA" style="width:auto" checked><span>Flytta också mappen ' + esc(STYRARBETE) + ' som ligger bredvid (om den finns) in i den nya mappen. Hela mappen delas med styrelsen och revisorn.</span></label>' +
+        '<label style="display:flex;gap:8px;font-weight:normal"><input type="checkbox" id="odFlyttaAldre" style="width:auto" checked><span>Flytta en äldre mapp ' + esc(REGMAPP) + ' som ligger bredvid (om den finns) till ' + esc(REGMAPP) + '/Äldre medlemsregister.</span></label>' +
+        '<p class="faint">Inget tas bort. Mapparna flyttas inom OneDrive, så delningar och inbjudningar fortsätter att fungera. En säkerhetskopia av bokföringen och styrelsens material laddas ner först.</p>' +
+        '<div class="row"><input id="odNyMapp" value="' + esc(forslagAdministration()) + '" style="max-width:420px" aria-label="Den nya mappen"><button class="btn btn-small" data-action="od-flytta">Samla mapparna</button></div></details>' : '') +
       (odNu.regFel ? '<p class="fel">' + esc(odNu.regFel) + '</p>' : '') +
       '<div class="row"><button class="btn btn-small" data-action="od-synka">' + (lasLage() ? 'Hämta senaste' : 'Synka nu') + '</button>' +
       '<button class="btn btn-secondary btn-small" data-action="od-byt-mapp">Byt mapp</button>' +
@@ -7484,7 +7653,7 @@ var VERSIONER = [
       // Styrelsens mapp, och förtroendeuppdragen för valberedningen.
       if (b.styr || b.uppdrag || od.styrMapp) {
         await synkaStyrelsen();
-        if (od.styrMapp) await sattDelning(od.styrMapp, epost, b.styr, text);
+        if (od.styrRot || od.styrMapp) await sattDelning(od.styrRot || od.styrMapp, epost, b.styr, text);
         var uf = odNu.roller && odNu.roller.uppdragFil;
         if (uf) {
           var textValb = 'Du har fått rollen ' + namn + ' i Föreningsbokföring för ' + (store.forening.namn || 'föreningen') + '. Öppna förtroendeuppdragen med den här länken och logga in med ditt Microsoft-konto: ' + uppdragslank(uf);
@@ -7492,7 +7661,7 @@ var VERSIONER = [
         }
       }
     }
-    fil = Object.assign({}, fil, { styrMapp: odNu.roller.styrMapp || fil.styrMapp || null, uppdragFil: odNu.roller.uppdragFil || fil.uppdragFil || null });
+    fil = Object.assign({}, fil, { styrMapp: odNu.roller.styrMapp || fil.styrMapp || null, styrRot: odNu.roller.styrRot || fil.styrRot || null, uppdragFil: odNu.roller.uppdragFil || fil.uppdragFil || null });
     if (!fil.regMapp && od.regMapp) fil.regMapp = { driveId: od.regMapp.driveId, id: od.regMapp.id, namn: od.regMapp.namn };
     await sparaRoller(fil);
   }
@@ -7719,7 +7888,13 @@ var VERSIONER = [
     var namn = K.sakertNamn(titel + ' årsmöte ' + (a.motesdatum || K.arNamn(ar)) + '.pdf');
     var nyckel = 'am-' + typ + '-' + datastampel(a, JSON.stringify(typ === 'rostlangd' ? K.rostlangd(reg(), a.motesdatum || idag(), store.ar, a.rostlangd, Number(a.rostalder) || 18) : '') + (store.forening.namn || '') + (logoUrl ? logoUrl.length : 0)) + '|' + namn;
     forbered(nyckel, function () { return skapaRapportPdf(ar, typ); });
-    return pdfKnappar(nyckel, 'kvitto-skriv-ut');
+    return pdfKnappar(nyckel, 'kvitto-skriv-ut') + sparaAmKnapp(nyckel, a.motesdatum, titel);
+  }
+
+  function sparaAmKnapp(nyckel, datum, titel) {
+    if (!odAnslutet() || styrBeh('styr') !== 'write' || !od.styrRot || !datum) return '';
+    var mapp = K.motesmapp('arsmote', datum);
+    return '<button class="btn btn-secondary btn-small" data-action="styr-spara-pdf-mapp" data-pdf="' + esc(nyckel) + '" data-mapp="' + esc(mapp) + '" data-fil="' + esc(K.motesfilnamn(datum, titel)) + '" disabled>Spara i ' + esc(mapp) + '</button>';
   }
 
   // Stadens årliga handlingar (Idrottsportalen) och villkor för stöd, enligt foreningsservice.stockholm.
@@ -7795,7 +7970,7 @@ var VERSIONER = [
         '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="styr-arsmote-protokoll">Skapa årsmötesprotokoll</button>' +
         '<button class="btn btn-secondary btn-small" data-action="styr-uppg-arsmote">Lägg in checklistan som uppgifter</button></div></div>';
     }
-    return html + vyArsmotet(ar) + vyArsmote(ar);
+    return html + vyArsmotesHandlingar(ar) + vyArsmotet(ar) + vyArsmote(ar);
   }
 
   function nastaFrister() {
@@ -7934,7 +8109,64 @@ var VERSIONER = [
     html += lista.length ? '<div class="scroll"><table class="kortlista"><thead><tr><th>Datum</th><th>Möte</th><th>Status</th><th></th></tr></thead><tbody>' + lista.map(function (m) {
       return '<tr><td>' + esc(m.datum) + '</td><td data-etikett="Möte">' + esc(motesNamn(m)) + '</td><td data-etikett="Status">' + statusTag(m) + '</td>' +
         '<td><button class="btn btn-secondary btn-small" data-action="styr-oppna" data-id="' + esc(m.id) + '">Öppna</button></td></tr>';
-    }).join('') + '</tbody></table></div>' : '<p class="faint">Inga protokoll ännu.</p>';
+    }).join('') + '</tbody></table></div>' : '<p class="faint">Inga protokoll i appen ännu.</p>';
+    return html + vyMotesHistorik();
+  }
+
+  var MAPPTYPER = { arsmote: 'Årsmöte', extra: 'Extra årsmöte', styrelse: 'Styrelsemöten', konstituerande: 'Konstituerande styrelsemöte', ar: 'Årsmapp' };
+  // Delarna som hämtas från OneDrive ritas om för sig, så att det man skriver i formulären inte försvinner.
+  function ritaOmDel(id, html) { var el = document.getElementById(id); if (el) el.innerHTML = html; }
+  function vyMotesHistorik() { return '<div id="motesHistorik">' + motesHistorikInre() + '</div>'; }
+  function motesHistorikInre() {
+    if (!odAnslutet()) return '';
+    if (!od.styrRot) return od.lage === 'agare' ? '<p class="faint" style="margin-top:14px">Samla appens mappar under Inställningar, År och arkiv, OneDrive, så sparas protokoll och handlingar i ' + esc(STYRARBETE + '/' + MOTEN) + ' och tidigare möten visas här.</p>' : '';
+    var h = odNu.motesHistorik;
+    var rubrik = '<h3 style="margin-top:18px">Mappar i ' + esc(STYRARBETE + '/' + MOTEN) + '</h3>';
+    if (!h) {
+      var rita = function () { ritaOmDel('motesHistorik', motesHistorikInre()); };
+      hamtaMotesHistorik().then(rita, function (err) { odNu.motesHistorik = { status: 'fel', fel: err.message, mappar: [] }; rita(); });
+      return rubrik + '<p class="faint">Hämtar mapparna…</p>';
+    }
+    if (h.status === 'hamtar') return rubrik + '<p class="faint">Hämtar mapparna…</p>';
+    if (h.status === 'fel') return rubrik + '<p class="fel">' + esc(h.fel) + '</p><button class="btn btn-secondary btn-small" data-action="styr-historik-hamta">Försök igen</button>';
+    var ordning = { arsmote: 0, extra: 1, konstituerande: 2, styrelse: 3, ar: 4 };
+    var kanda = h.mappar.filter(function (m) { return m.tolkat; }).sort(function (a, b) { return b.tolkat.ar - a.tolkat.ar || ordning[a.tolkat.typ] - ordning[b.tolkat.typ]; });
+    var ovriga = h.mappar.filter(function (m) { return !m.tolkat; });
+    var mapp = function (m) {
+      return '<details style="margin:4px 0"><summary><strong>' + esc(m.namn) + '</strong> <span class="faint">' + (m.tolkat ? esc(MAPPTYPER[m.tolkat.typ]) + ' · ' : '') + antal(m.filer.length, 'fil', 'filer') + '</span></summary>' +
+        '<ul style="margin:4px 0">' + m.filer.map(function (f) { return '<li>' + (f.webUrl ? '<a href="' + esc(f.webUrl) + '" target="_blank" rel="noopener">' + esc(f.namn) + '</a>' : esc(f.namn)) + (f.mapp ? ' <span class="faint">(mapp)</span>' : '') + '</li>'; }).join('') + '</ul>' +
+        (m.webUrl ? '<a href="' + esc(m.webUrl) + '" target="_blank" rel="noopener" class="faint">Öppna mappen i OneDrive</a>' : '') + '</details>';
+    };
+    return rubrik + '<p class="faint" style="margin-top:0">Tidigare möten och handlingar, direkt från mapparna. Inget kopieras; filerna öppnas i OneDrive.</p>' +
+      (kanda.length ? kanda.map(mapp).join('') : '<p class="faint">Inga mötesmappar ännu.</p>') +
+      (ovriga.length ? '<h4>Övriga mappar</h4>' + ovriga.map(mapp).join('') : '') +
+      '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="styr-historik-hamta">Hämta igen</button>' + (h.webUrl ? '<a class="btn btn-secondary btn-small" href="' + esc(h.webUrl) + '" target="_blank" rel="noopener">Öppna ' + esc(MOTEN) + ' i OneDrive</a>' : '') + '</div>';
+  }
+
+  // Årsmötets handlingar i ÅM-mappen, med uppladdning.
+  function vyArsmotesHandlingar(ar) { return '<div id="amHandlingar">' + arsmotesHandlingarInre(ar) + '</div>'; }
+  function arsmotesHandlingarInre(ar) {
+    var a = arsmoteData(ar);
+    if (!odAnslutet() || !styrBeh('styr') || !od.styrRot) return '';
+    if (!a.motesdatum) return '<div class="card"><strong>Handlingar i ÅM-mappen.</strong> <span class="faint">Ange datum för årsmötet nedan, så visas vilka handlingar som finns i mappen.</span></div>';
+    var mapp = K.motesmapp('arsmote', a.motesdatum), skriv = styrBeh('styr') === 'write';
+    var c = (odNu.amHandlingar || {})[mapp];
+    var html = '<div class="card"><h3 style="margin-top:0">Handlingar i ' + esc(STYRARBETE + '/' + MOTEN + '/' + mapp) + '</h3>';
+    if (!c) {
+      var rita = function () { ritaOmDel('amHandlingar', arsmotesHandlingarInre(aktivt())); };
+      hamtaAmHandlingar(mapp, a.motesdatum).then(rita, function (err) { odNu.amHandlingar[mapp] = { status: 'fel', fel: err.message }; rita(); });
+      return html + '<p class="faint">Hämtar…</p></div>';
+    }
+    if (c.status === 'hamtar') return html + '<p class="faint">Hämtar…</p></div>';
+    if (c.status === 'fel') return html + '<p class="fel">' + esc(c.fel) + '</p></div>';
+    html += '<ul class="checklista" style="margin:0">' + c.handlingar.map(function (h) {
+      return '<li><span class="bock" aria-hidden="true">' + (h.filer.length ? '✓' : '–') + '</span><div><div><strong>' + esc(h.namn) + '</strong> ' +
+        (h.filer.length ? '<span class="faint">' + esc(h.filer.join(', ')) + '</span>' : '<span class="faint">saknas</span>') + '</div>' +
+        (skriv ? '<div class="row" style="margin-top:4px"><button class="btn btn-secondary btn-small" data-action="styr-am-handling" data-nyckel="' + h.nyckel + '" data-mapp="' + esc(mapp) + '" data-datum="' + esc(a.motesdatum) + '">' + (h.filer.length ? 'Ladda upp en till' : 'Ladda upp') + '</button></div>' : '') + '</div></li>';
+    }).join('') + '</ul>' +
+      '<p class="faint">Appen känner igen handlingarna på filnamnet. Uppgifterna i checklistan under Styrelsen bockas av när handlingen finns i mappen.</p>' +
+      '<div class="row">' + (c.webUrl ? '<a class="btn btn-secondary btn-small" href="' + esc(c.webUrl) + '" target="_blank" rel="noopener">Öppna mappen i OneDrive</a>' : '') +
+      '<button class="btn btn-secondary btn-small" data-action="styr-am-hamta" data-mapp="' + esc(mapp) + '">Hämta igen</button></div></div>';
     return html;
   }
 
@@ -7994,7 +8226,8 @@ var VERSIONER = [
 
   function vyUnderskrift(m, skriv) {
     var html = '<div class="card"><h3 style="margin-top:0">Underskrift' + hjalp('underskrift') + '</h3>';
-    var pdf = '<button class="btn btn-secondary btn-small" data-action="styr-pdf">Ladda ner PDF</button><button class="btn btn-secondary btn-small" data-action="styr-pdf-skriv-ut">Skriv ut</button>';
+    var pdf = '<button class="btn btn-secondary btn-small" data-action="styr-pdf">Ladda ner PDF</button><button class="btn btn-secondary btn-small" data-action="styr-pdf-skriv-ut">Skriv ut</button>' +
+      (odAnslutet() && skriv && od.styrRot ? '<button class="btn btn-secondary btn-small" data-action="styr-pdf-spara">Spara i ' + esc(K.motesmapp(m.typ, m.datum)) + '</button>' : '');
     if (m.status === 'utkast') {
       if (!skriv) return html + '<p class="faint">Protokollet är ett utkast.</p><div class="row">' + pdf + '</div></div>';
       var fo = K.forslagUndertecknare(m, kanLoggaIn);
@@ -8274,7 +8507,7 @@ var VERSIONER = [
     return doc.output('blob');
   }
 
-  function protokollFilnamn(m) { return K.sakertNamn('Protokoll ' + motesNamn(m).toLowerCase() + ' ' + m.datum + '.pdf'); }
+  function protokollFilnamn(m) { return K.motesfilnamn(m.datum, 'Protokoll ' + motesNamn(m).toLowerCase()); }
 
   async function laddaUppProtokoll(m, fil) {
     var andelse = (fil.name.match(/\.[a-z0-9]+$/i) || ['.pdf'])[0].toLowerCase();
@@ -8282,17 +8515,9 @@ var VERSIONER = [
     var ref = { namn: namn };
     if (odAnslutet()) {
       await sakerstallStyrMapp();
-      var mapp = await sakerstallUndermapp(od.styrMapp.driveId, od.styrMapp.id, PROTOKOLLMAPP);
-      var bas = '/drives/' + od.styrMapp.driveId + '/items/' + mapp.id + ':/' + enc(namn) + ':';
-      var post;
-      if (fil.size <= 4 * 1024 * 1024) post = await graf(bas + '/content?@microsoft.graph.conflictBehavior=rename', { method: 'PUT', body: fil });
-      else {
-        var session = await graf(bas + '/createUploadSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } }) });
-        var res = await fetch(session.uploadUrl, { method: 'PUT', headers: { 'Content-Range': 'bytes 0-' + (fil.size - 1) + '/' + fil.size }, body: fil });
-        if (!res.ok) throw new Error('Uppladdningen misslyckades.');
-        post = await res.json();
-      }
-      ref.odId = post.id; ref.namn = post.name;
+      if (od.styrRot) namn = K.motesfilnamn(m.datum, 'Protokoll ' + motesNamn(m).toLowerCase() + ' undertecknat', andelse);
+      var post = await sparaIMotesmapp(K.motesmapp(m.typ, m.datum), namn, fil, false);
+      ref.odId = post.id; ref.namn = post.name; ref.mapp = od.styrRot ? K.motesmapp(m.typ, m.datum) : PROTOKOLLMAPP;
     } else {
       ref.lokalId = 'styrelsen-' + m.id;
       await sparaFil(ref.lokalId, fil, namn);
@@ -9588,7 +9813,11 @@ var VERSIONER = [
         return styrOperation(function (d) { return K.signera(d, m.id, vem, namn, summa, new Date().toISOString()); });
       }).then(function () {
         var mm = oppetMoteObj();
-        visa(mm && mm.status === 'signerat' ? 'Du har skrivit under. Alla har nu skrivit under protokollet.' : 'Du har skrivit under.');
+        if (!mm || mm.status !== 'signerat') { visa('Du har skrivit under.'); return; }
+        // Alla har skrivit under: protokollet med underskriftssidan sparas i mötets mapp.
+        if (!odAnslutet()) { visa('Du har skrivit under. Alla har nu skrivit under protokollet.'); return; }
+        return skapaProtokollPdf(mm).then(function (blob) { return sparaIMotesmapp(K.motesmapp(mm.typ, mm.datum), protokollFilnamn(mm), blob, true); })
+          .then(function () { visa('Du har skrivit under. Alla har nu skrivit under, och protokollet är sparat i ' + (od.styrRot ? STYRARBETE + '/' + MOTEN + '/' + K.motesmapp(mm.typ, mm.datum) : 'styrelsens mapp') + '.'); });
       }).catch(function (err) { visa(err.message, true); });
     },
     'styr-kontrollera': function () {
@@ -9634,6 +9863,32 @@ var VERSIONER = [
         var url = URL.createObjectURL(blob);
         if (fonster) fonster.location = url; else laddaNer(protokollFilnamn(m), blob, 'application/pdf');
       }, function (err) { if (fonster) fonster.close(); visa(err.message, true); });
+    },
+    'styr-historik-hamta': function () { odNu.motesHistorik = null; render(); },
+    'styr-am-hamta': function (t) { if (odNu.amHandlingar) delete odNu.amHandlingar[t.dataset.mapp]; render(); },
+    'styr-pdf-spara': function () {
+      var m = oppetMoteObj();
+      skapaProtokollPdf(m).then(function (blob) { return sparaIMotesmapp(K.motesmapp(m.typ, m.datum), m.status === 'utkast' ? K.motesfilnamn(m.datum, 'Protokoll ' + motesNamn(m).toLowerCase() + ' utkast') : protokollFilnamn(m), blob, true); })
+        .then(function (post) { visa('Sparat som ' + post.name + ' i ' + K.motesmapp(m.typ, m.datum) + '.'); }, function (err) { visa(err.message, true); });
+    },
+    'styr-spara-pdf-mapp': function (t) {
+      var c = pdfCache[t.dataset.pdf];
+      if (!c || c.status !== 'klar') return;
+      sparaIMotesmapp(t.dataset.mapp, t.dataset.fil, c.blob, true).then(function () { visa('Sparat som ' + t.dataset.fil + ' i ' + t.dataset.mapp + '.'); render(); }, function (err) { visa(err.message, true); });
+    },
+    'styr-am-handling': function (t) {
+      var h = K.ARSMOTESHANDLINGAR.find(function (x) { return x[0] === t.dataset.nyckel; });
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.onchange = function () {
+        var fil = input.files[0];
+        if (!fil) return;
+        var andelse = (fil.name.match(/\.[a-z0-9]+$/i) || ['.pdf'])[0].toLowerCase();
+        visa('Laddar upp…');
+        sparaIMotesmapp(t.dataset.mapp, K.motesfilnamn(t.dataset.datum, h[1], andelse), fil, false)
+          .then(function (post) { visa(h[1] + ' är sparad som ' + post.name + '.'); }, function (err) { visa(err.message, true); });
+      };
+      input.click();
     },
     'styr-uppg-ny': function () {
       andraStyr('styr', K.laggTillUppgift(styrData(), { text: varde('nyUppgText'), ansvarig: varde('nyUppgAnsvarig'), datum: varde('nyUppgDatum') }));
@@ -10307,10 +10562,12 @@ var VERSIONER = [
     },
     'od-flytta': function () {
       var sokvag = varde('odNyMapp');
-      if (!window.confirm('Flytta appens filer till ' + sokvag + '? Dina andra filer i OneDrive rörs inte.')) return;
-      flyttaAppensFiler(sokvag).then(function (res) {
-        visa('Klart: ' + antal(res.antal, 'fil är flyttad', 'filer är flyttade') + ' till ' + sokvag + '. Tomma mappar som appen skapade kan finnas kvar i ' + res.gammal + '; dem kan du ta bort i OneDrive.');
-      }).catch(function (err) { sattStatus('Flytten avbröts', true); visa('Flytten avbröts: ' + err.message + ' Inget är borttaget. Försök igen; det som redan flyttats hittas ändå.', true); });
+      var opt = { styrelsearbete: (document.getElementById('odFlyttaSA') || {}).checked, aldre: (document.getElementById('odFlyttaAldre') || {}).checked };
+      if (!window.confirm('Samla appens mappar i ' + sokvag + '? Inget tas bort.')) return;
+      samlaIAdministration(sokvag, opt).then(function (res) {
+        render();
+        visa('Klart. Appens mappar ligger nu i ' + sokvag + '. ' + (res.gjort.length ? 'Flyttat: ' + res.gjort.join('; ') + '. ' : '') + (res.delat ? 'Styrelsearbete är delat med ' + antal(res.delat, 'person', 'personer') + '.' : ''));
+      }).catch(function (err) { sattStatus('Flytten avbröts', true); visa('Flytten avbröts: ' + err.message + ' Inget är borttaget. Det som redan flyttats ligger i den nya mappen; försök igen så fortsätter appen.', true); });
     },
     'od-valj-mapp': function () {
       var sokvag = varde('odSokvag');
@@ -10388,7 +10645,7 @@ var VERSIONER = [
       od.rot = null;
       od.mapp = null; od.lage = null; od.eTag = null; od.senast = null; od.smutsig = false; odNu.mappar = {}; odNu.konflikt = false; odNu.delade = null;
       od.regMapp = null; od.regETag = null; odNu.regKonflikt = false;
-      od.styrMapp = null; od.uppdragLas = null;
+      od.styrMapp = null; od.styrRot = null; od.uppdragLas = null; odNu.motesHistorik = null; odNu.amHandlingar = {};
       ['styr', 'upp'].forEach(function (k) { sty[k].eTag = null; });
       sparaStyrLokalt();
       sparaOd();
