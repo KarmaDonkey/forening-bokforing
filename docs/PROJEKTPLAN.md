@@ -55,7 +55,7 @@ Lagen kräver troligen inte formellt att vi bokför, eftersom en ideell förenin
 | **5. Bankavstämning** (klar, 1.3) | Import av bankens CSV, matchning mot verifikationer, lista över omatchade rader | Bankkontot stämmer mot banken månad för månad |
 | **6. Bokslut och årsmöte** (klar, 1.4) | Årsbokslut, resultatdisposition, nytt år, PDF-rapporter, budget | Årsmöteshandlingarna för 2026 kommer ur verktyget |
 | **7. Delning** | Installationsguide och första-gången-flöde för andra föreningar, inga hårdkodade uppgifter | En annan förening kan komma igång själv |
-| **8. Medlemmar och terminsavgifter** (klar, 1.12) | Medlemsregister, betalare (Swish-nummer och bankgiroreferenser) kopplade till medlemmar, avgifter per termin, uppdelning på medlemsavgift och terminsavgift, statistik per termin | Statistiken för en termin kommer ur verktyget |
+| **8. Medlemmar och terminsavgifter** (klar, 1.12–1.13) | Medlemsregister, betalare (Swish-nummer och bankgiroreferenser) kopplade till medlemmar, avgifter per termin, uppdelning på medlemsavgift och terminsavgift, statistik per termin, eget register skilt från bokföringen, avförande enligt stadgarna, kvitton till medlemmar | Statistiken för en termin kommer ur verktyget |
 
 Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faserna 0–6 till början av 2027.
 
@@ -69,7 +69,10 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 ## Integritet
 
 - Koden kan vara publik. Bokföringsdata, medlemsnamn och underlag ligger bara i OneDrive.
-- Medlemsregistret (namn, kategori och vilka Swish-nummer som betalar för vem) sparas i samma fil som bokföringen och kan rensas separat. Testerna använder bara påhittade namn och nummer.
+- Medlemsregistret (namn, kategori och vilka Swish-nummer som betalar för vem) sparas i en egen fil i en egen mapp bredvid bokföringsmappen (från version 1.13). Den som får läsa bokföringen ser inga namn, och verifikationerna innehåller inga namn.
+- Medlemmar avförs vid utträde eller enligt stadgarna (ingen årsavgift två verksamhetsår i följd). Då tas namn och telefonnummer bort; betalningarna finns kvar utan namn för statistiken.
+- Kvitton till medlemmar: bara kvittonummer och datum sparas. Personnummer och andra uppgifter på kvittot sparas inte.
+- Testerna använder bara påhittade namn och nummer.
 - Analysen i fas 1 görs direkt på din dator. Filerna kopieras inte till GitHub.
 - Claude-anropen går från din webbläsare med föreningens egen API-nyckel. Underlagen skickas bara när du själv läser in dem.
 

@@ -69,13 +69,13 @@ test('känd betalare: terminsavgift plus årsavgift första gången under året'
   assert.equal(f.termin, 'VT-30');
   eq(f.poster, [{ medlem: 'm1', typ: 'termin', belopp: kr(1000) }, { medlem: 'm1', typ: 'arsavgift', belopp: kr(400) }]);
   eq(K.avgiftsrader(reg, f.poster, '1930', kr(1400)), [{ konto: '1930', belopp: kr(1400) }, { konto: '3020', belopp: kr(-1000) }, { konto: '3010', belopp: kr(-400) }]);
-  assert.equal(K.avgiftstext(reg, f.termin, f.poster), 'Medlems- och terminsavgift VT-30: Påhittad Ett');
+  assert.equal(K.avgiftstext(reg, f.termin, f.poster), 'Medlems- och terminsavgift VT-30, 1 medlem');
   // Hösten samma år: årsavgiften är redan betald.
   reg = K.registreraBetalning(reg, { datum: '2030-02-01', belopp: kr(1400), termin: 'VT-30', nyckel: '+46701112233', poster: f.poster });
   const h = K.avgiftsforslag(reg, { datum: '2030-08-20', belopp: kr(1000), nyckel: '+46701112233' });
   assert.equal(h.stammer, true);
   eq(h.poster, [{ medlem: 'm1', typ: 'termin', belopp: kr(1000) }]);
-  assert.equal(K.avgiftstext(reg, h.termin, h.poster), 'Terminsavgift HT-30: Påhittad Ett');
+  assert.equal(K.avgiftstext(reg, h.termin, h.poster), 'Terminsavgift HT-30, 1 medlem');
 });
 
 test('två föräldrar kan betala för samma barn, och barnet räknas en gång', () => {
@@ -126,7 +126,7 @@ test('familjeavgiften tas en gång och funktionärer betalar bara årsavgift', (
   const t = K.avgiftsforslag(reg, { datum: '2030-02-01', belopp: kr(40), nyckel: '+46706666666' });
   assert.equal(t.stammer, true);
   eq(t.poster, [{ medlem: 'm4', typ: 'arsavgift', belopp: kr(40) }]);
-  assert.equal(K.avgiftstext(reg, t.termin, t.poster), 'Medlemsavgift 2030: Tränare Test');
+  assert.equal(K.avgiftstext(reg, t.termin, t.poster), 'Medlemsavgift 2030, 1 medlem');
 });
 
 test('registrering kontrolleras', () => {
@@ -226,6 +226,65 @@ test('avgifter kan läsas in från fil med föreningsuppgifter', () => {
 
 test('tomt register normaliseras', () => {
   const r = K.normaliseraRegister(undefined);
-  eq(Object.keys(r).sort(), ['arsavgift', 'betalare', 'betalningar', 'ignorerade', 'konton', 'medlemmar', 'terminer']);
+  eq(Object.keys(r).sort(), ['arsavgift', 'avforEfterAr', 'betalare', 'betalningar', 'format', 'ignorerade', 'konton', 'kvitton', 'medlemmar', 'terminer']);
+  assert.equal(K.registerHarData(r), false);
+  assert.equal(K.normaliseraRegister({ avforEfterAr: 3 }).avforEfterAr, 3);
+  assert.equal(K.normaliseraRegister({ avforEfterAr: 'x' }).avforEfterAr, 2);
   assert.equal(K.normaliseraRegister({ medlemmar: [{ id: 'm1' }] }).medlemmar.length, 1);
+});
+
+test('verifikationstexten innehåller inga namn', () => {
+  const reg = registret();
+  const poster = [{ medlem: 'm1', typ: 'termin', belopp: kr(1000) }, { medlem: 'm2', typ: 'termin', belopp: kr(1000) }];
+  const text = K.avgiftstext(reg, 'VT-30', poster);
+  assert.equal(text, 'Terminsavgift VT-30, 2 medlemmar');
+  assert.ok(!/Påhittad/.test(text));
+});
+
+test('avförande tar bort namn och betalarens nummer men behåller statistiken', () => {
+  let reg = registret();
+  reg = K.kopplaBetalare(reg, { nyckel: '+46701111111' }, ['m1']);
+  reg = K.kopplaBetalare(reg, { nyckel: '+46702222222' }, ['m1', 'm2']);
+  reg = K.registreraBetalning(reg, { datum: '2030-02-01', belopp: kr(1400), termin: 'VT-30', nyckel: '+46701111111', poster: [{ medlem: 'm1', typ: 'termin', belopp: kr(1000) }, { medlem: 'm1', typ: 'arsavgift', belopp: kr(400) }] });
+  reg = K.avforMedlem(reg, 'm1', '2033-01-10', 'stadgarna');
+  eq(reg.medlemmar[0], { id: 'm1', namn: 'Tidigare medlem', kategori: 'barn', avford: '2033-01-10', orsak: 'stadgarna' });
+  eq(reg.betalare, [{ nyckel: '+46702222222', visning: '+46702222222', namn: '', medlemmar: ['m2'] }]);
+  assert.equal(reg.betalningar[0].nyckel, '');
+  assert.equal(K.terminsstatistik(reg, 'VT-30').totalt.antal, 1);
+  assert.throws(() => K.avforMedlem(reg, 'm1', '2033-01-11'), /redan avförd/);
+});
+
+test('att avföra enligt stadgarna: två hela verksamhetsår utan årsavgift', () => {
+  let reg = registret();
+  const ars = (medlem, datum) => { reg = K.registreraBetalning(reg, { datum, termin: K.terminForDatum(datum), belopp: kr(400), poster: [{ medlem, typ: 'arsavgift', belopp: kr(400) }] }); };
+  ars('m1', '2030-02-01');
+  ars('m2', '2031-02-01');
+  reg = K.laggTillMedlem(reg, { namn: 'Ny Medlem', kategori: 'vuxen', tillagd: '2032-05-01' }).reg;
+  // Den 2033-01-15 gäller 2031 och 2032: m1 betalade senast 2030, m3 och m4 aldrig. m2 betalade 2031. m5 är för ny.
+  const lista = K.attAvfora(reg, '2033-01-15');
+  eq(lista.map((x) => [x.medlem, x.senastBetalt]), [['m1', '2030'], ['m4', null], ['m3', null]]);
+  eq(lista[0].ar, ['2031', '2032']);
+  // Betalt i år: inte aktuell, även om de två föregående åren saknas.
+  ars('m4', '2033-01-12');
+  eq(K.attAvfora(reg, '2033-01-15').map((x) => x.medlem), ['m1', 'm3']);
+  reg.avforEfterAr = 3;
+  eq(K.attAvfora(reg, '2033-01-15').map((x) => x.medlem), ['m3']);
+});
+
+test('kvitto: rader för en medlem, löpnummer och registrering', () => {
+  let reg = registret();
+  reg = K.andraMedlem(reg, 'm1', { kategori: 'familj' });
+  reg = K.andraMedlem(reg, 'm2', { kategori: 'familj' });
+  reg = K.registreraBetalning(reg, { datum: '2030-02-01', belopp: kr(2900), termin: 'VT-30', nyckel: '+46701111111', poster: [{ medlem: 'm1', typ: 'termin', belopp: kr(2500) }, { medlem: 'm1', typ: 'arsavgift', belopp: kr(400) }, { medlem: 'm2', typ: 'termin', belopp: 0 }] });
+  reg = K.registreraBetalning(reg, { datum: '2031-02-01', belopp: kr(2000), termin: 'VT-31', nyckel: 'ref:123', poster: [{ medlem: 'm3', typ: 'termin', belopp: kr(2000) }] });
+  eq(K.kvittorader(reg, 'm1', null, '2030').map((r) => [r.text, r.belopp, r.betalsatt]), [['Medlemsavgift 2030 (del av betalning ' + K.formatBelopp(kr(2900)) + ' kr)', kr(400), 'Swish'], ['Terminsavgift VT-30 (del av betalning ' + K.formatBelopp(kr(2900)) + ' kr)', kr(2500), 'Swish']]);
+  eq(K.kvittorader(reg, 'm2').map((r) => [r.text, r.belopp]), [['Terminsavgift VT-30 (ingår i familjeavgift)', 0]]);
+  eq(K.kvittorader(reg, 'm3').map((r) => [r.text, r.betalsatt]), [['Terminsavgift VT-31', 'Bankgiro']]);
+  eq(K.kvittorader(reg, 'm3', null, '2030'), []);
+  assert.equal(K.nastaKvittonummer(reg, '2030'), 'M-2030-001');
+  reg = K.registreraKvitto(reg, { nr: 'M-2030-001', datum: '2030-03-01', medlem: 'm1' });
+  reg = K.registreraKvitto(reg, { nr: 'M-2030-001', datum: '2030-03-01', medlem: 'm1' });
+  assert.equal(reg.kvitton.length, 1);
+  assert.equal(K.nastaKvittonummer(reg, '2030'), 'M-2030-002');
+  assert.equal(K.nastaKvittonummer(reg, '2031'), 'M-2031-001');
 });

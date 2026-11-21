@@ -309,6 +309,17 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.13', datum: '2026-11-21',
+    nyheter: [
+      'Medlemsregistret sparas för sig, i en egen mapp bredvid bokföringsmappen i OneDrive. Den som får läsa bokföringen, till exempel revisorn, ser inga namn.',
+      'Verifikationer för avgifter innehåller inga namn, bara antal medlemmar.',
+      'Statistiken som PDF finns som sammanställning utan namn, och som lista med namn bara för kassören.',
+      'Utträde och avförande enligt stadgarna: medlemmar som inte betalat årsavgift två verksamhetsår i följd listas, och när de avförs tas namn och telefonnummer bort.',
+      'Kvitto på betalda avgifter till medlemmar som begär det, med fält för övriga uppgifter som inte sparas.',
+      'Medlemsregistret har en egen säkerhetskopia, och en sida som beskriver hur personuppgifterna hanteras.'
+    ]
+  },
+  {
     version: '1.12', datum: '2026-11-21',
     nyheter: [
       'Ny flik Medlemmar med medlemsregister, betalare och avgifter per termin.',
@@ -1931,7 +1942,7 @@ var VERSIONER = [
   var KATEGORI_KORT = { barn: 'Barn', student: 'Student', vuxen: 'Vuxen', familj: 'Familj', funktionar: 'Funktionär' };
 
   function tomtRegister() {
-    return { medlemmar: [], betalare: [], terminer: [], arsavgift: { vanlig: 0, funktionar: 0 }, konton: { medlemsavgift: '', terminsavgift: '' }, betalningar: [], ignorerade: [] };
+    return { format: 'foreningsbokforing-medlemsregister', medlemmar: [], betalare: [], terminer: [], arsavgift: { vanlig: 0, funktionar: 0 }, konton: { medlemsavgift: '', terminsavgift: '' }, betalningar: [], ignorerade: [], kvitton: [], avforEfterAr: 2 };
   }
 
   function normaliseraRegister(r) {
@@ -1939,9 +1950,14 @@ var VERSIONER = [
     r = r && typeof r === 'object' ? r : {};
     Object.keys(t).forEach(function (k) {
       if (Array.isArray(t[k])) t[k] = Array.isArray(r[k]) ? r[k] : [];
-      else t[k] = Object.assign(t[k], r[k] || {});
+      else if (typeof t[k] === 'object') t[k] = Object.assign(t[k], r[k] || {});
+      else if (k === 'avforEfterAr') t[k] = Number.isInteger(r[k]) && r[k] > 0 ? r[k] : t[k];
     });
     return t;
+  }
+
+  function registerHarData(r) {
+    return !!(r && (r.medlemmar.length || r.betalare.length || r.betalningar.length || r.terminer.length || r.konton.medlemsavgift || r.konton.terminsavgift));
   }
 
   function kategorinamn(k) {
@@ -2034,6 +2050,7 @@ var VERSIONER = [
     if (!namn) throw BokforingsFel('Medlemmen behöver ett namn.');
     if (!KATEGORIER.some(function (k) { return k[0] === kategori; })) throw BokforingsFel('Välj kategori för medlemmen.');
     var m = { id: nyttRegisterId(reg.medlemmar, 'm'), namn: namn, kategori: kategori };
+    if (uppgifter.tillagd) m.tillagd = uppgifter.tillagd;
     return { reg: Object.assign({}, reg, { medlemmar: reg.medlemmar.concat([m]) }), medlem: m };
   }
 
@@ -2173,16 +2190,14 @@ var VERSIONER = [
     return ut;
   }
 
+  // Texten i verifikationen innehåller inga namn; vilka det gäller finns bara i medlemsregistret.
   function avgiftstext(reg, termin, poster) {
-    var namn = [];
-    poster.forEach(function (p) {
-      var m = reg.medlemmar.find(function (x) { return x.id === p.medlem; });
-      if (m && namn.indexOf(m.namn) < 0) namn.push(m.namn);
-    });
+    var ids = [];
+    poster.forEach(function (p) { if (ids.indexOf(p.medlem) < 0) ids.push(p.medlem); });
     var harArs = poster.some(function (p) { return p.typ === 'arsavgift' && p.belopp; });
     var harTermin = poster.some(function (p) { return p.typ === 'termin' && p.belopp; });
     var rubrik = harArs && harTermin ? 'Medlems- och terminsavgift ' + termin : harArs ? 'Medlemsavgift ' + kalenderarForTermin(termin) : 'Terminsavgift ' + termin;
-    return rubrik + (namn.length ? ': ' + namn.join(', ') : '');
+    return rubrik + ', ' + ids.length + (ids.length === 1 ? ' medlem' : ' medlemmar');
   }
 
   // Verifikationsrader för en avgiftsbetalning: bankkontot mot terminsavgift och medlemsavgift.
@@ -2286,6 +2301,93 @@ var VERSIONER = [
       KATEGORIER.forEach(function (k) { rad[k[0]] = s.perKategori[k[0]].antal; });
       return rad;
     }).filter(function (r) { return r.antal > 0; });
+  }
+
+
+  // ---------- Avförande och kvitton ----------
+
+  // Avför en medlem (utträde eller enligt stadgarna) och tar bort personuppgifterna.
+  // Betalningarna finns kvar för statistiken, men utan namn och utan koppling till betalarens nummer.
+  function avforMedlem(reg, id, datum, orsak) {
+    var m = reg.medlemmar.find(function (x) { return x.id === id; });
+    if (!m) throw BokforingsFel('Medlemmen finns inte.');
+    if (m.avford) throw BokforingsFel('Medlemmen är redan avförd.');
+    var betalare = reg.betalare.map(function (b) { return Object.assign({}, b, { medlemmar: b.medlemmar.filter(function (x) { return x !== id; }) }); })
+      .filter(function (b) { return b.medlemmar.length > 0; });
+    var kvar = {};
+    betalare.forEach(function (b) { kvar[b.nyckel] = true; });
+    return Object.assign({}, reg, {
+      medlemmar: reg.medlemmar.map(function (x) { return x.id === id ? { id: x.id, namn: 'Tidigare medlem', kategori: x.kategori, avford: datum, orsak: orsak || '' } : x; }),
+      betalare: betalare,
+      // Betalarens nummer sparas inte längre på betalningar som bara gällde den här medlemmen.
+      betalningar: reg.betalningar.map(function (b) {
+        if (!b.nyckel || kvar[b.nyckel] || !b.poster.every(function (p) { return p.medlem === id; })) return b;
+        return Object.assign({}, b, { nyckel: '' });
+      })
+    });
+  }
+
+  function arsavgiftsAr(reg, medlemId, arMap) {
+    var ar = {};
+    giltigaBetalningar(reg, arMap).forEach(function (b) {
+      if (b.poster.some(function (p) { return p.medlem === medlemId && p.typ === 'arsavgift' && p.belopp > 0; })) ar[kalenderarForTermin(b.termin)] = true;
+    });
+    return ar;
+  }
+
+  // Medlemmar som inte betalat årsavgift de senaste hela verksamhetsåren (stadgarnas regel, normalt två år).
+  function attAvfora(reg, datum, arMap) {
+    var n = reg.avforEfterAr || 2;
+    var iAr = Number(datum.slice(0, 4));
+    var ar = [];
+    for (var i = n; i >= 1; i--) ar.push(String(iAr - i));
+    return reg.medlemmar.filter(function (m) {
+      if (m.avford) return false;
+      if (m.tillagd && Number(m.tillagd.slice(0, 4)) > iAr - n) return false;
+      var betalt = arsavgiftsAr(reg, m.id, arMap);
+      // Den som redan betalat i år är medlem, oavsett tidigare år.
+      return !betalt[String(iAr)] && ar.every(function (a) { return !betalt[a]; });
+    }).map(function (m) {
+      var betalt = Object.keys(arsavgiftsAr(reg, m.id, arMap)).sort();
+      return { medlem: m.id, namn: m.namn, kategori: m.kategori, senastBetalt: betalt.length ? betalt[betalt.length - 1] : null, ar: ar };
+    }).sort(function (a, b) { return a.namn.localeCompare(b.namn, 'sv'); });
+  }
+
+  function betalsatt(nyckel) {
+    if (/^\+46/.test(nyckel || '')) return 'Swish';
+    if (/^ref:/.test(nyckel || '')) return 'Bankgiro';
+    return nyckel ? 'Bank' : '';
+  }
+
+  // Det som en medlem har betalat, rad för rad, för ett kvitto. ar = kalenderår eller tomt för alla.
+  function kvittorader(reg, medlemId, arMap, ar) {
+    var rader = [];
+    giltigaBetalningar(reg, arMap).forEach(function (b) {
+      if (ar && b.datum.slice(0, 4) !== ar) return;
+      var familj = b.poster.length > 1 && b.poster.some(function (p) { return p.medlem !== medlemId; });
+      b.poster.forEach(function (p) {
+        if (p.medlem !== medlemId) return;
+        if (p.typ === 'termin' && p.belopp === 0 && !familj) return;
+        rader.push({
+          betalning: b.id, datum: b.datum, typ: p.typ, termin: b.termin, belopp: p.belopp, betalsatt: betalsatt(b.nyckel),
+          text: (p.typ === 'arsavgift' ? 'Medlemsavgift ' + kalenderarForTermin(b.termin) : 'Terminsavgift ' + b.termin) +
+            (p.typ === 'termin' && p.belopp === 0 ? ' (ingår i familjeavgift)' : familj ? ' (del av betalning ' + formatBelopp(b.belopp) + ' kr)' : '')
+        });
+      });
+    });
+    return rader.sort(function (a, b) { return a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : (a.typ === 'arsavgift' ? -1 : 1); });
+  }
+
+  function nastaKvittonummer(reg, ar) {
+    var prefix = 'M-' + ar + '-';
+    var max = reg.kvitton.reduce(function (m, k) { return k.nr.indexOf(prefix) === 0 ? Math.max(m, Number(k.nr.slice(prefix.length)) || 0) : m; }, 0);
+    return prefix + String(max + 1).padStart(3, '0');
+  }
+
+  // Bara numret, datumet och vem kvittot gällde sparas. Övriga uppgifter på kvittot sparas inte.
+  function registreraKvitto(reg, kvitto) {
+    if (reg.kvitton.some(function (k) { return k.nr === kvitto.nr; })) return reg;
+    return Object.assign({}, reg, { kvitton: reg.kvitton.concat([{ nr: kvitto.nr, datum: kvitto.datum, medlem: kvitto.medlem }]) });
   }
 
   // Två lediga intäktskonton att föreslå om föreningen inte redan har konton för avgifterna.
@@ -2517,6 +2619,13 @@ var VERSIONER = [
     terminsstatistik: terminsstatistik,
     terminshistorik: terminshistorik,
     foreslaAvgiftskonton: foreslaAvgiftskonton,
+    registerHarData: registerHarData,
+    avforMedlem: avforMedlem,
+    attAvfora: attAvfora,
+    betalsatt: betalsatt,
+    kvittorader: kvittorader,
+    nastaKvittonummer: nastaKvittonummer,
+    registreraKvitto: registreraKvitto,
     arMapp: arMapp,
     underlagSokvag: underlagSokvag,
     kvittoSokvag: kvittoSokvag
@@ -2530,6 +2639,10 @@ var VERSIONER = [
   'use strict';
   var K = window.Karna;
   var LAGRING = 'forening-bokforing:v1';
+  // Medlemsregistret sparas för sig, i webbläsaren och i en egen mapp i OneDrive, aldrig i bokföringsfilen.
+  var REG_LAGRING = 'forening-bokforing:medlemsregister';
+  var REGFIL = 'Medlemsregister.json';
+  var senastRegJson = null;
 
   var NYCKEL = 'forening-bokforing:claude-nyckel';
   var NYCKEL_UTGAR = 'forening-bokforing:claude-nyckel-utgar';
@@ -2559,27 +2672,58 @@ var VERSIONER = [
   // ---------- Lagring ----------
 
   function ladda() {
+    var inbaddat = null;
     try {
       var rad = localStorage.getItem(LAGRING);
       if (rad) {
         var d = JSON.parse(rad);
-        if (d && d.format === 1 && d.ar) store = d;
+        if (d && d.format === 1 && d.ar) { store = d; inbaddat = d.medlemsregister || null; }
         if (!store.regler) store.regler = [];
         if (!store.motpartsregler) store.motpartsregler = [];
         LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
-        store.medlemsregister = K.normaliseraRegister(store.medlemsregister);
       }
     } catch (e) { /* tom lagring är okej */ }
+    var lokalt = null;
+    try { var regRad = localStorage.getItem(REG_LAGRING); if (regRad) lokalt = K.normaliseraRegister(JSON.parse(regRad)); } catch (e) { /* tomt */ }
+    if (lokalt && (K.registerHarData(lokalt) || !inbaddat)) {
+      store.medlemsregister = lokalt;
+      senastRegJson = JSON.stringify(lokalt);
+    } else store.medlemsregister = K.normaliseraRegister(inbaddat);
+    // Version 1.12 sparade registret i bokföringen: flytta ut det.
+    if (inbaddat) { sparaRegister(); sparaLokalt(); }
+  }
+
+  // Bokföringen utan medlemsregistret, för webbläsaren, OneDrive och säkerhetskopian.
+  function bokforingsdata() {
+    var d = Object.assign({}, store);
+    delete d.medlemsregister;
+    return d;
+  }
+
+  // Sparar registret i webbläsaren och, om det har ändrats, i OneDrive en kort stund senare.
+  function sparaRegister() {
+    var rs = JSON.stringify(store.medlemsregister);
+    if (rs === senastRegJson) return false;
+    senastRegJson = rs;
+    try { localStorage.setItem(REG_LAGRING, rs); }
+    catch (e) { visa('Kunde inte spara medlemsregistret i webbläsaren.', true); }
+    if (odAnslutet() && !lasLage()) {
+      od.regSmutsig = true;
+      sparaOd();
+      schemalaggSynk();
+    }
+    return true;
   }
 
   function sparaLokalt() {
-    try { localStorage.setItem(LAGRING, JSON.stringify(store)); }
+    try { localStorage.setItem(LAGRING, JSON.stringify(bokforingsdata())); }
     catch (e) { visa('Kunde inte spara i webbläsaren. Exportera en säkerhetskopia under År och arkiv.', true); }
   }
 
   // Sparar i webbläsaren och, när appen är kopplad till OneDrive, även där en kort stund senare.
   function spara() {
     sparaLokalt();
+    sparaRegister();
     if (odAnslutet() && !lasLage()) {
       od.smutsig = true;
       sparaOd();
@@ -2975,7 +3119,7 @@ var VERSIONER = [
     if (typeof post === 'number') return null;
     od.mapp = inst.mapp;
     od.lage = inst.lage === 'lasare' ? 'lasare' : 'agare';
-    od.eTag = null; od.senast = null;
+    od.eTag = null; od.senast = null; od.regETag = null;
     sparaOd();
     await forstaSynk();
     return 'mapp';
@@ -3008,7 +3152,7 @@ var VERSIONER = [
     if (!post.folder) throw new Error(sokvag + ' är en fil, inte en mapp.');
     od.mapp = { driveId: post.parentReference.driveId, id: post.id, namn: post.name, sokvag: sokvag };
     od.lage = 'agare';
-    od.eTag = null; od.senast = null;
+    od.eTag = null; od.senast = null; od.regETag = null;
     sparaOd();
     sparaAppinstallningar({ mapp: od.mapp, lage: 'agare' }).catch(function () { /* frivilligt */ });
     await forstaSynk();
@@ -3040,6 +3184,7 @@ var VERSIONER = [
       od.smutsig = true;
       sparaOd();
       await synkaUpp();
+      await hamtaRegister().catch(function (err) { odNu.regFel = 'Medlemsregistret: ' + err.message; });
       return 'uppladdat';
     }
     if (harLokalData() && !lasLage()) {
@@ -3048,6 +3193,7 @@ var VERSIONER = [
       return 'konflikt';
     }
     await hamtaOchTillampa(meta);
+    await hamtaRegister().catch(function (err) { odNu.regFel = 'Medlemsregistret: ' + err.message; });
     return 'hamtat';
   }
 
@@ -3059,18 +3205,24 @@ var VERSIONER = [
     Object.keys(data.ar).forEach(function (id) { K.valideraAr(data.ar[id]).forEach(function (f) { fel.push(id + ': ' + f); }); });
     if (fel.length) throw new Error('Bokföringen i OneDrive har fel och lästes inte in: ' + fel.slice(0, 3).join(' '));
     var aktivtNu = store.aktivt;
+    var inbaddat = data.medlemsregister;
+    delete data.medlemsregister;
+    var reg = store.medlemsregister;
     store = data;
+    // Den som bara läser får aldrig medlemsregistret. Ett register från version 1.12 flyttas ut ur bokföringsfilen.
+    store.medlemsregister = lasLage() ? K.tomtRegister() : (inbaddat && !K.registerHarData(reg) ? K.normaliseraRegister(inbaddat) : reg);
     if (!store.regler) store.regler = [];
     if (!store.motpartsregler) store.motpartsregler = [];
     LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
-    store.medlemsregister = K.normaliseraRegister(store.medlemsregister);
     if (aktivtNu && store.ar[aktivtNu]) store.aktivt = aktivtNu;
     if (!store.ar[store.aktivt]) store.aktivt = Object.keys(store.ar).sort().pop() || null;
     od.eTag = meta.eTag;
-    od.smutsig = false;
+    od.smutsig = !!inbaddat && !lasLage();
     od.senast = new Date().toISOString();
     sparaOd();
     sparaLokalt();
+    if (!lasLage()) sparaRegister();
+    if (od.smutsig) schemalaggSynk();
     odNu.konflikt = false;
     odNu.konfliktForsta = false;
     await laddaLogo();
@@ -3079,6 +3231,11 @@ var VERSIONER = [
 
   // Hämtar senaste versionen om någon annan enhet har sparat. Ändringar här som inte hunnit sparas ger en krock.
   async function hamtaFranOneDrive() {
+    await hamtaBokforing();
+    await hamtaRegister().catch(function (err) { odNu.regFel = 'Medlemsregistret: ' + err.message; });
+  }
+
+  async function hamtaBokforing() {
     if (!odAnslutet() || odNu.konflikt) return;
     odNu.senastHamtat = Date.now();
     var meta = await graf(iMappen(DATAFIL), { tillat: [404] });
@@ -3095,6 +3252,92 @@ var VERSIONER = [
     await hamtaOchTillampa(meta);
   }
 
+
+  // ---------- Medlemsregistret i OneDrive ----------
+  // Registret ligger i en egen mapp bredvid bokföringsmappen. Den som får bokföringsmappen delad med sig
+  // (t.ex. revisorn) ser därför inga namn. Bara den som äger bokföringen synkar registret.
+
+  function regAnslutet() { return odAnslutet() && !lasLage(); }
+  function iRegMappen() { return '/drives/' + od.regMapp.driveId + '/items/' + od.regMapp.id + ':/' + enc(REGFIL) + ':'; }
+
+  async function sakerstallRegMapp() {
+    if (od.regMapp && od.regMapp.for === od.mapp.id) return;
+    var inst = await lasAppinstallningar().catch(function () { return {}; });
+    if (inst.regMapp && inst.regMapp.for === od.mapp.id) {
+      var finns = await graf('/drives/' + inst.regMapp.driveId + '/items/' + inst.regMapp.id, { tillat: [403, 404] });
+      if (typeof finns !== 'number') { od.regMapp = inst.regMapp; sparaOd(); return; }
+    }
+    var mapp = await graf('/drives/' + od.mapp.driveId + '/items/' + od.mapp.id + '?$select=id,name,parentReference');
+    var foralder = mapp.parentReference && mapp.parentReference.id;
+    if (!foralder) throw new Error('Hittar inte mappen ovanför bokföringsmappen.');
+    var namn = mapp.name + ' – medlemsregister';
+    var ny = await graf('/drives/' + od.mapp.driveId + '/items/' + foralder + '/children', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: namn, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }), tillat: [409]
+    });
+    if (ny === 409) ny = await graf('/drives/' + od.mapp.driveId + '/items/' + foralder + ':/' + enc(namn) + ':');
+    od.regMapp = { driveId: od.mapp.driveId, id: ny.id, namn: namn, for: od.mapp.id };
+    od.regETag = null;
+    sparaOd();
+    sparaAppinstallningar({ regMapp: od.regMapp }).catch(function () { /* frivilligt */ });
+  }
+
+  async function synkaRegister() {
+    if (!regAnslutet() || odNu.regKonflikt || !od.regSmutsig) return;
+    await sakerstallRegMapp();
+    var rubriker = { 'Content-Type': 'application/json' };
+    if (od.regETag) rubriker['If-Match'] = od.regETag;
+    var res = await graf(iRegMappen() + '/content', { method: 'PUT', headers: rubriker, body: JSON.stringify(store.medlemsregister), tillat: [412], ra: true });
+    if (res.status === 412) { odNu.regKonflikt = true; return; }
+    var post = await res.json();
+    od.regETag = post.eTag;
+    od.regSmutsig = false;
+    sparaOd();
+  }
+
+  async function lasRegisterFil() {
+    var res = await graf(iRegMappen() + '/content', { ra: true });
+    var data = await res.json();
+    if (!data || data.format !== 'foreningsbokforing-medlemsregister') throw new Error('Medlemsregistret i OneDrive har ett okänt format.');
+    return K.normaliseraRegister(data);
+  }
+
+  function tillampaRegister(reg, eTag) {
+    store.medlemsregister = reg;
+    senastRegJson = JSON.stringify(reg);
+    try { localStorage.setItem(REG_LAGRING, senastRegJson); } catch (e) { /* tomt */ }
+    od.regETag = eTag;
+    od.regSmutsig = false;
+    odNu.regKonflikt = false;
+    sparaOd();
+  }
+
+  async function hamtaRegister() {
+    if (!regAnslutet() || odNu.regKonflikt) return;
+    await sakerstallRegMapp();
+    var meta = await graf(iRegMappen(), { tillat: [404] });
+    if (meta === 404) {
+      if (K.registerHarData(store.medlemsregister)) { od.regSmutsig = true; od.regETag = null; sparaOd(); await synkaRegister(); }
+      return;
+    }
+    if (meta.eTag === od.regETag) { if (od.regSmutsig) await synkaRegister(); return; }
+    var fjarr = await lasRegisterFil();
+    if (od.regSmutsig && K.registerHarData(store.medlemsregister) && JSON.stringify(fjarr) !== JSON.stringify(store.medlemsregister)) {
+      odNu.regKonflikt = true;
+      return;
+    }
+    tillampaRegister(fjarr, meta.eTag);
+  }
+
+  function regKonfliktBanner() {
+    if (!odNu.regKonflikt) return '';
+    return '<div class="card fel" role="alert"><strong>Medlemsregistret har ändrats i OneDrive från en annan enhet samtidigt som det ändrats här.</strong>' +
+      '<p>Välj vilken version som ska gälla. Den andra försvinner, så spara gärna en kopia av den här versionen först.</p>' +
+      '<div class="row"><button class="btn btn-small" data-action="od-reg-onedrive">Använd versionen i OneDrive</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="od-reg-behall">Behåll den här webbläsarens version</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="exportera-register">Spara en kopia av den här versionen</button></div></div>';
+  }
+
   function schemalaggSynk() {
     clearTimeout(odNu.timer);
     sattStatus('Ej sparat i OneDrive ännu…');
@@ -3108,16 +3351,20 @@ var VERSIONER = [
     sattStatus('Sparar i OneDrive…');
     try {
       await synkaFiler();
-      var rubriker = { 'Content-Type': 'application/json' };
-      if (od.eTag) rubriker['If-Match'] = od.eTag;
-      var res = await graf(iMappen(DATAFIL) + '/content', { method: 'PUT', headers: rubriker, body: JSON.stringify(store), tillat: [412], ra: true });
-      if (res.status === 412) { odNu.konflikt = true; sattStatus('Krock med OneDrive', true); return; }
-      var post = await res.json();
-      od.eTag = post.eTag;
-      od.smutsig = false;
-      od.senast = new Date().toISOString();
-      sparaOd();
-      sattStatus('Synkad med OneDrive');
+      if (od.smutsig) {
+        var rubriker = { 'Content-Type': 'application/json' };
+        if (od.eTag) rubriker['If-Match'] = od.eTag;
+        var res = await graf(iMappen(DATAFIL) + '/content', { method: 'PUT', headers: rubriker, body: JSON.stringify(bokforingsdata()), tillat: [412], ra: true });
+        if (res.status === 412) { odNu.konflikt = true; sattStatus('Krock med OneDrive', true); return; }
+        var post = await res.json();
+        od.eTag = post.eTag;
+        od.smutsig = false;
+        od.senast = new Date().toISOString();
+        sparaOd();
+      }
+      try { await synkaRegister(); odNu.regFel = null; }
+      catch (e) { odNu.regFel = 'Medlemsregistret kunde inte sparas i OneDrive: ' + e.message; }
+      sattStatus(odNu.regKonflikt ? 'Krock i medlemsregistret' : 'Synkad med OneDrive', odNu.regKonflikt);
     } catch (err) {
       sattStatus('Kunde inte spara i OneDrive: ' + err.message, true);
       throw err;
@@ -3228,6 +3475,7 @@ var VERSIONER = [
     odNu.token = null;
     odNu.mappar = {};
     odNu.konflikt = false;
+    odNu.regKonflikt = false;
     sparaOd();
     sattStatus('');
   }
@@ -3924,7 +4172,9 @@ var VERSIONER = [
     var doc = nyPdf(await laddaJsPdf());
     var f = store.forening;
     var V = 15, H = 195, NED = 278;
-    var titel = typ === 'medl' ? 'Terminsavgifter ' + konto : RAPPORTTITLAR[typ] + (typ === 'hb' ? ' ' + konto + ' ' + K.kontonamn(ar, konto) : '');
+    var medNamn = typ === 'medln';
+    if (medNamn) typ = 'medl';
+    var titel = typ === 'medl' ? 'Terminsavgifter ' + konto + (medNamn ? ', med namn' : '') : RAPPORTTITLAR[typ] + (typ === 'hb' ? ' ' + konto + ' ' + K.kontonamn(ar, konto) : '');
     var y;
     // Sidhuvud
     var logoH = ritaLogo(doc, V, 12, 18, 16);
@@ -4033,6 +4283,11 @@ var VERSIONER = [
       });
       rad(['Totalt', String(s.totalt.antal), '', kr(s.totalt.termin), kr(s.totalt.arsavgift)], 'total');
       kol = null;
+      if (!medNamn) {
+        avsnitt('Översikt');
+        text('Har betalat: ' + s.totalt.antal + '. Har betalat mindre än avgiften: ' + s.forLite.length + '. Betalade ' + K.foregaendeTermin(konto) + ' men inte ' + konto + ': ' + s.slutat.length + '.');
+      } else {
+      doc.setTextColor(170, 40, 40); text('Innehåller personuppgifter. Bara för kassören, dela inte vidare.'); doc.setTextColor(26, 26, 26);
       avsnitt('Har betalat (' + s.betalande.length + ')');
       if (s.betalande.length) {
         kol = [{ r: 'Namn', x: V, w: 62 }, { r: 'Kategori', x: 80, w: 28 }, { r: 'Datum', x: 110, w: 30 }, { r: 'Terminsavgift', x: 168, align: R }, { r: 'Årsavgift', x: H, align: R }];
@@ -4046,6 +4301,7 @@ var VERSIONER = [
       }
       avsnitt('Betalade ' + K.foregaendeTermin(konto) + ' men inte ' + konto + ' (' + s.slutat.length + ')');
       s.slutat.length ? s.slutat.forEach(function (m) { text(m.namn + (m.kategori ? ' (' + (K.KATEGORI_KORT[m.kategori] || '') + ')' : '')); }) : text('Inga.');
+      }
       var hist = K.terminshistorik(reg(), store.ar);
       if (hist.length) {
         avsnitt('Utveckling');
@@ -4167,6 +4423,7 @@ var VERSIONER = [
   function delaEllerLaddaNer(nyckel, dela) {
     var c = pdfCache[nyckel];
     if (!c || c.status !== 'klar') return;
+    setTimeout(function () { kvittoAnvant(nyckel); }, 0);
     var namn = nyckel.split('|')[1];
     if (dela) {
       // Bara filen, utan titel eller text: då tar Mail, Messenger och WhatsApp emot den som en bilaga.
@@ -4283,7 +4540,7 @@ var VERSIONER = [
     renderArvaljare();
     var nav = document.getElementById('nav');
     var main = document.getElementById('main');
-    var msg = konfliktBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
+    var msg = konfliktBanner() + regKonfliktBanner() + inloggningsBanner() + nyckelBanner() + (meddelande ? '<div class="card ' + (meddelande.fel ? 'fel' : 'ok') + '" role="status">' + esc(meddelande.text) + '</div>' : '');
     if (!ar) {
       nav.innerHTML = '';
       main.innerHTML = msg + (vy === 'om' ? '<p><button class="btn btn-secondary btn-small" data-vy="inlasning">Tillbaka</button></p>' + vyOm() : vyStart());
@@ -4291,7 +4548,8 @@ var VERSIONER = [
       return;
     }
     if (lasLage() && (vy === 'inlasning' || vy === 'ny')) vy = 'verifikationer';
-    nav.innerHTML = VYER.filter(function (v) { return !lasLage() || (v[0] !== 'inlasning' && v[0] !== 'ny'); }).map(function (v) {
+    if (lasLage() && vy === 'medlemmar') vy = 'rapporter';
+    nav.innerHTML = VYER.filter(function (v) { return !lasLage() || (v[0] !== 'inlasning' && v[0] !== 'ny' && v[0] !== 'medlemmar'); }).map(function (v) {
       return '<button type="button" data-vy="' + v[0] + '"' + (vy === v[0] ? ' aria-current="page"' : '') + '>' + v[1] + '</button>';
     }).join('');
     var html = {
@@ -5069,6 +5327,8 @@ var VERSIONER = [
     html += '<p style="margin-top:0">' + (lasLage() ? '<strong>Endast läsning.</strong> ' : '') + 'Kopplad till <strong>' + esc(od.mapp.sokvag || od.mapp.namn) + '</strong> som ' + esc(od.konto || '') + '.</p>' +
       '<p class="faint">' + (od.senast ? 'Senast synkad ' + esc(od.senast.slice(0, 16).replace('T', ' ')) + '. ' : '') +
       (lasLage() ? 'Appen hämtar senaste versionen när den startar.' : 'Bokföringen ligger i ' + esc(DATAFIL) + ', underlagen i årsmapparna under Bokföringsunderlag. Ändringar sparas automatiskt.') + '</p>' +
+      (!lasLage() && od.regMapp ? '<p class="faint">Medlemsregistret ligger för sig i mappen <strong>' + esc(od.regMapp.namn) + '</strong> bredvid bokföringsmappen. Den mappen följer inte med när du delar bokföringen med revisorn.</p>' : '') +
+      (odNu.regFel ? '<p class="fel">' + esc(odNu.regFel) + '</p>' : '') +
       '<div class="row"><button class="btn btn-small" data-action="od-synka">' + (lasLage() ? 'Hämta senaste' : 'Synka nu') + '</button>' +
       '<button class="btn btn-secondary btn-small" data-action="od-byt-mapp">Byt mapp</button>' +
       '<button class="btn btn-secondary btn-small" data-action="od-logga-ut">Logga ut</button></div>';
@@ -5159,9 +5419,10 @@ var VERSIONER = [
   // ---------- Medlemmar och terminsavgifter ----------
 
   function reg() { return store.medlemsregister || (store.medlemsregister = K.tomtRegister()); }
-  function sparaReg(r) { store.medlemsregister = r; spara(); }
+  function sparaReg(r) { store.medlemsregister = r; sparaRegister(); }
   function medlemAv(id) { return reg().medlemmar.find(function (m) { return m.id === id; }) || null; }
-  function sorteradeMedlemmar() { return reg().medlemmar.slice().sort(function (a, b) { return a.namn.localeCompare(b.namn, 'sv'); }); }
+  // Aktiva medlemmar; avförda är anonymiserade och kan inte väljas.
+  function sorteradeMedlemmar() { return reg().medlemmar.filter(function (m) { return !m.avford; }).sort(function (a, b) { return a.namn.localeCompare(b.namn, 'sv'); }); }
   function arsavgiftFor(m) { return m.kategori === 'funktionar' ? (reg().arsavgift.funktionar || 0) : (reg().arsavgift.vanlig || 0); }
 
   // Avgiften för en bankrad: det du valt i panelen, eller förslaget för en känd betalare när beloppet stämmer.
@@ -5299,19 +5560,23 @@ var VERSIONER = [
       (tips ? '<span class="faint">' + esc(tips) + '</span>' : '') + '</div>';
   }
 
-  var MEDLEMVYER = [['statistik', 'Statistik'], ['koppla', 'Att koppla'], ['lista', 'Medlemmar'], ['betalare', 'Betalare'], ['avgifter', 'Avgifter']];
+  var MEDLEMVYER = [['statistik', 'Statistik'], ['koppla', 'Att koppla'], ['lista', 'Medlemmar'], ['betalare', 'Betalare'], ['avgifter', 'Avgifter'], ['personuppgifter', 'Personuppgifter']];
+  var kvittoUtkast = null;
 
   function vyMedlemmar(ar) {
     var r = reg();
     var okopplade = K.okoppladeInbetalningar(r, ar, store.aktivt);
+    var avforas = K.attAvfora(r, idag(), store.ar);
     var html = '<div class="row" style="margin-top:12px">' + MEDLEMVYER.map(function (v) {
-      var n = v[0] === 'koppla' && okopplade.length ? ' (' + okopplade.length + ')' : '';
+      var n = v[0] === 'koppla' && okopplade.length ? ' (' + okopplade.length + ')' : v[0] === 'lista' && avforas.length ? ' (' + avforas.length + ' att avföra)' : '';
       return '<button class="btn ' + (medlemVy === v[0] ? '' : 'btn-secondary') + ' btn-small" data-action="medl-vy" data-mvy="' + v[0] + '">' + v[1] + n + '</button>';
     }).join('') + '</div>';
     if (medlemVy === 'koppla') return html + vyMedlemKoppla(ar, okopplade);
     if (medlemVy === 'lista') return html + vyMedlemLista();
     if (medlemVy === 'betalare') return html + vyBetalare();
     if (medlemVy === 'avgifter') return html + vyAvgifter(ar);
+    if (medlemVy === 'personuppgifter') return html + vyPersonuppgifter();
+    if (medlemVy === 'kvitto' && kvittoUtkast) return html + vyKvitto();
     return html + vyMedlemStatistik(ar);
   }
 
@@ -5400,16 +5665,35 @@ var VERSIONER = [
     var html = '<div class="card"><h2 style="margin-top:0">Ny medlem</h2><div class="row"><input id="nyMedlemNamn" placeholder="Namn" style="flex:1 1 180px;width:auto">' +
       '<select id="nyMedlemKategori" style="width:auto">' + K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '">' + esc(k[1]) + '</option>'; }).join('') + '</select>' +
       '<button class="btn btn-small" data-action="medlem-ny">Lägg till</button></div>' +
-      '<p class="faint">Medlemsregistret sparas tillsammans med bokföringen i föreningens OneDrive och i säkerhetskopian, aldrig någon annanstans.</p></div>';
-    html += '<h2>Medlemmar (' + r.medlemmar.length + ')</h2>';
-    if (!r.medlemmar.length) return html + '<p class="muted">Inga medlemmar ännu.</p>';
+      '<p class="faint">Medlemsregistret sparas för sig, skilt från bokföringen. Läs mer under Personuppgifter.</p></div>';
+    var avforas = K.attAvfora(r, idag(), store.ar);
+    if (avforas.length) {
+      html += '<div class="card"><h2 style="margin-top:0">Ska avföras enligt stadgarna (' + avforas.length + ')</h2>' +
+        '<p class="faint" style="margin-top:0">Har inte betalat årsavgift ' + esc(avforas[0].ar.join(' eller ')) + '. Enligt stadgarna anses en medlem som inte betalat medlemsavgift ' +
+        (r.avforEfterAr === 2 ? 'två' : r.avforEfterAr) + ' verksamhetsår i följd ha begärt sitt utträde, och avförs från medlemsförteckningen. ' +
+        'När en medlem avförs tas namnet och kopplingen till betalarens nummer bort. Ta fram kvitton först om någon behöver dem.</p>' +
+        '<div class="scroll"><table class="kortlista"><tbody>' + avforas.map(function (a) {
+          return '<tr><td><strong>' + esc(a.namn) + '</strong> <span class="faint">' + esc(K.KATEGORI_KORT[a.kategori] || '') + '</span></td>' +
+            '<td data-etikett="Senast betalt">' + esc(a.senastBetalt || 'aldrig registrerad') + '</td>' +
+            '<td><button class="btn btn-secondary btn-small" data-action="kvitto-ny" data-id="' + esc(a.medlem) + '">Kvitto</button> ' +
+            '<button class="btn btn-small" data-action="medlem-avfor" data-id="' + esc(a.medlem) + '">Avför</button></td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        (avforas.length > 1 ? '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="avfor-alla">Avför alla ' + avforas.length + '</button></div>' : '') + '</div>';
+    }
+    var aktiva = sorteradeMedlemmar();
+    var avforda = r.medlemmar.length - aktiva.length;
+    html += '<h2>Medlemmar (' + aktiva.length + ')</h2>';
+    if (!aktiva.length) return html + '<p class="muted">Inga medlemmar ännu.</p>' + (avforda ? '<p class="faint">' + antal(avforda, 'tidigare medlem är avförd', 'tidigare medlemmar är avförda') + ' och anonymiserad' + (avforda === 1 ? '' : 'e') + '.</p>' : '');
     html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Namn</th><th>Kategori</th><th>Betalare</th><th>Senast betalt</th><th></th></tr></thead><tbody>' +
       sorteradeMedlemmar().map(function (m) {
         return '<tr><td data-etikett="Namn"><input data-medl="namn" data-id="' + esc(m.id) + '" value="' + esc(m.namn) + '" aria-label="Namn"></td>' +
           '<td data-etikett="Kategori"><select data-medl="kategori" data-id="' + esc(m.id) + '" aria-label="Kategori">' + K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '"' + (k[0] === m.kategori ? ' selected' : '') + '>' + esc(K.KATEGORI_KORT[k[0]]) + '</option>'; }).join('') + '</select></td>' +
           '<td data-etikett="Betalare">' + esc(betalareFor(m.id).join(', ')) + '</td><td data-etikett="Senast betalt">' + esc(senast[m.id] || '') + '</td>' +
-          '<td><button class="btn btn-secondary btn-small" data-action="medlem-ta-bort" data-id="' + esc(m.id) + '" aria-label="Ta bort ' + esc(m.namn) + '">×</button></td></tr>';
+          '<td style="white-space:nowrap"><button class="btn btn-secondary btn-small" data-action="kvitto-ny" data-id="' + esc(m.id) + '">Kvitto</button> ' +
+          '<button class="btn btn-secondary btn-small" data-action="medlem-uttrade" data-id="' + esc(m.id) + '">Utträde</button> ' +
+          '<button class="btn btn-secondary btn-small" data-action="medlem-ta-bort" data-id="' + esc(m.id) + '" aria-label="Ta bort ' + esc(m.namn) + '" title="Ta bort (felregistrerad)">×</button></td></tr>';
       }).join('') + '</tbody></table></div>';
+    if (avforda) html += '<p class="faint">' + antal(avforda, 'tidigare medlem är avförd', 'tidigare medlemmar är avförda') + ' och anonymiserad' + (avforda === 1 ? '' : 'e') + '. Deras betalningar räknas fortfarande i statistiken, utan namn.</p>';
     return html;
   }
 
@@ -5476,6 +5760,11 @@ var VERSIONER = [
     } else html += '<p class="muted">Inga terminer ännu. Lägg till den första och fyll i avgifterna, eller läs in dem från en fil med föreningsuppgifter under År och arkiv.</p>';
     html += '<div class="row" style="margin-top:8px"><input id="nyTermin" placeholder="' + esc(nyTerminForslag(ar)) + '" value="' + esc(nyTerminForslag(ar)) + '" style="width:100px"><button class="btn btn-secondary btn-small" data-action="termin-ny">Lägg till termin</button></div>' +
       '<p class="faint">Saknas en termin används avgifterna från den senaste terminen före. Om familjer: appen föreslår årsavgift för alla, och du ändrar från fall till fall.</p></div>';
+    html += '<div class="card"><h2 style="margin-top:0">Avförande</h2><label>Avför medlemmar som inte betalat årsavgift så här många verksamhetsår i följd</label>' +
+      '<input class="num" inputmode="numeric" data-mavfor="1" value="' + r.avforEfterAr + '" style="width:80px"><p class="faint">Som i stadgarna. Appen listar dem under Medlemmar när ett nytt år börjar.</p></div>';
+    html += '<div class="card"><h2 style="margin-top:0">Säkerhetskopia av medlemsregistret</h2><p class="faint" style="margin-top:0">Registret har en egen säkerhetskopia, skild från bokföringens. Spara den på ett ställe som bara du kommer åt.</p>' +
+      '<div class="row"><button class="btn btn-secondary btn-small" data-action="exportera-register">Spara säkerhetskopia</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="importera-register">Läs in säkerhetskopia</button></div></div>';
     html += '<div class="card"><h2 style="margin-top:0">Rensa medlemsregistret</h2><p class="faint" style="margin-top:0">Tar bort alla medlemmar, betalare och kopplade betalningar. Bokföringen påverkas inte. Avgifter och konton finns kvar.</p>' +
       '<button class="btn btn-secondary btn-small" data-action="register-rensa">Rensa medlemsregistret</button></div>';
     return html;
@@ -5498,15 +5787,104 @@ var VERSIONER = [
   }
 
   function medlPdfKnappar(termin) {
-    var namn = K.sakertNamn('Terminsavgifter ' + termin + '.pdf');
-    var nyckel = 'medl-' + termin + '-' + datastampel(reg(), JSON.stringify(Object.keys(store.ar).map(function (id) { return store.ar[id].verifikationer.length; })) + (store.forening.namn || '') + (logoUrl ? logoUrl.length : 0)) + '|' + namn;
-    forbered(nyckel, function () { return skapaRapportPdf(aktivt(), 'medl', termin); });
-    return '<div class="row ej-utskrift" style="margin:10px 0">' + pdfKnappar(nyckel, 'skriv-ut') + '</div>';
+    var stampel = datastampel(reg(), JSON.stringify(Object.keys(store.ar).map(function (id) { return store.ar[id].verifikationer.length; })) + (store.forening.namn || '') + (logoUrl ? logoUrl.length : 0));
+    var nyckel = function (typ, namn) {
+      var n = typ + '-' + termin + '-' + stampel + '|' + K.sakertNamn(namn);
+      forbered(n, function () { return skapaRapportPdf(aktivt(), typ, termin); });
+      return n;
+    };
+    var utan = nyckel('medl', 'Terminsavgifter ' + termin + '.pdf');
+    var med = nyckel('medln', 'Terminsavgifter ' + termin + ' med namn.pdf');
+    return '<p class="faint" style="margin:10px 0 0">Sammanställning utan namn, för styrelsen och årsmötet:</p>' +
+      '<div class="row ej-utskrift" style="margin:4px 0 6px">' + pdfKnappar(utan, 'kvitto-skriv-ut') + '</div>' +
+      '<details><summary>Lista med namn (innehåller personuppgifter)</summary><p class="faint">Bara för kassören. Dela den inte vidare.</p>' +
+      '<div class="row ej-utskrift" style="margin:4px 0">' + pdfKnappar(med, 'kvitto-skriv-ut') + '</div></details>';
+  }
+
+  // Kvitto på betalda avgifter till en medlem som begär det. Övriga uppgifter (t.ex. personnummer) sparas inte.
+  function nyttKvitto(medlemId) {
+    var m = medlemAv(medlemId);
+    var rader = K.kvittorader(reg(), medlemId, store.ar);
+    var ar = rader.length ? rader[rader.length - 1].datum.slice(0, 4) : idag().slice(0, 4);
+    kvittoUtkast = {
+      medlem: medlemId, ar: ar, mottagare: m.namn, ovrigt: '',
+      adressId: store.adresser[0] ? store.adresser[0].id : '', kontaktId: store.kontakter[0] ? store.kontakter[0].id : '',
+      valda: null, skapat: null
+    };
+  }
+
+  function kvittoValdaRader() {
+    var u = kvittoUtkast;
+    var rader = K.kvittorader(reg(), u.medlem, store.ar, u.ar === 'alla' ? null : u.ar);
+    return rader.filter(function (r, i) { return !u.valda || u.valda[r.betalning + r.typ] !== false; });
+  }
+
+  function vyKvitto() {
+    var u = kvittoUtkast;
+    var m = medlemAv(u.medlem) || { namn: '?' };
+    var alla = K.kvittorader(reg(), u.medlem, store.ar);
+    var arLista = [];
+    alla.forEach(function (r) { var a = r.datum.slice(0, 4); if (arLista.indexOf(a) < 0) arLista.push(a); });
+    var html = '<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Kvitto till ' + esc(m.namn) + '</h2>' +
+      '<button class="btn btn-secondary btn-small" data-action="kvitto-stang">Stäng</button></div>';
+    if (!alla.length) return html + '<p class="muted">Det finns inga registrerade betalningar för ' + esc(m.namn) + '.</p></div>';
+    if (u.skapat) {
+      var c = u.skapat;
+      html += '<p>Kvitto <strong>' + esc(c.nr) + '</strong> till ' + esc(c.mottagare) + ', ' + kr(c.summa) + ' kr.</p>' +
+        '<div class="row ej-utskrift">' + pdfKnappar(c.nyckel, 'kvitto-skriv-ut') + '</div>' +
+        '<p class="faint">Kvittonumret sparas när du delar, laddar ner eller skriver ut kvittot. Övriga uppgifter sparas inte.</p>' +
+        '<div class="row"><button class="btn btn-secondary btn-small" data-action="kvitto-andra">Ändra</button></div></div>';
+      return html;
+    }
+    html += '<div class="grid2"><div><label>Gäller</label><select data-kvitto="ar">' + arLista.map(function (a) { return '<option value="' + a + '"' + (u.ar === a ? ' selected' : '') + '>' + a + '</option>'; }).join('') +
+      '<option value="alla"' + (u.ar === 'alla' ? ' selected' : '') + '>Alla betalningar</option></select></div>' +
+      '<div><label>Mottagare</label><input data-kvitto="mottagare" value="' + esc(u.mottagare) + '"></div></div>';
+    var rader = K.kvittorader(reg(), u.medlem, store.ar, u.ar === 'alla' ? null : u.ar);
+    html += '<div class="scroll"><table class="kortlista" style="margin-top:10px"><thead><tr><th></th><th>Datum</th><th>Avser</th><th>Betalsätt</th><th class="num">Belopp</th></tr></thead><tbody>' +
+      rader.map(function (r) {
+        var nyckel = r.betalning + r.typ;
+        return '<tr><td><input type="checkbox" style="width:auto" data-kvitto="rad" data-rad="' + esc(nyckel) + '"' + (u.valda && u.valda[nyckel] === false ? '' : ' checked') + ' aria-label="Ta med"></td>' +
+          '<td data-etikett="Datum">' + esc(r.datum) + '</td><td data-etikett="Avser">' + esc(r.text) + '</td><td data-etikett="Betalsätt">' + esc(r.betalsatt) + '</td><td class="num" data-etikett="Belopp">' + kr(r.belopp) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    html += '<label>Övriga uppgifter på kvittot (sparas inte)</label><textarea data-kvitto="ovrigt" rows="3" style="width:100%;font:inherit" placeholder="T.ex. personnummer, vad avgiften gäller eller vad mottagaren behöver">' + esc(u.ovrigt) + '</textarea>';
+    html += '<div class="grid2"><div><label>Avsändaradress</label><select data-kvitto="adressId"><option value="">Ingen</option>' + store.adresser.map(function (a) { return '<option value="' + esc(a.id) + '"' + (a.id === u.adressId ? ' selected' : '') + '>' + esc(a.etikett || rader0(a.text)) + '</option>'; }).join('') + '</select></div>' +
+      '<div><label>Vår referens</label><select data-kvitto="kontaktId"><option value="">Ingen</option>' + store.kontakter.map(function (k) { return '<option value="' + esc(k.id) + '"' + (k.id === u.kontaktId ? ' selected' : '') + '>' + esc(k.namn) + '</option>'; }).join('') + '</select></div></div>';
+    html += '<div class="row" style="margin-top:12px"><button class="btn" data-action="kvitto-skapa">Skapa kvitto</button></div></div>';
+    return html;
+  }
+
+  // Ett kvitto som delats, laddats ner eller skrivits ut får sitt nummer sparat i registret.
+  function kvittoAnvant(nyckel) {
+    if (!/^kvitto-/.test(nyckel) || !kvittoUtkast || !kvittoUtkast.skapat || kvittoUtkast.skapat.nyckel !== nyckel) return;
+    sparaReg(K.registreraKvitto(reg(), { nr: kvittoUtkast.skapat.nr, datum: idag(), medlem: kvittoUtkast.medlem }));
+  }
+
+  function rader0(text) { return String(text || '').split(/\r?\n/)[0]; }
+
+  function vyPersonuppgifter() {
+    var r = reg();
+    var f = store.forening.namn || 'Föreningen';
+    var ar = r.avforEfterAr === 2 ? 'två' : String(r.avforEfterAr);
+    return '<div class="card"><h2 style="margin-top:0">Personuppgifter i medlemsregistret</h2>' +
+      '<p>' + esc(f) + ' är personuppgiftsansvarig. Så här hanteras uppgifterna om medlemmar i appen.</p>' +
+      '<h3>Vilka uppgifter</h3><ul><li>Namn och medlemskategori (barn, student, vuxen, familj eller funktionär).</li>' +
+      '<li>Vilka Swish-nummer eller bankgiroreferenser som har betalat för vilken medlem.</li>' +
+      '<li>Betalda avgifter: datum, termin och belopp.</li><li>Nummer och datum för kvitton som lämnats ut. Övriga uppgifter på kvittot, till exempel personnummer, sparas inte.</li></ul>' +
+      '<h3>Varför</h3><p>För att administrera medlemskap och avgifter enligt stadgarna, kunna lämna kvitto på betalda avgifter och ta fram statistik.</p>' +
+      '<h3>Var</h3><p>I en egen fil, ' + esc(REGFIL) + (od.regMapp ? ', i mappen <strong>' + esc(od.regMapp.namn) + '</strong>' : '') + ' i föreningens OneDrive, och i webbläsaren på de enheter där kassören använder appen. ' +
+      'Registret är skilt från bokföringen. Den som får läsa bokföringen, till exempel revisorn, ser inga namn. Verifikationerna innehåller inga namn, bara antal medlemmar. ' +
+      'Kontoutdragen i bokföringen innehåller betalarens Swish-nummer, eftersom de är underlag till bokföringen.</p>' +
+      '<h3>Hur länge</h3><p>Den som anmäler utträde avförs direkt. Den som inte har betalat årsavgift ' + esc(ar) + ' verksamhetsår i följd avförs enligt stadgarna. ' +
+      'När en medlem avförs tas namnet och kopplingen till betalarens nummer bort. Betalningarna finns kvar utan namn, för statistiken. ' +
+      'Bokföringen, med kontoutdragen, sparas i sju år enligt bokföringslagen.</p>' +
+      '<h3>Vem ser uppgifterna</h3><p>Kassören. Statistiken till styrelse och årsmöte tas fram utan namn.</p>' +
+      '<h3>Medlemmens rättigheter</h3><p>En medlem kan be att få veta vilka uppgifter som finns om hen, få fel rättade och begära utträde. Kontakta föreningen' +
+      (store.forening.epost ? ' på ' + esc(store.forening.epost) : '') + '.</p></div>';
   }
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport]');
@@ -5532,6 +5910,7 @@ var VERSIONER = [
     if (t.dataset.inkorg) {
       inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { [t.dataset.inkorg]: t.value });
     }
+    if (t.dataset.kvitto && kvittoUtkast && (t.dataset.kvitto === 'mottagare' || t.dataset.kvitto === 'ovrigt')) kvittoUtkast[t.dataset.kvitto] = t.value;
     if (t.dataset.avg && avgiftUtkast[t.dataset.id]) {
       var au = avgiftUtkast[t.dataset.id];
       if (t.dataset.avg === 'tb') au.rader[Number(t.dataset.i)].termin = t.value;
@@ -5569,7 +5948,7 @@ var VERSIONER = [
       }
       render();
     }
-    if (lasLage() && (t.dataset.forening || t.dataset.lista || t.dataset.underlag || t.dataset.arsmote || t.dataset.avg || t.dataset.medl || t.dataset.betn || t.dataset.betl || t.dataset.mkonto || t.dataset.mars || t.dataset.mtermin)) { visa('Endast läsning.', true); return; }
+    if (lasLage() && (t.dataset.forening || t.dataset.lista || t.dataset.underlag || t.dataset.arsmote || t.dataset.avg || t.dataset.medl || t.dataset.betn || t.dataset.betl || t.dataset.mkonto || t.dataset.mars || t.dataset.mtermin || t.dataset.mavfor || t.dataset.kvitto)) { visa('Endast läsning.', true); return; }
     if (t.dataset.avg && avgiftUtkast[t.dataset.id]) {
       var au2 = avgiftUtkast[t.dataset.id];
       if (t.dataset.avg === 'lagg-till' && t.value) au2.rader.push(standardRad(t.value, K.giltigtTerminId(au2.termin) ? au2.termin : K.terminForDatum(idag())));
@@ -5579,7 +5958,18 @@ var VERSIONER = [
       else if (['lagg-till', 'nykategori', 'komihag'].indexOf(t.dataset.avg) >= 0) render();
       return;
     }
+    if (t.dataset.kvitto && kvittoUtkast) {
+      if (t.dataset.kvitto === 'rad') { kvittoUtkast.valda = kvittoUtkast.valda || {}; kvittoUtkast.valda[t.dataset.rad] = t.checked; }
+      else kvittoUtkast[t.dataset.kvitto] = t.value;
+      if (t.dataset.kvitto === 'ar') { kvittoUtkast.valda = null; render(); }
+      return;
+    }
     try {
+      if (t.dataset.mavfor) {
+        var n = Number(t.value);
+        if (!Number.isInteger(n) || n < 1 || n > 10) throw new Error('Ange ett antal år mellan 1 och 10.');
+        sparaReg(Object.assign({}, reg(), { avforEfterAr: n })); render(); return;
+      }
       if (t.dataset.medl) { var andr = {}; andr[t.dataset.medl] = t.value; sparaReg(K.andraMedlem(reg(), t.dataset.id, andr)); if (t.dataset.medl === 'kategori') render(); return; }
       if (t.dataset.betn) { sparaReg(K.andraBetalare(reg(), t.dataset.nyckel, { namn: t.value })); return; }
       if (t.dataset.betl && t.value) { var bet = K.hittaBetalare(reg(), t.dataset.nyckel); sparaReg(K.kopplaBetalare(reg(), bet, [t.value])); render(); return; }
@@ -5588,7 +5978,7 @@ var VERSIONER = [
         if (nr && !K.giltigtKontonummer(nr)) throw new Error('Kontot ska vara fyra siffror, t.ex. 3010.');
         if (nr) sakerstallKonto(nr, t.dataset.mkonto === 'medlemsavgift' ? 'Medlemsavgifter' : 'Terminsavgifter');
         var rk = reg(); rk.konton = Object.assign({}, rk.konton); rk.konton[t.dataset.mkonto] = nr;
-        sparaReg(rk); render(); return;
+        store.medlemsregister = rk; spara(); render(); return;
       }
       if (t.dataset.mars) {
         var ra = reg(); ra.arsavgift = Object.assign({}, ra.arsavgift); ra.arsavgift[t.dataset.mars] = t.value.trim() ? Math.abs(K.parseBelopp(t.value)) : 0;
@@ -5767,7 +6157,7 @@ var VERSIONER = [
     'avg-ta-bort': function (t) { avgiftUtkast[t.dataset.id].rader.splice(Number(t.dataset.i), 1); render(); },
     'avg-ny-medlem': function (t) {
       var u = avgiftUtkast[t.dataset.id];
-      var res = K.laggTillMedlem(reg(), { namn: u.nyNamn, kategori: u.nyKategori || 'barn' });
+      var res = K.laggTillMedlem(reg(), { namn: u.nyNamn, kategori: u.nyKategori || 'barn', tillagd: idag() });
       sparaReg(res.reg);
       u.rader.push(standardRad(res.medlem.id, u.termin));
       u.nyNamn = '';
@@ -5790,9 +6180,63 @@ var VERSIONER = [
       render();
     },
     'medlem-ny': function () {
-      var res = K.laggTillMedlem(reg(), { namn: document.getElementById('nyMedlemNamn').value, kategori: document.getElementById('nyMedlemKategori').value });
+      var res = K.laggTillMedlem(reg(), { namn: document.getElementById('nyMedlemNamn').value, kategori: document.getElementById('nyMedlemKategori').value, tillagd: idag() });
       sparaReg(res.reg);
       visa(res.medlem.namn + ' är tillagd.');
+    },
+    'medlem-avfor': function (t) {
+      var m = medlemAv(t.dataset.id);
+      if (!window.confirm('Avföra ' + m.namn + ' enligt stadgarna? Namnet och kopplingen till betalarens nummer tas bort. Har du tagit fram de kvitton som behövs?')) return;
+      sparaReg(K.avforMedlem(reg(), m.id, idag(), 'stadgarna'));
+      visa(m.namn + ' är avförd.');
+    },
+    'avfor-alla': function () {
+      var lista = K.attAvfora(reg(), idag(), store.ar);
+      if (!window.confirm('Avföra ' + lista.length + ' medlemmar enligt stadgarna? Namnen och kopplingarna till betalarnas nummer tas bort.')) return;
+      var r = reg();
+      lista.forEach(function (a) { r = K.avforMedlem(r, a.medlem, idag(), 'stadgarna'); });
+      sparaReg(r);
+      visa(antal(lista.length, 'medlem är avförd', 'medlemmar är avförda') + '.');
+    },
+    'medlem-uttrade': function (t) {
+      var m = medlemAv(t.dataset.id);
+      if (!window.confirm(m.namn + ' har anmält utträde. Avföra nu? Namnet och kopplingen till betalarens nummer tas bort. Ta fram kvitto först om det behövs.')) return;
+      sparaReg(K.avforMedlem(reg(), m.id, idag(), 'utträde'));
+      visa(m.namn + ' är avförd.');
+    },
+    'kvitto-ny': function (t) { nyttKvitto(t.dataset.id); medlemVy = 'kvitto'; meddelande = null; render(); },
+    'kvitto-stang': function () { kvittoUtkast = null; medlemVy = 'lista'; render(); },
+    'kvitto-andra': function () { kvittoUtkast.skapat = null; render(); },
+    'kvitto-skapa': function () {
+      var u = kvittoUtkast;
+      var valda = kvittoValdaRader();
+      if (!valda.length) throw new Error('Välj minst en betalning.');
+      if (!u.mottagare.trim()) throw new Error('Kvittot behöver en mottagare.');
+      var nr = K.nastaKvittonummer(reg(), idag().slice(0, 4));
+      var adress = hitta('adresser', u.adressId), kontakt = hitta('kontakter', u.kontaktId);
+      var betalsatt = valda.map(function (r) { return r.betalsatt; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+      var d = {
+        typ: 'kvitto', nummer: nr, datum: idag(),
+        betaldDatum: valda.length === 1 || valda.every(function (r) { return r.datum === valda[0].datum; }) ? valda[0].datum : '',
+        betalsatt: betalsatt.length === 1 ? betalsatt[0] : '',
+        forening: { namn: store.forening.namn, orgnr: store.forening.orgnr, bankgiro: store.forening.bankgiro, swish: store.forening.swish, webb: store.forening.webb, epost: store.forening.epost },
+        avsandare: adress ? adress.text : '', referens: kontakt ? { namn: kontakt.namn, epost: kontakt.epost, mobil: kontakt.mobil } : null,
+        mottagare: { namn: u.mottagare.trim(), adress: u.ovrigt },
+        rader: valda.map(function (r) { return { beskrivning: r.datum + '  ' + r.text, antal: 1, pris: r.belopp }; })
+      };
+      var nyckel = 'kvitto-' + nr + '-' + Date.now().toString(36) + '|' + K.sakertNamn('Kvitto ' + nr + '.pdf');
+      forbered(nyckel, function () { return skapaDokumentPdf(d); });
+      u.skapat = { nr: nr, nyckel: nyckel, mottagare: d.mottagare.namn, summa: valda.reduce(function (s, r) { return s + r.belopp; }, 0) };
+      render();
+    },
+    'kvitto-skriv-ut': function (t) {
+      var nyckel = t.parentNode.querySelector('[data-pdf]').dataset.pdf;
+      var c = pdfCache[nyckel];
+      if (!c || c.status !== 'klar') return;
+      var url = URL.createObjectURL(c.blob);
+      var w = window.open(url, '_blank');
+      if (!w) laddaNer(nyckel.split('|')[1], c.blob, 'application/pdf');
+      kvittoAnvant(nyckel);
     },
     'medlem-ta-bort': function (t) {
       var m = medlemAv(t.dataset.id);
@@ -5811,7 +6255,8 @@ var VERSIONER = [
       var r = reg();
       if (!r.konton.medlemsavgift) { sakerstallKonto(f.medlemsavgift, 'Medlemsavgifter'); r.konton.medlemsavgift = f.medlemsavgift; }
       if (!r.konton.terminsavgift) { sakerstallKonto(f.terminsavgift, 'Terminsavgifter'); r.konton.terminsavgift = f.terminsavgift; }
-      sparaReg(r);
+      store.medlemsregister = r;
+      spara();
       visa('Avgifterna bokförs på ' + r.konton.medlemsavgift + ' och ' + r.konton.terminsavgift + '.');
     },
     'termin-ny': function () {
@@ -6172,6 +6617,42 @@ var VERSIONER = [
       var steg = lasLage() || !od.smutsig ? hamtaFranOneDrive() : synkaUpp();
       steg.then(function () { render(); }).catch(function (err) { visa(err.message, true); });
     },
+    'od-reg-onedrive': function () {
+      if (!window.confirm('Ersätta medlemsregistret i den här webbläsaren med versionen i OneDrive?')) return;
+      graf(iRegMappen()).then(function (meta) { return lasRegisterFil().then(function (r) { tillampaRegister(r, meta.eTag); }); })
+        .then(function () { visa('Medlemsregistret från OneDrive används nu.'); }).catch(function (err) { visa(err.message, true); });
+    },
+    'od-reg-behall': function () {
+      if (!window.confirm('Skriva över medlemsregistret i OneDrive med den här webbläsarens version?')) return;
+      graf(iRegMappen(), { tillat: [404] }).then(function (meta) {
+        od.regETag = meta === 404 ? null : meta.eTag;
+        od.regSmutsig = true;
+        odNu.regKonflikt = false;
+        sparaOd();
+        return synkaRegister();
+      }).then(function () { visa('Den här webbläsarens medlemsregister är sparat i OneDrive.'); }).catch(function (err) { visa(err.message, true); });
+    },
+    'exportera-register': function () {
+      laddaNer('medlemsregister-' + idag() + '.json', JSON.stringify(store.medlemsregister, null, 2), 'application/json');
+    },
+    'importera-register': function () {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json,.json';
+      input.onchange = function () {
+        var fil = input.files[0];
+        if (!fil) return;
+        fil.text().then(function (txt) {
+          var d = JSON.parse(txt);
+          var r = d && d.format === 'foreningsbokforing-medlemsregister' ? d : d && d.format === 1 && d.medlemsregister ? d.medlemsregister : null;
+          if (!r) throw new Error('Filen innehåller inget medlemsregister.');
+          if (K.registerHarData(reg()) && !window.confirm('Ersätta medlemsregistret med det i filen?')) return;
+          sparaReg(K.normaliseraRegister(r));
+          visa('Medlemsregistret är inläst.');
+        }).catch(function (err) { visa('Filen kunde inte läsas: ' + err.message, true); });
+      };
+      input.click();
+    },
     'od-anvand-onedrive': function () {
       if (!window.confirm('Ersätta bokföringen i den här webbläsaren med versionen i OneDrive?')) return;
       graf(iMappen(DATAFIL)).then(hamtaOchTillampa).then(function () { visa('Bokföringen från OneDrive används nu.'); }).catch(function (err) { visa(err.message, true); });
@@ -6191,6 +6672,7 @@ var VERSIONER = [
       if (od.smutsig && !window.confirm('Det finns ändringar som inte sparats i OneDrive. Byta mapp ändå?')) return;
       sparaAppinstallningar({ mapp: null, lage: null }).catch(function () { /* frivilligt */ });
       od.mapp = null; od.lage = null; od.eTag = null; od.senast = null; od.smutsig = false; odNu.mappar = {}; odNu.konflikt = false; odNu.delade = null;
+      od.regMapp = null; od.regETag = null; odNu.regKonflikt = false;
       sparaOd();
       sattStatus('');
       render();
@@ -6241,7 +6723,7 @@ var VERSIONER = [
       visa('Logotypen är borttagen.');
     },
     'exportera': function () {
-      laddaNer('foreningsbokforing-' + idag() + '.json', JSON.stringify(store, null, 2), 'application/json');
+      laddaNer('foreningsbokforing-' + idag() + '.json', JSON.stringify(bokforingsdata(), null, 2), 'application/json');
     },
     'sie': function () {
       var ar = aktivt();
@@ -6262,11 +6744,15 @@ var VERSIONER = [
           Object.keys(d.ar).forEach(function (id) { K.valideraAr(d.ar[id]).forEach(function (f) { fel.push(id + ': ' + f); }); });
           if (fel.length) throw new Error('Säkerhetskopian har fel: ' + fel.slice(0, 5).join(' '));
           if (Object.keys(store.ar).length && !window.confirm('Ersätta all bokföring i webbläsaren med säkerhetskopian?')) return;
+          var regNu = store.medlemsregister;
+          var regI = d.medlemsregister;
+          delete d.medlemsregister;
           store = d;
+          // Säkerhetskopior från version 1.12 innehåller registret; det används bara om registret här är tomt.
+          store.medlemsregister = regI && !K.registerHarData(regNu) ? K.normaliseraRegister(regI) : regNu;
           if (!store.regler) store.regler = [];
           if (!store.motpartsregler) store.motpartsregler = [];
           LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
-          store.medlemsregister = K.normaliseraRegister(store.medlemsregister);
           if (!store.ar[store.aktivt]) store.aktivt = Object.keys(store.ar).sort().pop() || null;
           spara();
           vy = 'verifikationer';
