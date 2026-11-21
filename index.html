@@ -345,6 +345,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.29', datum: '2026-11-21',
+    nyheter: [
+      'Menyn Föreningen heter nu Styrelsen, med flikarna Möten och protokoll, Beslut, Uppgifter, Förtroendeuppdrag, Ärenden, Årsmötet och Stockholms stad.',
+      'Fakturor och kvitton ligger nu under Bokföring.'
+    ]
+  },
+  {
     version: '1.28', datum: '2026-11-21',
     nyheter: [
       'Cirklarna för dem som har appen öppen ligger nu i övre högra hörnet, så att sidhuvudet inte blir högre. På mobilen är de lite mindre, och högst tre andra visas.'
@@ -6505,7 +6512,11 @@ var VERSIONER = [
     ['rapporter', 'Rapporter'],
     ['bokslut', 'Bokslut'],
     ['kontoplan', 'Kontoplan'],
-    ['styrelsen', 'Styrelsen'],
+    ['st-moten', 'Möten och protokoll'],
+    ['st-beslut', 'Beslut'],
+    ['st-uppgifter', 'Uppgifter'],
+    ['st-uppdrag', 'Förtroendeuppdrag'],
+    ['st-arenden', 'Ärenden'],
     ['arsmote', 'Årsmötet'],
     ['staden', 'Stockholms stad'],
     ['arkiv', 'År och arkiv'],
@@ -6515,9 +6526,9 @@ var VERSIONER = [
   // Huvuddelar med sina flikar. Vilken flik som var vald senast i varje del kommer appen ihåg.
   var GRUPPER = [
     ['oversikt', 'Översikt', ['oversikt']],
-    ['bokforing', 'Bokföring', ['inlasning', 'verifikationer', 'ny', 'huvudbok', 'rapporter', 'bokslut', 'kontoplan']],
+    ['bokforing', 'Bokföring', ['inlasning', 'verifikationer', 'ny', 'dokument', 'huvudbok', 'rapporter', 'bokslut', 'kontoplan']],
     ['medlemmar', 'Medlemmar', ['medlemmar']],
-    ['foreningen', 'Föreningen', ['styrelsen', 'arsmote', 'staden', 'dokument']],
+    ['styrelsen', 'Styrelsen', ['st-moten', 'st-beslut', 'st-uppgifter', 'st-uppdrag', 'st-arenden', 'arsmote', 'staden']],
     ['installningar', 'Inställningar', ['arkiv', 'om']]
   ];
   var senastIGrupp = {};
@@ -6550,11 +6561,12 @@ var VERSIONER = [
     var tillaten = function (v) {
       if (ar.grovkopia && (v === 'inlasning' || v === 'ny')) return false;
       if (v === 'medlemmar') return regSynligt;
-      if (v === 'styrelsen') return !!(styrBeh('styr') || styrBeh('upp'));
+      if (v === 'st-uppdrag') return !!styrBeh('upp');
+      if (v.indexOf('st-') === 0) return !!styrBeh('styr');
       return !lasLage() || (v !== 'inlasning' && v !== 'ny');
     };
     if (!tillaten(vy)) {
-      // Första tillåtna fliken i samma del, annars översikten (t.ex. bokföraren under Föreningen, där Styrelsen inte visas).
+      // Första tillåtna fliken i samma del, annars översikten (t.ex. bokföraren under Styrelsen, där styrelsens material inte visas).
       var iGrupp = GRUPPER.find(function (g) { return g[0] === gruppFor(vy); })[2].filter(tillaten);
       vy = iGrupp[0] || 'oversikt';
     }
@@ -6571,7 +6583,7 @@ var VERSIONER = [
     var html = {
       oversikt: vyOversikt,
       arsmote: function (a) { return vyArsmoteSida(a); },
-      styrelsen: vyStyrelsen,
+      'st-moten': vyStyrelsen, 'st-beslut': vyStyrelsen, 'st-uppgifter': vyStyrelsen, 'st-uppdrag': vyStyrelsen, 'st-arenden': vyStyrelsen,
       staden: function (a) { return vyStaden(a); },
       inlasning: vyInlasning,
       verifikationer: vyVerifikationer,
@@ -8176,7 +8188,7 @@ var VERSIONER = [
     if (styrBeh('styr')) {
       var sp = styrPaminnelser(rad);
       html += '<div class="card"><h3 style="margin-top:0">Styrelsen</h3>' + (sp ? '<ul class="checklista varningar">' + sp + '</ul>' : '<p class="ok" style="margin:0">Inget som väntar på dig.</p>') +
-        '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-vy="styrelsen">Styrelsen</button></div></div>';
+        '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-vy="st-moten">Styrelsen</button></div></div>';
     }
     // Medlemmar
     var regSynligt = !lasLage() || (odNu.regLas && K.registerHarData(reg()));
@@ -8192,7 +8204,7 @@ var VERSIONER = [
     var frister = nastaFrister();
     html += '<div class="card"><h3 style="margin-top:0">På gång</h3>' + (frister.length
       ? '<ul style="margin:0">' + frister.map(function (f) { return '<li><strong>' + esc(f.datum) + '</strong> ' + esc(f.text) + '</li>'; }).join('') + '</ul>'
-      : '<p class="faint" style="margin:0">Inga frister inlagda. Ange datum för årsmötet under Föreningen, Årsmötet, så visas fristerna här.</p>') +
+      : '<p class="faint" style="margin:0">Inga frister inlagda. Ange datum för årsmötet under Styrelsen, Årsmötet, så visas fristerna här.</p>') +
       '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-vy="arsmote">Årsmötet</button></div></div>';
     return html;
   }
@@ -8230,16 +8242,13 @@ var VERSIONER = [
     return '<span class="tag varning">' + (u.metod === 'papper' ? 'Väntar på det inskannade originalet' : 'Väntar på underskrift, ' + u.signaturer.length + ' av ' + u.undertecknare.length) + '</span>';
   }
 
+  // Styrelsens flikar (st-moten, st-beslut …) ligger i undermenyn under Styrelsen.
   function vyStyrelsen(ar) {
-    var bs = styrBeh('styr'), bu = styrBeh('upp');
-    var flikar = STYRFLIKAR.filter(function (f) { return f[0] === 'uppdrag' ? bu : bs; });
-    if (!flikar.some(function (f) { return f[0] === styrVy; })) styrVy = flikar[0][0];
-    var html = '<h2>Styrelsen' + hjalp('styrelsen') + '</h2>';
+    var bs = styrBeh('styr');
+    styrVy = vy.slice(3);
+    var html = '<h2>' + esc(STYRFLIKAR.find(function (f) { return f[0] === styrVy; })[1]) + hjalp(styrVy === 'uppdrag' ? 'uppdrag' : 'styrelsen') + '</h2>';
     if (bs === 'read') html += '<p class="faint">Du kan läsa styrelsens material men inte ändra det.</p>';
     else if (!bs) html += '<p class="faint">Du ser förtroendeuppdragen. Resten av styrelsens material är inte delat med dig.</p>';
-    html += '<div class="row" style="margin-bottom:10px">' + flikar.map(function (f) {
-      return '<button class="btn btn-small' + (styrVy === f[0] ? '' : ' btn-secondary') + '" data-action="styr-vy" data-v="' + f[0] + '"' + (styrVy === f[0] ? ' aria-pressed="true"' : '') + '>' + esc(f[1]) + '</button>';
-    }).join('') + '</div>';
     if (odNu.styrFel) html += '<p class="fel">' + esc(odNu.styrFel) + '</p>';
     html += '<div class="arsmote-form">' + { moten: vyMoten, beslut: vyBeslut, uppgifter: vyUppgifter, uppdrag: vyUppdrag, arenden: vyArenden }[styrVy](ar) + '</div>';
     if (odAnslutet() && od.styrMapp) html += '<p class="faint" style="font-size:.85em;margin-top:14px">Sparas i mappen ' + esc(od.styrMapp.namn) + ' i OneDrive. Alla i styrelsen kan ändra samtidigt; ändrar två personer samma sak visas det.</p>';
@@ -8638,7 +8647,7 @@ var VERSIONER = [
       skriv(u.kontrollsumma, 'normal', 8.5);
       skriv(summa === u.kontrollsumma ? 'Texten i den här utskriften har samma kontrollsumma, alltså är den oförändrad.' : 'OBS: texten har ändrats efter att protokollet låstes.', 'normal', 9, summa === u.kontrollsumma ? null : [170, 40, 40]);
       y += 3;
-      skriv('Protokollet har skrivits under i Föreningsbokföring. Varje person har loggat in med sitt Microsoft-konto och bekräftat att hen läst och godkänner protokollet. Underskrifterna kan kontrolleras i appen under Föreningen, Styrelsen.', 'normal', 8.5, GRA);
+      skriv('Protokollet har skrivits under i Föreningsbokföring. Varje person har loggat in med sitt Microsoft-konto och bekräftat att hen läst och godkänner protokollet. Underskrifterna kan kontrolleras i appen under Styrelsen, Möten och protokoll.', 'normal', 8.5, GRA);
     } else {
       // Rader för underskrift på papper.
       var namn = [];
@@ -9898,8 +9907,8 @@ var VERSIONER = [
       input.click();
     },
     'min-bild-bort': function () { sattMinBild(null); uppdateraNarvaro().catch(function () { /* nästa gång */ }); visa('Bilden är borttagen. Cirkeln visar dina initialer.'); },
-    'styr-vy': function (t) { vy = 'styrelsen'; styrVy = t.dataset.v; oppetMote = null; render(); },
-    'styr-oppna': function (t) { vy = 'styrelsen'; styrVy = 'moten'; oppetMote = t.dataset.id; meddelande = null; render(); window.scrollTo(0, 0); },
+    'styr-vy': function (t) { vy = 'st-' + t.dataset.v; oppetMote = null; render(); },
+    'styr-oppna': function (t) { vy = 'st-moten'; oppetMote = t.dataset.id; meddelande = null; render(); window.scrollTo(0, 0); },
     'styr-stang': function () { oppetMote = null; meddelande = null; render(); },
     'styr-krock-stang': function () { styrKrockar = []; render(); },
     'styr-uppdrag-hamta': function () { synkaStyrelsen().then(function () { visa('Förtroendeuppdragen är hämtade.'); }, function (err) { visa(err.message, true); }); },
@@ -9920,7 +9929,7 @@ var VERSIONER = [
       var ar = aktivt(), am = arsmoteData(ar);
       if (!am.motesdatum) throw new Error('Ange datum för årsmötet först.');
       var r = K.nyttMote(styrData(), { typ: 'arsmote', datum: am.motesdatum, dagordning: am.dagordning, skapad: new Date().toISOString() });
-      vy = 'styrelsen'; styrVy = 'moten'; oppetMote = r.mote.id;
+      vy = 'st-moten'; oppetMote = r.mote.id;
       andraStyr('styr', r.styr);
       window.scrollTo(0, 0);
     },
@@ -10063,7 +10072,7 @@ var VERSIONER = [
       if (styrData().uppgifter.some(function (u) { return u.grupp === grupp; }) && !window.confirm('Checklistan för årsmötet ' + am.motesdatum + ' är redan inlagd. Lägga in den igen?')) return;
       var d = styrData();
       K.arsmotesUppgifter(am.motesdatum).forEach(function (x) { d = K.laggTillUppgift(d, { text: x.text, datum: x.datum, grupp: grupp }); });
-      vy = 'styrelsen'; styrVy = 'uppgifter';
+      vy = 'st-uppgifter';
       andraStyr('styr', d, false);
       visa('Checklistan inför årsmötet är inlagd som uppgifter. Fyll i vem som är ansvarig.');
     },
