@@ -162,3 +162,17 @@ test('rubrik på flera rader och ingående balanser i grundboken räknas en gån
   eq(t2.saknas, []);
   eq(t2.ingaendeBalans, { 1930: kr(5000), 2010: kr(-5000) });
 });
+
+test('inläsning: ursprungstexten sparas, och nya namn kan ändras eller kopplas till en befintlig medlem', () => {
+  let reg = K.tomtRegister();
+  reg = K.laggTillMedlem(reg, { namn: 'Vuxen Exemplet', kategori: 'vuxen' }).reg;
+  const t = K.tolkaArsbok(arbetsbok(), 'x.xlsm');
+  const f = K.historikForslag(reg, t);
+  const ett = f.nyaMedlemmar.find((n) => n.namn === 'Ett Påhittad'), vuxen = f.nyaMedlemmar.find((n) => n.namn === 'Vuxen Exempel');
+  const res = K.lasInHistorik(reg, t, {}, { namn: { [ett.nyckel]: 'Ett Städad' }, sammaSom: { [vuxen.nyckel]: 'm1' } });
+  eq(res.reg.medlemmar.map((m) => m.namn), ['Vuxen Exemplet', 'Ett Städad']);
+  assert.equal(res.antal.medlemmar, 1);
+  eq(res.reg.betalningar.map((b) => [b.poster[0].medlem, b.meddelande]), [
+    ['m2', 'Terminsavgift VT2030 - PÅHITTAD, ETT'], ['m2', 'Terminsavgift HT30 - Ett Påhittad'], ['m1', 'Terminsavgift HT2030 - Vuxen Exempel']
+  ]);
+});
