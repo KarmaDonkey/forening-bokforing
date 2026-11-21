@@ -309,6 +309,15 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.14', datum: '2026-11-21',
+    nyheter: [
+      'Appens filer kan ligga i en egen mapp med två undermappar: Bokföring och underlag (som du kan dela med revisorn) och Medlemsregister (som du inte delar). Knappen Flytta flyttar det som finns i dag; dina Excel-filer rörs inte.',
+      'Tidigare år kan läsas in från föreningens Excel-arbetsböcker under År och arkiv. Bokföringen blir en låst grovkopia med rapporter, huvudbok och verifikationer, utan namn i avgiftstexterna.',
+      'Avvikelser i den gamla bokföringen läses in ändå och listas, och du kan skriva anteckningar på grovkopian.',
+      'Avgifterna och Swish-listan i arbetsböckerna läses in i medlemsregistret, så att statistiken går bakåt i tiden. Samma person känns igen även när namnet är skrivet på olika sätt.'
+    ]
+  },
+  {
     version: '1.13', datum: '2026-11-21',
     nyheter: [
       'Medlemsregistret sparas för sig, i en egen mapp bredvid bokföringsmappen i OneDrive. Den som får läsa bokföringen, till exempel revisorn, ser inga namn.',
@@ -836,6 +845,7 @@ var VERSIONER = [
 
   // Låser upp en låst period. Varje upplåsning sparas i årets logg så att den syns i efterhand.
   function lasUpp(ar, opt) {
+    if (ar.grovkopia) throw BokforingsFel('En grovkopia från Excel kan inte låsas upp.');
     if (!ar.lastTom) throw BokforingsFel('Inget är låst.');
     var post = { handling: 'upplåst', tom: ar.lastTom, tid: (opt && opt.tid) || null, orsak: (opt && opt.orsak) || '' };
     return Object.assign({}, ar, { lastTom: null, laslogg: (ar.laslogg || []).concat([post]) });
@@ -1086,6 +1096,13 @@ var VERSIONER = [
     if (!ar || ar.format !== FORMAT) return ['Okänt filformat.'];
     if (!arGiltigtDatum(ar.start) || !arGiltigtDatum(ar.slut) || ar.slut < ar.start) fel.push('Räkenskapsårets datum är ogiltiga.');
     if (!Array.isArray(ar.kontoplan) || !Array.isArray(ar.verifikationer) || !ar.ingaendeBalans) return fel.concat(['Filen saknar kontoplan, verifikationer eller ingående balans.']);
+    // En grovkopia från Excel behöver inte gå ihop; avvikelserna finns i ar.grovkopia.avvikelser.
+    if (ar.grovkopia) {
+      ar.verifikationer.forEach(function (v) {
+        if (!Number.isInteger(v.nr) || !Array.isArray(v.rader) || v.rader.some(function (r) { return typeof r.konto !== 'string' || !arHeltal(r.belopp); })) fel.push('Verifikation ' + v.nr + ' i grovkopian är skadad.');
+      });
+      return fel;
+    }
     fel = fel.concat(kontrolleraIngaendeBalans(ar.kontoplan, ar.ingaendeBalans));
     var sedda = {};
     ar.verifikationer.forEach(function (v) {
@@ -2222,11 +2239,14 @@ var VERSIONER = [
     });
     if (summaPoster(b.poster) !== b.belopp) throw BokforingsFel('Fördelningen (' + formatBelopp(summaPoster(b.poster)) + ' kr) stämmer inte med beloppet ' + formatBelopp(b.belopp) + ' kr.');
     if (b.bankradId && reg.betalningar.some(function (x) { return x.bankradId === b.bankradId && x.arId === b.arId; })) throw BokforingsFel('Betalningen är redan kopplad till medlemmar.');
+    if (b.kalla && reg.betalningar.some(function (x) { return x.kalla === b.kalla; })) throw BokforingsFel('Betalningen är redan inläst.');
     var post = {
       id: nyttRegisterId(reg.betalningar, 'b'), datum: b.datum, belopp: b.belopp, termin: b.termin,
       nyckel: b.nyckel || '', arId: b.arId || null, ver: b.ver == null ? null : b.ver, bankradId: b.bankradId || null,
       poster: b.poster.map(function (p) { return { medlem: p.medlem, typ: p.typ === 'arsavgift' ? 'arsavgift' : 'termin', belopp: p.belopp }; })
     };
+    if (b.kalla) post.kalla = b.kalla;
+    if (b.historik) post.historik = true;
     return Object.assign({}, reg, { betalningar: reg.betalningar.concat([post]) });
   }
 
@@ -2304,6 +2324,260 @@ var VERSIONER = [
   }
 
 
+
+  // ---------- Tidigare år från föreningens Excel-arbetsböcker ----------
+  // Arbetsboken lämnas in som { flikar: { namn: [[cell, …], …] } } där datum redan är 'ÅÅÅÅ-MM-DD'.
+  // Bokföringen blir en låst grovkopia; avgifterna i bankfliken blir betalningar i medlemsregistret.
+
+  function flik(bok, namn) {
+    var n = Object.keys(bok.flikar || {}).find(function (k) { return k.trim().toLowerCase() === namn.toLowerCase(); });
+    return n ? bok.flikar[n] : null;
+  }
+
+  function cellText(c) { return c == null ? '' : String(c).trim(); }
+
+  // Rubrikraden: den första raden som innehåller alla rubrikerna. Ger { rad, kol: { rubrik: index } }.
+  function rubriker(rader, ord) {
+    for (var i = 0; i < Math.min(rader.length, 40); i++) {
+      var kol = {};
+      (rader[i] || []).forEach(function (c, j) { var t = cellText(c).toLowerCase(); if (t && kol[t] == null) kol[t] = j; });
+      if (ord.every(function (o) { return kol[o.toLowerCase()] != null; })) return { rad: i, kol: kol };
+    }
+    return null;
+  }
+
+  function excelDatum(c) {
+    var t = cellText(c);
+    var m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m && arGiltigtDatum(m[1] + '-' + m[2] + '-' + m[3]) ? m[1] + '-' + m[2] + '-' + m[3] : null;
+  }
+
+  function excelBelopp(c) {
+    if (typeof c === 'number' && isFinite(c)) return Math.round(c * 100);
+    var t = cellText(c);
+    return t ? tolkaBankbelopp(t) : null;
+  }
+
+  function excelKonto(c) {
+    var t = cellText(c).replace(/\.0+$/, '');
+    return /^[1-8]\d{3}$/.test(t) ? t : null;
+  }
+
+  // Namn skrivs olika: "EFTERNAMN, FÖRNAMN", "FÖRNAMN EFTERNAMN". Nyckeln är oberoende av ordning och versaler.
+  function namnNyckel(namn) {
+    return cellText(namn).toLowerCase().replace(/[^a-zåäöéèüæøß\s,-]/g, ' ').replace(/[,-]/g, ' ').split(/\s+/).filter(Boolean).sort().join(' ');
+  }
+
+  function visningsnamn(namn) {
+    var t = cellText(namn).replace(/\s+/g, ' ');
+    var m = t.match(/^([^,]+),\s*(.+)$/);
+    if (m) t = m[2] + ' ' + m[1];
+    if (t === t.toUpperCase()) t = t.toLowerCase().replace(/(^|[\s-])([a-zåäöéü])/g, function (x, a, b) { return a + b.toUpperCase(); });
+    return t.trim();
+  }
+
+  var AVGIFTSKOMMENTAR = /^\s*(terminsavg\w*|träningsavg\w*|traningsavg\w*|medlemsavg\w*)\b(.*)$/i;
+
+  // Terminen ur en kommentar som "Terminsavgift VT2026 - …" eller "Terminsavgift HT22 - …".
+  function terminIText(t) {
+    var m = String(t || '').match(/\b(VT|HT)\s*-?\s*(\d{4}|\d{2})\b/i);
+    return m ? m[1].toUpperCase() + '-' + m[2].slice(-2) : null;
+  }
+
+  // Tar bort namnet i en avgiftstext: "Terminsavgift VT2026 - Namn" -> "Terminsavgift VT2026".
+  function avgiftstextUtanNamn(text) {
+    var t = String(text || '');
+    if (!AVGIFTSKOMMENTAR.test(t)) return t;
+    return t.replace(/\s+-\s+.*$/, '').replace(/^(\s*\S+\s+(VT|HT)\s*-?\s*\d{2,4})\b.*$/i, '$1').trim();
+  }
+
+  function tolkaArsbok(bok, filnamn) {
+    var ut = { filnamn: filnamn || '', ar: null, kontoplan: [], ingaendeBalans: {}, verifikationer: [], swish: [], avgifter: [], avvikelser: [], saknas: [] };
+    // Kontoplan: första heltalet 1000–8999 på raden och texten efter det.
+    var kp = flik(bok, 'Kontoplan_lookup') || flik(bok, 'Kontoplan');
+    var namn = {};
+    (kp || []).forEach(function (r) {
+      for (var j = 0; j < (r || []).length; j++) {
+        var nr = typeof r[j] === 'number' ? excelKonto(r[j]) : null;
+        if (nr) {
+          var n = (r.slice(j + 1).find(function (c) { return typeof c === 'string' && c.trim(); }) || '').trim();
+          if (n && !namn[nr]) namn[nr] = n;
+          return;
+        }
+      }
+    });
+    if (!kp) ut.saknas.push('Kontoplan_lookup');
+    // Grundbok: en rad har en debetsida och/eller en kreditsida.
+    var gb = flik(bok, 'Grundbok');
+    var gr = gb && rubriker(gb, ['Verifikationsnummer', 'Debet Konto-nr', 'Debet belopp', 'Kredit Konto-nr', 'Kredit Belopp']);
+    var ver = [], perNr = {}, ar = {};
+    if (!gr) ut.saknas.push('Grundbok');
+    else {
+      var k = gr.kol;
+      gb.slice(gr.rad + 1).forEach(function (r) {
+        var vnr = r[k['verifikationsnummer']];
+        var dk = excelKonto(r[k['debet konto-nr']]), db = excelBelopp(r[k['debet belopp']]);
+        var kk = excelKonto(r[k['kredit konto-nr']]), kb = excelBelopp(r[k['kredit belopp']]);
+        if ((vnr === null || vnr === undefined || vnr === '') && !db && !kb) return;
+        if (!db && !kb) return;
+        var nr = Number(vnr);
+        if (!Number.isInteger(nr)) { ut.avvikelser.push('En rad i grundboken har ogiltigt verifikationsnummer (' + cellText(vnr) + ') och hoppades över.'); return; }
+        var v = perNr[nr];
+        if (!v) { v = perNr[nr] = { nr: nr, datum: null, text: '', rader: [] }; ver.push(v); }
+        var d = excelDatum(r[k['registreringsdatum']]);
+        if (d && !v.datum) v.datum = d;
+        if (!v.text) v.text = cellText(r[k['beskrivning']]);
+        if (db) { if (!dk) ut.avvikelser.push('Verifikation ' + nr + ': debetbelopp utan konto.'); v.rader.push({ konto: dk || '????', belopp: db }); if (dk && !namn[dk]) namn[dk] = cellText(r[k['debet konto']]); }
+        if (kb) { if (!kk) ut.avvikelser.push('Verifikation ' + nr + ': kreditbelopp utan konto.'); v.rader.push({ konto: kk || '????', belopp: -kb }); if (kk && !namn[kk]) namn[kk] = cellText(r[k['kredit konto']]); }
+        if (d) ar[d.slice(0, 4)] = (ar[d.slice(0, 4)] || 0) + 1;
+      });
+    }
+    // Ingående balanser
+    var ibf = flik(bok, 'IngåendeBalanser');
+    var ir = ibf && rubriker(ibf, ['Konto-nr', 'Amount', 'Type']);
+    if (!ir) ut.saknas.push('IngåendeBalanser');
+    else {
+      ibf.slice(ir.rad + 1).forEach(function (r) {
+        var nr = excelKonto(r[ir.kol['konto-nr']]), b = excelBelopp(r[ir.kol['amount']]);
+        if (!nr || !b) return;
+        var tecken = /^k/i.test(cellText(r[ir.kol['type']])) ? -1 : 1;
+        ut.ingaendeBalans[nr] = (ut.ingaendeBalans[nr] || 0) + tecken * Math.abs(b);
+        if (!namn[nr]) namn[nr] = cellText(r[ir.kol['konto']]);
+      });
+    }
+    // Året: det vanligaste året bland verifikationerna, annars året i filnamnet.
+    var vanligast = Object.keys(ar).sort(function (a, b) { return ar[b] - ar[a]; })[0];
+    var fn = String(filnamn || '').match(/(19|20)\d{2}/);
+    ut.ar = vanligast || (fn ? fn[0] : null);
+    if (ut.ar) {
+      ver.forEach(function (v) {
+        if (!v.datum) { ut.avvikelser.push('Verifikation ' + v.nr + ' saknar datum och fick ' + ut.ar + '-12-31.'); v.datum = ut.ar + '-12-31'; }
+        else if (v.datum.slice(0, 4) !== ut.ar) ut.avvikelser.push('Verifikation ' + v.nr + ' har datum ' + v.datum + ', utanför året.');
+        var s = v.rader.reduce(function (x, r) { return x + r.belopp; }, 0);
+        if (s !== 0) ut.avvikelser.push('Verifikation ' + v.nr + ' går inte ihop: skillnaden är ' + formatBelopp(s) + ' kr.');
+        v.text = avgiftstextUtanNamn(v.text) || 'Verifikation ' + v.nr;
+      });
+    }
+    var ibSumma = Object.keys(ut.ingaendeBalans).reduce(function (x, nr) { return x + ut.ingaendeBalans[nr]; }, 0);
+    if (ibSumma !== 0) ut.avvikelser.push('Ingående balans går inte ihop: skillnaden är ' + formatBelopp(ibSumma) + ' kr.');
+    ut.verifikationer = ver;
+    var anvanda = {};
+    ver.forEach(function (v) { v.rader.forEach(function (r) { anvanda[r.konto] = true; }); });
+    Object.keys(ut.ingaendeBalans).forEach(function (nr) { anvanda[nr] = true; });
+    ut.kontoplan = sorteraKonton(Object.keys(namn).concat(Object.keys(anvanda)).filter(function (nr, i, a) { return a.indexOf(nr) === i; })
+      .map(function (nr) { return { nr: nr, namn: namn[nr] || (nr === '????' ? 'Konto saknas i Excel' : 'Konto ' + nr) }; }));
+    // Swish-fliken: nummer -> namn
+    var sw = flik(bok, 'Swish');
+    var sr = sw && rubriker(sw, ['Swish', 'Namn']);
+    if (sr) {
+      sw.slice(sr.rad + 1).forEach(function (r) {
+        var nummer = hittaMobilnummer(cellText(r[sr.kol['swish']])), n = cellText(r[sr.kol['namn']]);
+        if (nummer && n) ut.swish.push({ nyckel: nummer, namn: n });
+      });
+    }
+    // Bankfliken: avgifter med kommentar som "Terminsavgift VT2026 - Namn"
+    var bk = flik(bok, 'Bankkonto');
+    var br = bk && rubriker(bk, ['Transaktionstyp', 'Belopp', 'Kommentar']);
+    if (!br) ut.saknas.push('Bankkonto');
+    else {
+      var bkol = br.kol;
+      bk.slice(br.rad + 1).forEach(function (r, i) {
+        var kom = cellText(r[bkol['kommentar']]);
+        var m = kom.match(AVGIFTSKOMMENTAR);
+        var b = excelBelopp(r[bkol['belopp']]);
+        if (!m || !b || b <= 0) return;
+        var datum = excelDatum(r[bkol['bokf dag']]) || excelDatum(r[bkol['transdag']]);
+        if (!datum) { ut.avvikelser.push('Avgiften "' + avgiftstextUtanNamn(kom) + '" i bankfliken saknar datum.'); return; }
+        var personnamn = (kom.match(/\s-\s+(.+)$/) || [])[1] || cellText(r[bkol['motpart']]);
+        var typ = cellText(r[bkol['transaktionstyp']]), ref = cellText(r[bkol['referens']]);
+        var betalare = tolkaBetalare({ text: typ, referens: /^swish/i.test(typ) ? '' : ref });
+        ut.avgifter.push({
+          datum: datum, belopp: b, termin: terminIText(m[2]) || terminForDatum(datum), typ: /^medlems/i.test(m[1]) ? 'arsavgift' : 'termin',
+          namn: personnamn.trim(), nyckel: betalare ? betalare.nyckel : '', visning: betalare ? betalare.visning : '',
+          kalla: 'excel:' + (ut.ar || '') + ':' + (cellText(r[bkol['konttrans#']]) || cellText(r[bkol['kontotrans#']]) || (br.rad + 2 + i))
+        });
+      });
+    }
+    return ut;
+  }
+
+  // Den inlästa bokföringen som ett låst år, märkt som grovkopia.
+  function grovkopiaAr(t, meta) {
+    var ar = {
+      format: FORMAT, start: t.ar + '-01-01', slut: t.ar + '-12-31', kontoplan: t.kontoplan, ingaendeBalans: rensaNollor(Object.assign({}, t.ingaendeBalans)),
+      verifikationer: t.verifikationer.map(function (v) { return { nr: v.nr, datum: v.datum, text: v.text, rader: v.rader.slice(), underlag: [], underlagKommentar: 'Grovkopia från Excel' }; }),
+      lastTom: t.ar + '-12-31', bankrader: [], underlag: [],
+      grovkopia: { fil: t.filnamn, inlast: (meta && meta.inlast) || null, avvikelser: t.avvikelser.slice(), anteckningar: [] }
+    };
+    return ar;
+  }
+
+  // Förhandsgranskning av avgifterna: vilka medlemmar som känns igen och vilka som blir nya.
+  function historikForslag(reg, t) {
+    var kanda = {};
+    reg.medlemmar.forEach(function (m) { if (!m.avford) kanda[namnNyckel(m.namn)] = m.id; });
+    var lasta = {};
+    reg.betalningar.forEach(function (b) { if (b.kalla) lasta[b.kalla] = true; });
+    var nya = {}, betalningar = [], redan = 0;
+    t.avgifter.forEach(function (a) {
+      if (lasta[a.kalla]) { redan++; return; }
+      var nyckel = namnNyckel(a.namn);
+      if (!nyckel) return;
+      var medlem = kanda[nyckel] || null;
+      if (!medlem) {
+        var n = nya[nyckel] || (nya[nyckel] = { nyckel: nyckel, namn: visningsnamn(a.namn), antal: 0, kategori: gissaKategori(reg, a) });
+        n.antal++;
+      }
+      betalningar.push(Object.assign({}, a, { medlem: medlem, namnNyckel: nyckel }));
+    });
+    var nyaBetalare = t.swish.filter(function (s) { return !hittaBetalare(reg, s.nyckel); }).length;
+    return { betalningar: betalningar, nyaMedlemmar: Object.keys(nya).map(function (k) { return nya[k]; }).sort(function (a, b) { return a.namn.localeCompare(b.namn, 'sv'); }), redan: redan, nyaBetalare: nyaBetalare };
+  }
+
+  function gissaKategori(reg, a) {
+    var avg = terminsavgifter(reg, a.termin).avgifter;
+    var ars = reg.arsavgift.vanlig || 0;
+    var hit = ['barn', 'student', 'vuxen', 'familj'].find(function (k) { return avg[k] && (a.belopp === avg[k] || a.belopp === avg[k] + ars); });
+    return hit || 'vuxen';
+  }
+
+  // Lägger in avgifterna och Swish-listan i registret. kategorier: { namnNyckel: kategori } för nya medlemmar.
+  function lasInHistorik(reg, t, kategorier) {
+    var f = historikForslag(reg, t);
+    var antal = { betalningar: 0, medlemmar: 0, betalare: 0, redan: f.redan };
+    var fore = reg.betalare.length;
+    var id = {};
+    reg.medlemmar.forEach(function (m) { if (!m.avford) id[namnNyckel(m.namn)] = m.id; });
+    f.nyaMedlemmar.forEach(function (n) {
+      var res = laggTillMedlem(reg, { namn: n.namn, kategori: (kategorier && kategorier[n.nyckel]) || n.kategori, tillagd: t.ar ? t.ar + '-01-01' : undefined });
+      reg = res.reg; id[n.nyckel] = res.medlem.id; antal.medlemmar++;
+    });
+    f.betalningar.forEach(function (b) {
+      var m = id[b.namnNyckel];
+      reg = registreraBetalning(reg, { datum: b.datum, belopp: b.belopp, termin: b.termin, nyckel: b.nyckel, kalla: b.kalla, historik: true, poster: [{ medlem: m, typ: b.typ, belopp: b.belopp }] });
+      if (b.nyckel) reg = kopplaBetalare(reg, { nyckel: b.nyckel, visning: b.visning }, [m]);
+      antal.betalningar++;
+    });
+    // Swish-listan: nummer som inte redan finns blir betalare med namn, utan koppling till någon medlem.
+    t.swish.forEach(function (s) {
+      var finns = hittaBetalare(reg, s.nyckel);
+      if (!finns) { reg = Object.assign({}, reg, { betalare: reg.betalare.concat([{ nyckel: s.nyckel, visning: visaMobilnummer(s.nyckel), namn: visningsnamn(s.namn), medlemmar: [] }]) }); antal.betalare++; }
+      else if (!finns.namn) reg = andraBetalare(reg, s.nyckel, { namn: visningsnamn(s.namn) });
+    });
+    antal.betalare = reg.betalare.length - fore;
+    return { reg: reg, antal: antal };
+  }
+
+  // Skillnader mellan grovkopians utgående balans och nästa års ingående balans.
+  function ubMotIb(ar, nasta) {
+    var ub = saldon(ar);
+    var konton = {};
+    Object.keys(ub).concat(Object.keys(nasta.ingaendeBalans)).forEach(function (nr) { if (arBalanskonto(nr)) konton[nr] = true; });
+    return Object.keys(konton).sort().map(function (nr) {
+      return { konto: nr, ub: ub[nr] || 0, ib: nasta.ingaendeBalans[nr] || 0 };
+    }).filter(function (x) { return x.ub !== x.ib; });
+  }
+
   // ---------- Avförande och kvitton ----------
 
   // Avför en medlem (utträde eller enligt stadgarna) och tar bort personuppgifterna.
@@ -2330,7 +2604,8 @@ var VERSIONER = [
   function arsavgiftsAr(reg, medlemId, arMap) {
     var ar = {};
     giltigaBetalningar(reg, arMap).forEach(function (b) {
-      if (b.poster.some(function (p) { return p.medlem === medlemId && p.typ === 'arsavgift' && p.belopp > 0; })) ar[kalenderarForTermin(b.termin)] = true;
+      // Inlästa betalningar från Excel saknar uppdelning; en avgift det året räknas som medlemskap.
+      if (b.poster.some(function (p) { return p.medlem === medlemId && ((p.typ === 'arsavgift' && p.belopp > 0) || b.historik); })) ar[kalenderarForTermin(b.termin)] = true;
     });
     return ar;
   }
@@ -2626,6 +2901,15 @@ var VERSIONER = [
     kvittorader: kvittorader,
     nastaKvittonummer: nastaKvittonummer,
     registreraKvitto: registreraKvitto,
+    namnNyckel: namnNyckel,
+    visningsnamn: visningsnamn,
+    terminIText: terminIText,
+    avgiftstextUtanNamn: avgiftstextUtanNamn,
+    tolkaArsbok: tolkaArsbok,
+    grovkopiaAr: grovkopiaAr,
+    historikForslag: historikForslag,
+    lasInHistorik: lasInHistorik,
+    ubMotIb: ubMotIb,
     arMapp: arMapp,
     underlagSokvag: underlagSokvag,
     kvittoSokvag: kvittoSokvag
@@ -2642,6 +2926,9 @@ var VERSIONER = [
   // Medlemsregistret sparas för sig, i webbläsaren och i en egen mapp i OneDrive, aldrig i bokföringsfilen.
   var REG_LAGRING = 'forening-bokforing:medlemsregister';
   var REGFIL = 'Medlemsregister.json';
+  // Appens egen mapp innehåller två undermappar: bokföringen (delas med revisorn) och medlemsregistret (delas inte).
+  var DATAMAPP = 'Bokföring och underlag';
+  var REGMAPP = 'Medlemsregister';
   var senastRegJson = null;
 
   var NYCKEL = 'forening-bokforing:claude-nyckel';
@@ -2664,6 +2951,7 @@ var VERSIONER = [
   var medlemVy = 'statistik';
   var valdTermin = null;
   var avgiftUtkast = {};
+  var excelForhand = null;
   var oppenVer = null;
   var valtKonto = '1930';
   var meddelande = null;
@@ -2936,6 +3224,7 @@ var VERSIONER = [
   var STANDARD_KLIENTER = { 'karmadonkey.github.io': '0c0a38fc-1bb6-47a2-b690-e9e749dfb800' };
   var QR_URL = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
   var JSPDF_URL = 'https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js';
+  var XLSX_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
   var HTML2CANVAS_URL = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
   var NYCKEL_ANDRAD = 'forening-bokforing:claude-nyckel-andrad';
   var INBJUDAN = 'forening-bokforing:inbjudan';
@@ -3118,6 +3407,7 @@ var VERSIONER = [
     var post = await graf('/drives/' + inst.mapp.driveId + '/items/' + inst.mapp.id, { tillat: [403, 404] });
     if (typeof post === 'number') return null;
     od.mapp = inst.mapp;
+    od.rot = inst.lage === 'lasare' ? null : (inst.rot || null);
     od.lage = inst.lage === 'lasare' ? 'lasare' : 'agare';
     od.eTag = null; od.senast = null; od.regETag = null;
     sparaOd();
@@ -3150,11 +3440,21 @@ var VERSIONER = [
     var post = await graf('/me/drive/root:/' + enc(sokvag), { tillat: [404] });
     if (post === 404) throw new Error('Hittar ingen mapp som heter ' + sokvag + ' i din OneDrive. Kontrollera stavningen.');
     if (!post.folder) throw new Error(sokvag + ' är en fil, inte en mapp.');
-    od.mapp = { driveId: post.parentReference.driveId, id: post.id, namn: post.name, sokvag: sokvag };
+    var driveId = post.parentReference.driveId;
+    // Äldre upplägg: bokföringsfilen ligger direkt i mappen. Annars används (och skapas) appens undermappar.
+    var direkt = await graf('/drives/' + driveId + '/items/' + post.id + ':/' + enc(DATAFIL) + ':', { tillat: [404] });
+    if (direkt !== 404) {
+      od.rot = null;
+      od.mapp = { driveId: driveId, id: post.id, namn: post.name, sokvag: sokvag };
+    } else {
+      var data = await sakerstallUndermapp(driveId, post.id, DATAMAPP);
+      od.rot = { driveId: driveId, id: post.id, namn: post.name, sokvag: sokvag };
+      od.mapp = { driveId: driveId, id: data.id, namn: DATAMAPP, sokvag: sokvag + '/' + DATAMAPP };
+    }
     od.lage = 'agare';
-    od.eTag = null; od.senast = null; od.regETag = null;
+    od.eTag = null; od.senast = null; od.regETag = null; od.regMapp = null; odNu.mappar = {};
     sparaOd();
-    sparaAppinstallningar({ mapp: od.mapp, lage: 'agare' }).catch(function () { /* frivilligt */ });
+    sparaAppinstallningar({ mapp: od.mapp, rot: od.rot, lage: 'agare', regMapp: null }).catch(function () { /* frivilligt */ });
     await forstaSynk();
   }
 
@@ -3239,6 +3539,21 @@ var VERSIONER = [
     if (!odAnslutet() || odNu.konflikt) return;
     odNu.senastHamtat = Date.now();
     var meta = await graf(iMappen(DATAFIL), { tillat: [404] });
+    if (meta === 404 && !lasLage()) {
+      // Har appens filer flyttats från en annan enhet? Då står den nya mappen i appmappen.
+      var inst = await lasAppinstallningar().catch(function () { return {}; });
+      if (inst.mapp && inst.mapp.id !== od.mapp.id && inst.lage !== 'lasare') {
+        od.mapp = inst.mapp; od.rot = inst.rot || null; od.regMapp = inst.regMapp || null;
+        od.eTag = null; od.regETag = null; odNu.mappar = {};
+        sparaOd();
+        meta = await graf(iMappen(DATAFIL), { tillat: [404] });
+        if (meta !== 404) {
+          if (od.smutsig) { odNu.konflikt = true; sattStatus('Krock med OneDrive', true); return; }
+          await hamtaOchTillampa(meta);
+          return;
+        }
+      }
+    }
     if (meta === 404) {
       if (!lasLage()) { od.smutsig = true; sparaOd(); await synkaUpp(); }
       return;
@@ -3267,16 +3582,17 @@ var VERSIONER = [
       var finns = await graf('/drives/' + inst.regMapp.driveId + '/items/' + inst.regMapp.id, { tillat: [403, 404] });
       if (typeof finns !== 'number') { od.regMapp = inst.regMapp; sparaOd(); return; }
     }
-    var mapp = await graf('/drives/' + od.mapp.driveId + '/items/' + od.mapp.id + '?$select=id,name,parentReference');
-    var foralder = mapp.parentReference && mapp.parentReference.id;
-    if (!foralder) throw new Error('Hittar inte mappen ovanför bokföringsmappen.');
-    var namn = mapp.name + ' – medlemsregister';
-    var ny = await graf('/drives/' + od.mapp.driveId + '/items/' + foralder + '/children', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: namn, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }), tillat: [409]
-    });
-    if (ny === 409) ny = await graf('/drives/' + od.mapp.driveId + '/items/' + foralder + ':/' + enc(namn) + ':');
-    od.regMapp = { driveId: od.mapp.driveId, id: ny.id, namn: namn, for: od.mapp.id };
+    var foralder, namn;
+    if (od.rot) { foralder = od.rot.id; namn = REGMAPP; }
+    else {
+      // Äldre upplägg: en mapp bredvid bokföringsmappen.
+      var mapp = await graf('/drives/' + od.mapp.driveId + '/items/' + od.mapp.id + '?$select=id,name,parentReference');
+      foralder = mapp.parentReference && mapp.parentReference.id;
+      if (!foralder) throw new Error('Hittar inte mappen ovanför bokföringsmappen.');
+      namn = mapp.name + ' – medlemsregister';
+    }
+    var ny = await sakerstallUndermapp(od.mapp.driveId, foralder, namn);
+    od.regMapp = { driveId: od.mapp.driveId, id: ny.id, namn: od.rot ? od.rot.namn + '/' + namn : namn, for: od.mapp.id };
     od.regETag = null;
     sparaOd();
     sparaAppinstallningar({ regMapp: od.regMapp }).catch(function () { /* frivilligt */ });
@@ -3469,6 +3785,109 @@ var VERSIONER = [
     return { blob: blob };
   }
 
+
+  async function sakerstallUndermapp(driveId, foralderId, namn) {
+    var ny = await graf('/drives/' + driveId + '/items/' + foralderId + '/children', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: namn, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }), tillat: [409]
+    });
+    if (ny === 409) ny = await graf('/drives/' + driveId + '/items/' + foralderId + ':/' + enc(namn) + ':');
+    return ny;
+  }
+
+  // Mappen på sökvägen i min OneDrive; mappar som saknas skapas.
+  async function skapaSokvag(sokvag) {
+    var rot = await graf('/me/drive/root');
+    var driveId = rot.parentReference && rot.parentReference.driveId ? rot.parentReference.driveId : od.mapp.driveId;
+    var id = rot.id;
+    var delar = sokvag.split('/').filter(Boolean);
+    for (var i = 0; i < delar.length; i++) id = (await sakerstallUndermapp(driveId, id, delar[i])).id;
+    return { driveId: driveId, id: id, namn: delar[delar.length - 1] };
+  }
+
+  // Flyttar appens egna filer (bokföringen, logotypen, underlagen, kvittona och medlemsregistret) till en ny mapp
+  // med undermapparna Bokföring och underlag och Medlemsregister. Andra filer i den gamla mappen rörs inte.
+  async function flyttaAppensFiler(sokvag) {
+    sokvag = sokvag.replace(/^\/+|\/+$/g, '');
+    if (!sokvag) throw new Error('Skriv sökvägen till den nya mappen, t.ex. Föreningen/Föreningsbokföring.');
+    if (odNu.konflikt || odNu.regKonflikt) throw new Error('Lös krocken med OneDrive först.');
+    var gammalSokvag = (od.mapp.sokvag || '').replace(/\/+$/, '');
+    if (gammalSokvag && (sokvag === gammalSokvag || sokvag.indexOf(gammalSokvag + '/') === 0)) throw new Error('Den nya mappen kan inte ligga i bokföringsmappen.');
+    if (od.rot && sokvag === od.rot.sokvag) throw new Error('Appens filer ligger redan i ' + sokvag + '.');
+    sattStatus('Sparar innan flytten…');
+    await synkaUpp();
+    if (od.smutsig || od.regSmutsig) throw new Error('Allt kunde inte sparas i OneDrive. Försök igen.');
+    sattStatus('Flyttar…');
+    var rot = await skapaSokvag(sokvag);
+    var finns = await graf('/drives/' + rot.driveId + '/items/' + rot.id + ':/' + enc(DATAMAPP + '/' + DATAFIL) + ':', { tillat: [404] });
+    if (finns !== 404) throw new Error('Det finns redan en bokföring från appen i ' + sokvag + '.');
+    var data = await sakerstallUndermapp(rot.driveId, rot.id, DATAMAPP);
+    var cache = {};
+    var dir = function (rel) { return rel.indexOf('/') < 0 ? '' : katalog(rel); };
+    var mappI = async function (rel) {
+      if (!rel) return data.id;
+      if (cache[rel]) return cache[rel];
+      var f = await mappI(dir(rel));
+      cache[rel] = (await sakerstallUndermapp(rot.driveId, f, filnamnAv(rel))).id;
+      return cache[rel];
+    };
+    var flyttaTill = async function (itemId, rel) {
+      var f = await mappI(dir(rel));
+      return graf('/drives/' + rot.driveId + '/items/' + itemId, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: filnamnAv(rel), parentReference: { id: f }, '@microsoft.graph.conflictBehavior': 'rename' })
+      });
+    };
+    var antal = 0;
+    var arIds = Object.keys(store.ar);
+    for (var i = 0; i < arIds.length; i++) {
+      var lista = store.ar[arIds[i]].underlag || [];
+      for (var j = 0; j < lista.length; j++) {
+        if (!lista[j].odId) continue;
+        await flyttaTill(lista[j].odId, lista[j].odMal || K.underlagSokvag(arIds[i], lista[j]));
+        antal++;
+      }
+    }
+    for (var k = 0; k < store.dokument.length; k++) {
+      var d = store.dokument[k];
+      if (d.odId) { await flyttaTill(d.odId, K.kvittoSokvag(d)); antal++; }
+    }
+    if (store.forening.logoOdId) {
+      var logo = await graf('/drives/' + od.mapp.driveId + '/items/' + store.forening.logoOdId, { tillat: [404] });
+      if (logo !== 404) { await flyttaTill(logo.id, logo.name); antal++; }
+    }
+    // Medlemsregistret
+    var regMal = await sakerstallUndermapp(rot.driveId, rot.id, REGMAPP);
+    if (od.regMapp) {
+      var regFil = await graf(iRegMappen(), { tillat: [404] });
+      if (regFil !== 404) {
+        var flyttad = await graf('/drives/' + rot.driveId + '/items/' + regFil.id, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: REGFIL, parentReference: { id: regMal.id } })
+        });
+        od.regETag = flyttad.eTag;
+        // Registret pekas om direkt, så att ett avbrott senare inte gör att det skapas på nytt i den gamla mappen.
+        od.regMapp = { driveId: rot.driveId, id: regMal.id, namn: rot.namn + '/' + REGMAPP, for: od.mapp.id };
+        sparaOd();
+        antal++;
+      }
+    }
+    // Bokföringsfilen sist, så att den gamla mappen gäller tills allt annat är flyttat.
+    var meta = await graf(iMappen(DATAFIL));
+    var nyMeta = await flyttaTill(meta.id, DATAFIL);
+    antal++;
+    var gammal = od.mapp.sokvag || od.mapp.namn;
+    od.rot = { driveId: rot.driveId, id: rot.id, namn: rot.namn, sokvag: sokvag };
+    od.mapp = { driveId: rot.driveId, id: data.id, namn: DATAMAPP, sokvag: sokvag + '/' + DATAMAPP };
+    od.regMapp = { driveId: rot.driveId, id: regMal.id, namn: rot.namn + '/' + REGMAPP, for: data.id };
+    od.eTag = nyMeta.eTag;
+    odNu.mappar = {};
+    sparaOd();
+    await sparaAppinstallningar({ mapp: od.mapp, rot: od.rot, lage: 'agare', regMapp: od.regMapp }).catch(function () { /* frivilligt */ });
+    sattStatus('Synkad med OneDrive');
+    return { antal: antal, gammal: gammal };
+  }
+
   function kopplaFranOneDrive() {
     clearTimeout(odNu.timer);
     od = { clientId: od.clientId, refreshToken: null, konto: null, mapp: null, lage: null, eTag: null, senast: null, smutsig: false };
@@ -3519,7 +3938,13 @@ var VERSIONER = [
 
   function arForDatum(d) {
     if (!d) return null;
-    return Object.keys(store.ar).find(function (id) { return store.ar[id].start <= d && d <= store.ar[id].slut; }) || null;
+    return Object.keys(store.ar).find(function (id) { return !store.ar[id].grovkopia && store.ar[id].start <= d && d <= store.ar[id].slut; }) || null;
+  }
+
+  // Det aktiva året, eller det senaste vanliga året om det aktiva är en grovkopia.
+  function oppetAr() {
+    if (store.ar[store.aktivt] && !store.ar[store.aktivt].grovkopia) return store.aktivt;
+    return Object.keys(store.ar).filter(function (id) { return !store.ar[id].grovkopia; }).sort().pop() || store.aktivt;
   }
 
   function logga(text, fel) { logg.unshift({ text: text, fel: !!fel }); logg = logg.slice(0, 12); }
@@ -3528,6 +3953,7 @@ var VERSIONER = [
   function kopplaEfterhand() {
     var antalKopplade = 0;
     Object.keys(store.ar).forEach(function (id) {
+      if (store.ar[id].grovkopia) return;
       var res = K.kopplaBokforda(store.ar[id]);
       store.ar[id] = res.ar;
       antalKopplade += res.kopplade.length;
@@ -3559,6 +3985,7 @@ var VERSIONER = [
   function importeraRader(rader) {
     var nya = 0, dubbletter = 0;
     Object.keys(store.ar).forEach(function (id) {
+      if (store.ar[id].grovkopia) return;
       var res = K.importeraBankrader(store.ar[id], rader);
       store.ar[id] = res.ar;
       nya += res.nya;
@@ -3602,7 +4029,7 @@ var VERSIONER = [
       var u = n.underlag;
       var regel = K.hittaMotpartsregel(store.motpartsregler, u.motpart);
       if (regel) { u.foreslagetKonto = regel.konto; u.kontoKalla = 'inlart'; }
-      var arId = arForDatum(u.forfallodatum || u.datum) || store.aktivt;
+      var arId = arForDatum(u.forfallodatum || u.datum) || oppetAr();
       store.ar[arId] = K.laggTillUnderlag(store.ar[arId], u);
       spara();
       logga(fil.name + ': ' + (u.motpart || 'okänd motpart') + ', ' + kr(u.belopp) + ' kr' +
@@ -3847,6 +4274,34 @@ var VERSIONER = [
   // Fakturor, kvitton och årsmöteshandlingar ritas som riktiga PDF-filer (A4, sökbar text) med jsPDF.
 
   var jspdfLaddas = null;
+  var xlsxLaddas = null;
+  function laddaXlsx() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (!xlsxLaddas) {
+      xlsxLaddas = new Promise(function (ok, fel) {
+        var sk = document.createElement('script');
+        sk.src = XLSX_URL;
+        sk.onload = function () { ok(window.XLSX); };
+        sk.onerror = function () { xlsxLaddas = null; fel(new Error('Verktyget för Excel-filer kunde inte laddas. Kontrollera internetanslutningen.')); };
+        document.head.appendChild(sk);
+      });
+    }
+    return xlsxLaddas;
+  }
+
+  // Läser en Excel-arbetsbok i webbläsaren. Filen skickas ingenstans.
+  async function lasArbetsbok(fil) {
+    var X = await laddaXlsx();
+    var wb = X.read(await fil.arrayBuffer(), { cellDates: true });
+    var flikar = {};
+    wb.SheetNames.forEach(function (n) {
+      flikar[n] = X.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null }).map(function (r) {
+        return r.map(function (c) { return c instanceof Date ? new Date(c.getTime() - c.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : c; });
+      });
+    });
+    return { flikar: flikar };
+  }
+
   function laddaJsPdf() {
     if (window.jspdf) return Promise.resolve(window.jspdf.jsPDF);
     if (!jspdfLaddas) {
@@ -4184,7 +4639,7 @@ var VERSIONER = [
     doc.setFont('helvetica', 'bold'); doc.setFontSize(typ === 'hb' ? 14 : 18); doc.setTextColor.apply(doc, SKIFFER);
     doc.text(pt(titel), H, 20, { align: 'right' });
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(26, 26, 26);
-    doc.text(typ === 'medl' ? pt(K.terminNamn(konto)) : 'Räkenskapsår ' + ar.start + ' - ' + ar.slut + (ar.lastTom === ar.slut ? '' : ' (preliminär)'), H, 26, { align: 'right' });
+    doc.text(typ === 'medl' ? pt(K.terminNamn(konto)) : 'Räkenskapsår ' + ar.start + ' - ' + ar.slut + (ar.grovkopia ? ' (grovkopia från Excel)' : ar.lastTom === ar.slut ? '' : ' (preliminär)'), H, 26, { align: 'right' });
     doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
     doc.text('Utskriven ' + idag(), H, 30.5, { align: 'right' });
     doc.setTextColor(26, 26, 26);
@@ -4491,7 +4946,7 @@ var VERSIONER = [
     if (d.typ === 'faktura') {
       var filnamn = dokumentFilnamn(d);
       var u = K.fakturaTillUnderlag(d, filnamn);
-      var arId = arForDatum(d.forfallodatum) || arForDatum(d.datum) || store.aktivt;
+      var arId = arForDatum(d.forfallodatum) || arForDatum(d.datum) || oppetAr();
       store.ar[arId] = K.laggTillUnderlag(store.ar[arId], u);
       d.underlagId = u.id;
       d.arId = arId;
@@ -4549,8 +5004,12 @@ var VERSIONER = [
     }
     if (lasLage() && (vy === 'inlasning' || vy === 'ny')) vy = 'verifikationer';
     if (lasLage() && vy === 'medlemmar') vy = 'rapporter';
-    nav.innerHTML = VYER.filter(function (v) { return !lasLage() || (v[0] !== 'inlasning' && v[0] !== 'ny' && v[0] !== 'medlemmar'); }).map(function (v) {
-      return '<button type="button" data-vy="' + v[0] + '"' + (vy === v[0] ? ' aria-current="page"' : '') + '>' + v[1] + '</button>';
+    if (ar.grovkopia && (vy === 'inlasning' || vy === 'ny')) vy = 'rapporter';
+    nav.innerHTML = VYER.filter(function (v) {
+      if (ar.grovkopia && (v[0] === 'inlasning' || v[0] === 'ny')) return false;
+      return !lasLage() || (v[0] !== 'inlasning' && v[0] !== 'ny' && v[0] !== 'medlemmar');
+    }).map(function (v) {
+      return '<button type="button" data-vy="' + v[0] + '"' + (vy === v[0] ? ' aria-current="page"' : '') + '>' + (ar.grovkopia && v[0] === 'bokslut' ? 'Grovkopia' : v[1]) + '</button>';
     }).join('');
     var html = {
       inlasning: vyInlasning,
@@ -4565,7 +5024,7 @@ var VERSIONER = [
       arkiv: vyArkiv,
       om: vyOm
     }[vy](ar);
-    main.innerHTML = msg + html;
+    main.innerHTML = msg + (vy !== 'medlemmar' && vy !== 'bokslut' ? grovkopiaRuta(ar) : '') + html;
     ritaQr();
     skalaForhandsvisningar();
     uppdateraPdfKnappar();
@@ -4596,7 +5055,7 @@ var VERSIONER = [
     el.innerHTML = '<label for="valjAr" style="margin:0">Räkenskapsår</label>' +
       '<select id="valjAr" style="width:auto">' + ids.map(function (id) {
         return '<option value="' + esc(id) + '"' + (id === store.aktivt ? ' selected' : '') + '>' + esc(id) +
-          (store.ar[id].lastTom === store.ar[id].slut ? ' (låst)' : '') + '</option>';
+          (store.ar[id].grovkopia ? ' (grovkopia)' : store.ar[id].lastTom === store.ar[id].slut ? ' (låst)' : '') + '</option>';
       }).join('') + '</select>';
   }
 
@@ -4725,7 +5184,7 @@ var VERSIONER = [
         (avst.skillnad === 0 ? '<span class="ok">stämmer</span>' : '<span class="fel">skillnad ' + kr(avst.skillnad) + '</span>' + (avst.obokforda ? ' <span class="faint">(' + antal(avst.obokforda, 'transaktion är', 'transaktioner är') + ' inte bokförda ännu)</span>' : ''));
       if (avst.ingaendeEnligtBank != null && avst.ingaendeEnligtBank !== avst.ingaendeBokfort && !ar.lastTom) {
         html += '<p class="fel">Ingående balans på ' + avst.konto + ' är ' + kr(avst.ingaendeBokfort) + ' kr, men enligt banken fanns ' + kr(avst.ingaendeEnligtBank) + ' kr före årets första transaktion.</p>' +
-          (foregaende(ar) ? '<p class="faint">Ingående balans kommer från föregående år. Kontrollera bokföringen där.</p>'
+          (foregaende(ar) && !foregaende(ar).grovkopia ? '<p class="faint">Ingående balans kommer från föregående år. Kontrollera bokföringen där.</p>'
             : '<button class="btn btn-secondary btn-small" data-action="ib-fran-bank" data-belopp="' + avst.ingaendeEnligtBank + '">Sätt ingående balans till ' + kr(avst.ingaendeEnligtBank) + ' kr (mot 2067 Balanserad vinst eller förlust)</button>');
       }
       html += '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="till-bankavstamning">Visa avstämning per månad</button></div></div>';
@@ -4902,7 +5361,7 @@ var VERSIONER = [
       return '<button class="btn ' + (rapportVy === r[0] ? '' : 'btn-secondary') + ' btn-small" data-rapport="' + r[0] + '">' + r[1] + '</button>';
     }).join('') + '</div>' + rapportPdfKnappar(ar, rapportVy);
     var rubrik = (store.forening.namn ? esc(store.forening.namn) + ' · ' : '') + 'Räkenskapsår ' + esc(ar.start) + ' – ' + esc(ar.slut);
-    html += '<div class="card"><p class="faint">' + rubrik + (ar.lastTom === ar.slut ? '' : ' · preliminär') + '</p>';
+    html += '<div class="card"><p class="faint">' + rubrik + (ar.grovkopia ? ' · grovkopia från Excel' : ar.lastTom === ar.slut ? '' : ' · preliminär') + '</p>';
     if (rapportVy === 'rr') html += rapportRR(ar);
     if (rapportVy === 'br') html += rapportBR(ar);
     if (rapportVy === 'sb') html += rapportSB(ar);
@@ -5010,6 +5469,7 @@ var VERSIONER = [
   }
 
   function vyBokslut(ar) {
+    if (ar.grovkopia) return vyGrovkopia(ar);
     var namn = K.arNamn(ar);
     var lista = K.bokslutsKontroller(ar);
     var steg = {
@@ -5311,8 +5771,9 @@ var VERSIONER = [
     }
     if (!od.mapp) {
       html += '<p style="margin-top:0">Inloggad som <strong>' + esc(od.konto || '') + '</strong>. Välj var bokföringen ska ligga.</p>' +
-        '<h3>Föreningens mapp i min OneDrive</h3><p class="faint" style="margin:0">Skriv sökvägen från OneDrive-roten, med snedstreck mellan mapparna.</p>' +
-        '<div class="row" style="margin-top:6px"><input id="odSokvag" placeholder="t.ex. Föreningen/Bokföring" style="max-width:420px"><button class="btn btn-small" data-action="od-valj-mapp">Använd mappen</button></div>' +
+        '<h3>Appens mapp i min OneDrive</h3><p class="faint" style="margin:0">Skriv sökvägen från OneDrive-roten, med snedstreck mellan mapparna. Använd en egen mapp för appen, till exempel <em>Föreningen/Föreningsbokföring</em>. ' +
+        'Appen skapar två undermappar där: <em>' + esc(DATAMAPP) + '</em> (som du kan dela med revisorn) och <em>' + esc(REGMAPP) + '</em> (som du inte delar). Har appen redan använt mappen hittar den bokföringen där.</p>' +
+        '<div class="row" style="margin-top:6px"><input id="odSokvag" placeholder="t.ex. Föreningen/Föreningsbokföring" style="max-width:420px"><button class="btn btn-small" data-action="od-valj-mapp">Använd mappen</button></div>' +
         '<h3>En mapp som delats med mig (läsning, t.ex. för revisorn)</h3>';
       if (odNu.delade) {
         html += odNu.delade.length ? odNu.delade.map(function (m, i) {
@@ -5324,10 +5785,16 @@ var VERSIONER = [
       }
       return html + '<div class="row" style="margin-top:12px"><button class="btn btn-secondary btn-small" data-action="od-logga-ut">Logga ut</button></div></div>';
     }
-    html += '<p style="margin-top:0">' + (lasLage() ? '<strong>Endast läsning.</strong> ' : '') + 'Kopplad till <strong>' + esc(od.mapp.sokvag || od.mapp.namn) + '</strong> som ' + esc(od.konto || '') + '.</p>' +
+    html += '<p style="margin-top:0">' + (lasLage() ? '<strong>Endast läsning.</strong> ' : '') + 'Kopplad till <strong>' + esc(od.rot ? od.rot.sokvag : (od.mapp.sokvag || od.mapp.namn)) + '</strong> som ' + esc(od.konto || '') + '.</p>' +
       '<p class="faint">' + (od.senast ? 'Senast synkad ' + esc(od.senast.slice(0, 16).replace('T', ' ')) + '. ' : '') +
-      (lasLage() ? 'Appen hämtar senaste versionen när den startar.' : 'Bokföringen ligger i ' + esc(DATAFIL) + ', underlagen i årsmapparna under Bokföringsunderlag. Ändringar sparas automatiskt.') + '</p>' +
-      (!lasLage() && od.regMapp ? '<p class="faint">Medlemsregistret ligger för sig i mappen <strong>' + esc(od.regMapp.namn) + '</strong> bredvid bokföringsmappen. Den mappen följer inte med när du delar bokföringen med revisorn.</p>' : '') +
+      (lasLage() ? 'Appen hämtar senaste versionen när den startar.' : od.rot
+        ? 'Bokföringen och underlagen ligger i undermappen <strong>' + esc(DATAMAPP) + '</strong>, som du kan dela med revisorn. Medlemsregistret ligger i <strong>' + esc(REGMAPP) + '</strong>, som du inte delar. Ändringar sparas automatiskt.'
+        : 'Bokföringen ligger i ' + esc(DATAFIL) + ', underlagen i årsmapparna under Bokföringsunderlag. Ändringar sparas automatiskt.') + '</p>' +
+      (!lasLage() && od.regMapp && !od.rot ? '<p class="faint">Medlemsregistret ligger för sig i mappen <strong>' + esc(od.regMapp.namn) + '</strong> bredvid bokföringsmappen. Den mappen följer inte med när du delar bokföringen med revisorn.</p>' : '') +
+      (!lasLage() ? '<details style="margin:8px 0"' + (od.rot ? '' : ' open') + '><summary>' + (od.rot ? 'Flytta appens filer till en annan mapp' : 'Flytta appens filer till en egen mapp (rekommenderas)') + '</summary>' +
+        '<p class="faint">Appen flyttar bokföringen, underlagen, kvittona, logotypen och medlemsregistret till den nya mappen, i undermapparna ' + esc(DATAMAPP) + ' och ' + esc(REGMAPP) + '. Andra filer, till exempel dina Excel-filer, rörs inte. ' +
+        'Har du delat bokföringen med revisorn behöver du dela den nya mappen ' + esc(DATAMAPP) + ' och skicka en ny inbjudan efteråt.</p>' +
+        '<div class="row"><input id="odNyMapp" placeholder="t.ex. Föreningen/Föreningsbokföring" style="max-width:420px"><button class="btn btn-small" data-action="od-flytta">Flytta</button></div></details>' : '') +
       (odNu.regFel ? '<p class="fel">' + esc(odNu.regFel) + '</p>' : '') +
       '<div class="row"><button class="btn btn-small" data-action="od-synka">' + (lasLage() ? 'Hämta senaste' : 'Synka nu') + '</button>' +
       '<button class="btn btn-secondary btn-small" data-action="od-byt-mapp">Byt mapp</button>' +
@@ -5375,9 +5842,11 @@ var VERSIONER = [
 
   function vyArkiv(ar) {
     if (lasLage()) return vyOneDrive();
-    var varningar = K.kontroller(ar);
+    var varningar = ar.grovkopia ? [] : K.kontroller(ar);
     var arLast = ar.lastTom === ar.slut;
-    var html = vyOneDrive() + '<h2>Kontroller</h2><div class="card">' + (varningar.length
+    var html = vyOneDrive() + vyExcelHistorik();
+    if (ar.grovkopia) return html + vyArkivRest(ar);
+    html += '<h2>Kontroller</h2><div class="card">' + (varningar.length
       ? '<ul>' + varningar.map(function (w) { return '<li>' + esc(w.meddelande) + '</li>'; }).join('') + '</ul>'
       : '<p class="ok">Inga anmärkningar.</p>') + '</div>';
     html += '<h2>Låsning och årsskifte</h2><div class="card">' +
@@ -5389,6 +5858,11 @@ var VERSIONER = [
       }).join('') + '</ul></details>' : '') +
       '<p class="faint" style="margin-top:12px">Nästa år skapas med utgående balanser som ingående balanser. Årets resultat läggs på konto 2069 om det inte redan bokförts där.</p>' +
       '<button class="btn btn-secondary" data-action="nasta-ar">Skapa nästa räkenskapsår</button></div>';
+    return html + vyArkivRest(ar);
+  }
+
+  function vyArkivRest(ar) {
+    var html = '';
     html += '<h2 id="claude-installning">Claude</h2><div class="card"><p>Claude läser fakturor, kvitton och kontoutdrag. Det kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. ' +
       'Ett vanligt kvitto kostar några tiotals öre att tolka.</p>' +
       '<p class="faint">' + (od.refreshToken ? 'Nyckeln sparas i webbläsaren och i din privata appmapp i OneDrive (Appar/Föreningsbokföring), så att den följer med till dina andra enheter. Den ligger inte i föreningens delade mapp.'
@@ -5411,10 +5885,78 @@ var VERSIONER = [
       : 'Bokföringen sparas bara i den här webbläsaren. Exportera en säkerhetskopia regelbundet, eller koppla appen till OneDrive ovan. Inlästa filer ingår inte i säkerhetskopian.') + '</p><div class="row">' +
       '<button class="btn btn-secondary" data-action="exportera">Exportera allt (JSON)</button>' +
       '<button class="btn btn-secondary" data-action="importera">Läs in säkerhetskopia</button>' +
-      '<button class="btn btn-secondary" data-action="sie">Exportera ' + esc(K.arNamn(ar)) + ' som SIE 4</button></div></div>';
+      (ar.grovkopia ? '' : '<button class="btn btn-secondary" data-action="sie">Exportera ' + esc(K.arNamn(ar)) + ' som SIE 4</button>') + '</div></div>';
     return html;
   }
 
+
+  // ---------- Tidigare år från Excel ----------
+
+  function vyExcelHistorik() {
+    var html = '<h2 id="tidigare-ar">Tidigare år från Excel</h2><div class="card">' +
+      '<p style="margin-top:0">Läs in föreningens årsfiler (.xlsm) så att allt finns samlat i appen. Bokföringen blir en <strong>grovkopia</strong>: ett låst år som du kan läsa rapporter, huvudbok och verifikationer i, men inte ändra. ' +
+      'Avgifterna i bankfliken och Swish-listan läses in i medlemsregistret för statistiken. Filen läses i webbläsaren och skickas ingenstans.</p>' +
+      '<div class="row"><button class="btn btn-secondary" data-action="excel-valj">Välj årsfiler</button></div>';
+    if (excelForhand) {
+      if (excelForhand.laser) html += '<p class="muted" role="status">' + esc(excelForhand.laser) + '</p>';
+      excelForhand.filer.forEach(function (x, i) {
+        var t = x.tolkning;
+        html += '<div class="card" style="background:var(--surface-2);margin-top:10px"><strong>' + esc(x.filnamn) + '</strong>';
+        if (x.fel) { html += '<p class="fel">' + esc(x.fel) + '</p></div>'; return; }
+        var finns = store.ar[t.ar];
+        var kanBokforing = t.ar && !t.saknas.some(function (f) { return f === 'Grundbok'; }) && (!finns || finns.grovkopia);
+        html += '<p style="margin:4px 0">År <strong>' + esc(t.ar || '?') + '</strong> · ' + antal(t.verifikationer.length, 'verifikation', 'verifikationer') + ' · ' +
+          antal(t.avgifter.length, 'avgiftsbetalning', 'avgiftsbetalningar') + ' · ' + antal(t.swish.length, 'Swish-nummer', 'Swish-nummer') + '</p>';
+        if (t.saknas.length) html += '<p class="fel" style="margin:4px 0">Flikar som saknas: ' + esc(t.saknas.join(', ')) + '.</p>';
+        html += '<label style="font-weight:normal;display:flex;gap:6px;align-items:center"><input type="checkbox" style="width:auto" data-excel="bokforing" data-i="' + i + '"' + (x.bokforing && kanBokforing ? ' checked' : '') + (kanBokforing ? '' : ' disabled') + '> ' +
+          (finns && !finns.grovkopia ? 'Bokföringen: ' + esc(t.ar) + ' finns redan som vanligt år i appen och läses inte in.' : 'Bokföringen som grovkopia' + (finns ? ' (ersätter den som finns)' : '')) + '</label>';
+        if (t.avvikelser.length) html += '<details><summary class="faint">' + antal(t.avvikelser.length, 'avvikelse', 'avvikelser') + ' i bokföringen (läses in ändå)</summary><ul class="faint">' + t.avvikelser.map(function (a) { return '<li>' + esc(a) + '</li>'; }).join('') + '</ul></details>';
+        var f = x.forslag;
+        html += '<label style="font-weight:normal;display:flex;gap:6px;align-items:center"><input type="checkbox" style="width:auto" data-excel="medlemmar" data-i="' + i + '"' + (x.medlemmar ? ' checked' : '') + '> ' +
+          'Medlemsbetalningar: ' + antal(f.betalningar.length, 'ny', 'nya') + (f.redan ? ', ' + f.redan + ' redan inlästa' : '') + ', ' + antal(f.nyaMedlemmar.length, 'ny medlem', 'nya medlemmar') + ', ' + antal(f.nyaBetalare, 'nytt Swish-nummer', 'nya Swish-nummer') + '</label>';
+        if (x.medlemmar && f.nyaMedlemmar.length) {
+          html += '<details><summary class="faint">Nya medlemmar och kategori (kontrollera)</summary><div class="scroll"><table class="kortlista"><tbody>' + f.nyaMedlemmar.map(function (n) {
+            var vald = (x.kategorier[n.nyckel]) || n.kategori;
+            return '<tr><td><strong>' + esc(n.namn) + '</strong> <span class="faint">' + antal(n.antal, 'betalning', 'betalningar') + '</span></td><td><select data-excel="kategori" data-i="' + i + '" data-nyckel="' + esc(n.nyckel) + '" aria-label="Kategori">' +
+              K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '"' + (k[0] === vald ? ' selected' : '') + '>' + esc(K.KATEGORI_KORT[k[0]]) + '</option>'; }).join('') + '</select></td></tr>';
+          }).join('') + '</tbody></table></div><p class="faint">Kategorin gissas från beloppet och avgifterna under Medlemmar, Avgifter. Samma person med namnet skrivet på olika sätt (t.ex. "EFTERNAMN, FÖRNAMN") känns igen.</p></details>';
+        }
+        html += '</div>';
+      });
+      var nagot = excelForhand.filer.some(function (x) { return !x.fel && (x.bokforing || x.medlemmar); });
+      html += '<div class="row" style="margin-top:10px"><button class="btn" data-action="excel-las-in"' + (nagot ? '' : ' disabled') + '>Läs in</button>' +
+        '<button class="btn btn-secondary btn-small" data-action="excel-avbryt">Avbryt</button></div>';
+    }
+    return html + '</div>';
+  }
+
+  function grovkopiaRuta(ar) {
+    if (!ar.grovkopia) return '';
+    return '<div class="card" style="border-left:4px solid var(--guld)"><strong>Grovkopia från Excel</strong> · ' + esc(ar.grovkopia.fil || '') +
+      '. Året är låst och kan inte ändras. Den formella bokföringen för året är fortfarande Excel-filen med underlagen.' +
+      (ar.grovkopia.avvikelser.length ? ' <button class="tag knapp-tag" data-vy="bokslut">' + antal(ar.grovkopia.avvikelser.length, 'avvikelse', 'avvikelser') + '</button>' : '') + '</div>';
+  }
+
+  function vyGrovkopia(ar) {
+    var g = ar.grovkopia;
+    var html = '<h2>Grovkopia av ' + esc(K.arNamn(ar)) + '</h2><div class="card"><p style="margin-top:0">Inläst från <strong>' + esc(g.fil || '') + '</strong>' + (g.inlast ? ' den ' + esc(g.inlast) : '') + '. ' +
+      'Bokslutet för året gjordes i Excel och fastställdes där. Grovkopian ändras inte. Hittar du ett fel: skriv en anteckning här, och rätta det i det år som är öppet nu om det påverkar saldona i dag.</p></div>';
+    html += '<h2>Avvikelser (' + g.avvikelser.length + ')</h2><div class="card">' + (g.avvikelser.length ? '<ul>' + g.avvikelser.map(function (a) { return '<li>' + esc(a) + '</li>'; }).join('') + '</ul>' : '<p class="ok">Inga. Alla verifikationer går ihop.</p>') + '</div>';
+    html += '<h2>Anteckningar</h2><div class="card">' + (g.anteckningar.length ? '<ul>' + g.anteckningar.map(function (a, i) {
+      return '<li>' + esc(a.datum) + ': ' + esc(a.text) + (lasLage() ? '' : ' <button class="tag knapp-tag" data-action="grov-ta-bort-anteckning" data-i="' + i + '" aria-label="Ta bort">×</button>') + '</li>';
+    }).join('') + '</ul>' : '<p class="faint" style="margin-top:0">Inga anteckningar.</p>') +
+      (lasLage() ? '' : '<textarea id="grovAnteckning" rows="2" style="width:100%;font:inherit" placeholder="T.ex. Ver 23: lokalhyran bokförd på fel konto, påverkar inte saldona."></textarea><div class="row" style="margin-top:6px"><button class="btn btn-secondary btn-small" data-action="grov-anteckning">Spara anteckning</button></div>') + '</div>';
+    var nastaId = Object.keys(store.ar).find(function (id) { return store.ar[id].start === K.laggTillDagar(ar.slut, 1); });
+    if (nastaId) {
+      var diff = K.ubMotIb(ar, store.ar[nastaId]);
+      html += '<h2>Utgående balans mot ' + esc(nastaId) + '</h2><div class="card">' + (diff.length
+        ? '<p style="margin-top:0">Utgående balans enligt grovkopian skiljer sig från ingående balans i ' + esc(nastaId) + ':</p><div class="scroll"><table class="kortlista"><thead><tr><th>Konto</th><th class="num">UB ' + esc(K.arNamn(ar)) + '</th><th class="num">IB ' + esc(nastaId) + '</th></tr></thead><tbody>' +
+          diff.map(function (d) { return '<tr><td>' + esc(d.konto) + ' ' + esc(K.kontonamn(ar, d.konto) || K.kontonamn(store.ar[nastaId], d.konto)) + '</td><td class="num" data-etikett="UB">' + kr(d.ub) + '</td><td class="num" data-etikett="IB">' + kr(d.ib) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+          '<p class="faint">Skillnader kan bero på olika kontoplaner (t.ex. 2010 mot 2067), på fel i den gamla bokföringen eller på att den ingående balansen i ' + esc(nastaId) + ' är fel.</p>'
+        : '<p class="ok" style="margin-top:0">Stämmer med ingående balans i ' + esc(nastaId) + '.</p>') + '</div>';
+    }
+    return html;
+  }
 
   // ---------- Medlemmar och terminsavgifter ----------
 
@@ -5598,7 +6140,8 @@ var VERSIONER = [
       medlPdfKnappar(valdTermin);
     if (!r.medlemmar.length) {
       html += '<p class="muted">Inga medlemmar ännu. När du bokför en Swish-inbetalning under Läs in kan du välja <strong>Terminsavgift…</strong> och lägga till medlemmen där. ' +
-        'Betalningar som redan är bokförda kopplar du under <strong>Att koppla</strong>. Ange först avgifterna under <strong>Avgifter</strong>.</p>';
+        'Betalningar som redan är bokförda kopplar du under <strong>Att koppla</strong>. Ange först avgifterna under <strong>Avgifter</strong>. ' +
+        'Historik från tidigare år läser du in från föreningens Excel-filer under <strong>År och arkiv</strong>.</p>';
     }
     html += '<div class="nyckeltal"><div><span class="faint">Betalande</span><strong>' + s.totalt.antal + '</strong></div>' +
       '<div><span class="faint">Terminsavgifter</span><strong>' + kr(s.totalt.termin) + '</strong></div>' +
@@ -5958,6 +6501,12 @@ var VERSIONER = [
       else if (['lagg-till', 'nykategori', 'komihag'].indexOf(t.dataset.avg) >= 0) render();
       return;
     }
+    if (t.dataset.excel && excelForhand) {
+      var x = excelForhand.filer[Number(t.dataset.i)];
+      if (t.dataset.excel === 'kategori') x.kategorier[t.dataset.nyckel] = t.value;
+      else { x[t.dataset.excel] = t.checked; render(); }
+      return;
+    }
     if (t.dataset.kvitto && kvittoUtkast) {
       if (t.dataset.kvitto === 'rad') { kvittoUtkast.valda = kvittoUtkast.valda || {}; kvittoUtkast.valda[t.dataset.rad] = t.checked; }
       else kvittoUtkast[t.dataset.kvitto] = t.value;
@@ -6053,12 +6602,13 @@ var VERSIONER = [
   document.addEventListener('drop', function (e) {
     if (!aktivt() || !e.dataTransfer || !e.dataTransfer.files.length) return;
     if (lasLage()) { e.preventDefault(); visa('Endast läsning: filer kan inte läsas in.', true); return; }
+    if (aktivt().grovkopia) { e.preventDefault(); visa('Välj ett vanligt räkenskapsår för att läsa in filer. ' + store.aktivt + ' är en grovkopia.', true); return; }
     e.preventDefault();
     vy = 'inlasning';
     lasInFiler(Array.from(e.dataTransfer.files));
   });
   document.addEventListener('paste', function (e) {
-    if (!aktivt() || lasLage() || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (!aktivt() || lasLage() || aktivt().grovkopia || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     var cd = e.clipboardData;
     if (cd.files && cd.files.length) {
       e.preventDefault();
@@ -6140,6 +6690,71 @@ var VERSIONER = [
     },
     'rensa-logg': function () { logg = []; render(); },
     'visa-fil': function (t) { visaFil(t.dataset.id); },
+    'excel-valj': function () {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = '.xlsm,.xlsx,.xls';
+      input.onchange = async function () {
+        var filer = Array.prototype.slice.call(input.files);
+        if (!filer.length) return;
+        excelForhand = { filer: [], laser: 'Läser filerna…' };
+        render();
+        for (var i = 0; i < filer.length; i++) {
+          var post = { filnamn: filer[i].name, bokforing: true, medlemmar: true, kategorier: {} };
+          try {
+            excelForhand.laser = 'Läser ' + filer[i].name + '…'; render();
+            post.tolkning = K.tolkaArsbok(await lasArbetsbok(filer[i]), filer[i].name);
+            if (!post.tolkning.ar) throw new Error('Hittar inte vilket år filen gäller.');
+            post.forslag = K.historikForslag(reg(), post.tolkning);
+          } catch (err) { post.fel = 'Filen kunde inte läsas: ' + (err.fel ? err.fel.join(' ') : err.message); }
+          excelForhand.filer.push(post);
+        }
+        excelForhand.filer.sort(function (a, b) { return String(a.tolkning && a.tolkning.ar).localeCompare(String(b.tolkning && b.tolkning.ar)); });
+        excelForhand.laser = null;
+        render();
+      };
+      input.click();
+    },
+    'excel-avbryt': function () { excelForhand = null; render(); },
+    'excel-las-in': function () {
+      var ers = excelForhand.filer.filter(function (x) { return !x.fel && x.bokforing && store.ar[x.tolkning.ar] && store.ar[x.tolkning.ar].grovkopia; });
+      if (ers.length && !window.confirm('Ersätta grovkopian för ' + ers.map(function (x) { return x.tolkning.ar; }).join(', ') + '? Anteckningarna följer med.')) return;
+      var ar = 0, bet = 0, med = 0, swish = 0;
+      excelForhand.filer.forEach(function (x) {
+        if (x.fel) return;
+        var t = x.tolkning, finns = store.ar[t.ar];
+        if (x.bokforing && (!finns || finns.grovkopia)) {
+          var g = K.grovkopiaAr(t, { inlast: idag() });
+          if (finns) g.grovkopia.anteckningar = finns.grovkopia.anteckningar || [];
+          store.ar[t.ar] = g;
+          ar++;
+        }
+        if (x.medlemmar) {
+          var res = K.lasInHistorik(reg(), t, x.kategorier);
+          store.medlemsregister = res.reg;
+          bet += res.antal.betalningar; med += res.antal.medlemmar; swish += res.antal.betalare;
+        }
+      });
+      if (!store.aktivt) store.aktivt = Object.keys(store.ar).sort().pop();
+      spara();
+      excelForhand = null;
+      visa('Inläst: ' + antal(ar, 'år som grovkopia', 'år som grovkopior') + ', ' + antal(bet, 'medlemsbetalning', 'medlemsbetalningar') + ', ' + antal(med, 'ny medlem', 'nya medlemmar') + ' och ' + antal(swish, 'nytt Swish-nummer', 'nya Swish-nummer') + '.');
+    },
+    'grov-anteckning': function () {
+      var text = document.getElementById('grovAnteckning').value.trim();
+      if (!text) return;
+      var a = aktivt();
+      setAktivt(Object.assign({}, a, { grovkopia: Object.assign({}, a.grovkopia, { anteckningar: a.grovkopia.anteckningar.concat([{ datum: idag(), text: text }]) }) }));
+      render();
+    },
+    'grov-ta-bort-anteckning': function (t) {
+      if (!window.confirm('Ta bort anteckningen?')) return;
+      var a = aktivt();
+      var lista = a.grovkopia.anteckningar.slice(); lista.splice(Number(t.dataset.i), 1);
+      setAktivt(Object.assign({}, a, { grovkopia: Object.assign({}, a.grovkopia, { anteckningar: lista }) }));
+      render();
+    },
     'medl-vy': function (t) { vy = 'medlemmar'; medlemVy = t.dataset.mvy; meddelande = null; render(); },
     'avg-oppna': function (t) {
       var rad = aktivt().bankrader.find(function (r) { return r.id === t.dataset.id; });
@@ -6598,6 +7213,13 @@ var VERSIONER = [
       sattStatus('Hämtar delade mappar…');
       delaMappar().then(function (lista) { odNu.delade = lista; sattStatus(''); render(); }).catch(function (err) { visa(err.message, true); });
     },
+    'od-flytta': function () {
+      var sokvag = varde('odNyMapp');
+      if (!window.confirm('Flytta appens filer till ' + sokvag + '? Dina andra filer i OneDrive rörs inte.')) return;
+      flyttaAppensFiler(sokvag).then(function (res) {
+        visa('Klart: ' + antal(res.antal, 'fil är flyttad', 'filer är flyttade') + ' till ' + sokvag + '. Tomma mappar som appen skapade kan finnas kvar i ' + res.gammal + '; dem kan du ta bort i OneDrive.');
+      }).catch(function (err) { sattStatus('Flytten avbröts', true); visa('Flytten avbröts: ' + err.message + ' Inget är borttaget. Försök igen; det som redan flyttats hittas ändå.', true); });
+    },
     'od-valj-mapp': function () {
       var sokvag = varde('odSokvag');
       sattStatus('Kopplar till OneDrive…');
@@ -6670,7 +7292,8 @@ var VERSIONER = [
     },
     'od-byt-mapp': function () {
       if (od.smutsig && !window.confirm('Det finns ändringar som inte sparats i OneDrive. Byta mapp ändå?')) return;
-      sparaAppinstallningar({ mapp: null, lage: null }).catch(function () { /* frivilligt */ });
+      sparaAppinstallningar({ mapp: null, rot: null, lage: null, regMapp: null }).catch(function () { /* frivilligt */ });
+      od.rot = null;
       od.mapp = null; od.lage = null; od.eTag = null; od.senast = null; od.smutsig = false; odNu.mappar = {}; odNu.konflikt = false; odNu.delade = null;
       od.regMapp = null; od.regETag = null; odNu.regKonflikt = false;
       sparaOd();
