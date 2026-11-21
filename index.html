@@ -309,6 +309,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.16', datum: '2026-11-21',
+    nyheter: [
+      'Tidigare år från Excel heter nu arkivkopior.',
+      'En arkivkopia kan tas bort, till exempel för att läsa in året på nytt. Medlemsbetalningarna från samma år, och medlemmar som då saknar betalningar, kan tas bort samtidigt. Excel-filen påverkas inte.'
+    ]
+  },
+  {
     version: '1.15', datum: '2026-11-21',
     nyheter: [
       'Dela bokföringen med revisorn direkt från appen: skriv revisorns e-postadress, så får revisorn läsbehörighet till mappen Bokföring och underlag och ett mejl med länk till appen. Medlemsregistret delas inte. Du ser vem som har tillgång och kan ta bort delningen.',
@@ -854,7 +861,7 @@ var VERSIONER = [
 
   // Låser upp en låst period. Varje upplåsning sparas i årets logg så att den syns i efterhand.
   function lasUpp(ar, opt) {
-    if (ar.grovkopia) throw BokforingsFel('En grovkopia från Excel kan inte låsas upp.');
+    if (ar.grovkopia) throw BokforingsFel('En arkivkopia från Excel kan inte låsas upp.');
     if (!ar.lastTom) throw BokforingsFel('Inget är låst.');
     var post = { handling: 'upplåst', tom: ar.lastTom, tid: (opt && opt.tid) || null, orsak: (opt && opt.orsak) || '' };
     return Object.assign({}, ar, { lastTom: null, laslogg: (ar.laslogg || []).concat([post]) });
@@ -1105,10 +1112,10 @@ var VERSIONER = [
     if (!ar || ar.format !== FORMAT) return ['Okänt filformat.'];
     if (!arGiltigtDatum(ar.start) || !arGiltigtDatum(ar.slut) || ar.slut < ar.start) fel.push('Räkenskapsårets datum är ogiltiga.');
     if (!Array.isArray(ar.kontoplan) || !Array.isArray(ar.verifikationer) || !ar.ingaendeBalans) return fel.concat(['Filen saknar kontoplan, verifikationer eller ingående balans.']);
-    // En grovkopia från Excel behöver inte gå ihop; avvikelserna finns i ar.grovkopia.avvikelser.
+    // En arkivkopia från Excel behöver inte gå ihop; avvikelserna finns i ar.grovkopia.avvikelser.
     if (ar.grovkopia) {
       ar.verifikationer.forEach(function (v) {
-        if (!Number.isInteger(v.nr) || !Array.isArray(v.rader) || v.rader.some(function (r) { return typeof r.konto !== 'string' || !arHeltal(r.belopp); })) fel.push('Verifikation ' + v.nr + ' i grovkopian är skadad.');
+        if (!Number.isInteger(v.nr) || !Array.isArray(v.rader) || v.rader.some(function (r) { return typeof r.konto !== 'string' || !arHeltal(r.belopp); })) fel.push('Verifikation ' + v.nr + ' i arkivkopian är skadad.');
       });
       return fel;
     }
@@ -2336,7 +2343,7 @@ var VERSIONER = [
 
   // ---------- Tidigare år från föreningens Excel-arbetsböcker ----------
   // Arbetsboken lämnas in som { flikar: { namn: [[cell, …], …] } } där datum redan är 'ÅÅÅÅ-MM-DD'.
-  // Bokföringen blir en låst grovkopia; avgifterna i bankfliken blir betalningar i medlemsregistret.
+  // Bokföringen blir en låst arkivkopia; avgifterna i bankfliken blir betalningar i medlemsregistret.
 
   function flik(bok, namn) {
     var n = Object.keys(bok.flikar || {}).find(function (k) { return k.trim().toLowerCase() === namn.toLowerCase(); });
@@ -2510,11 +2517,11 @@ var VERSIONER = [
     return ut;
   }
 
-  // Den inlästa bokföringen som ett låst år, märkt som grovkopia.
+  // Den inlästa bokföringen som ett låst år, märkt som arkivkopia.
   function grovkopiaAr(t, meta) {
     var ar = {
       format: FORMAT, start: t.ar + '-01-01', slut: t.ar + '-12-31', kontoplan: t.kontoplan, ingaendeBalans: rensaNollor(Object.assign({}, t.ingaendeBalans)),
-      verifikationer: t.verifikationer.map(function (v) { return { nr: v.nr, datum: v.datum, text: v.text, rader: v.rader.slice(), underlag: [], underlagKommentar: 'Grovkopia från Excel' }; }),
+      verifikationer: t.verifikationer.map(function (v) { return { nr: v.nr, datum: v.datum, text: v.text, rader: v.rader.slice(), underlag: [], underlagKommentar: 'Arkivkopia från Excel' }; }),
       lastTom: t.ar + '-12-31', bankrader: [], underlag: [],
       grovkopia: { fil: t.filnamn, inlast: (meta && meta.inlast) || null, avvikelser: t.avvikelser.slice(), anteckningar: [] }
     };
@@ -2577,7 +2584,28 @@ var VERSIONER = [
     return { reg: reg, antal: antal };
   }
 
-  // Skillnader mellan grovkopians utgående balans och nästa års ingående balans.
+  // Medlemsbetalningar som lästs in från ett års Excel-fil, och de medlemmar som då inte har några betalningar kvar.
+  function historikFranAr(reg, ar) {
+    var prefix = 'excel:' + ar + ':';
+    var bort = reg.betalningar.filter(function (b) { return b.kalla && b.kalla.indexOf(prefix) === 0; });
+    var kvar = reg.betalningar.filter(function (b) { return !(b.kalla && b.kalla.indexOf(prefix) === 0); });
+    var medBetalning = {};
+    kvar.forEach(function (b) { b.poster.forEach(function (p) { medBetalning[p.medlem] = true; }); });
+    var berorda = {};
+    bort.forEach(function (b) { b.poster.forEach(function (p) { berorda[p.medlem] = true; }); });
+    var utan = reg.medlemmar.filter(function (m) { return berorda[m.id] && !medBetalning[m.id]; });
+    return { betalningar: bort.length, medlemmarUtanBetalning: utan.map(function (m) { return { id: m.id, namn: m.namn }; }) };
+  }
+
+  function taBortHistorikFranAr(reg, ar, opt) {
+    var prefix = 'excel:' + ar + ':';
+    var info = historikFranAr(reg, ar);
+    var ut = Object.assign({}, reg, { betalningar: reg.betalningar.filter(function (b) { return !(b.kalla && b.kalla.indexOf(prefix) === 0); }) });
+    if (opt && opt.medlemmar) info.medlemmarUtanBetalning.forEach(function (m) { ut = taBortMedlem(ut, m.id); });
+    return ut;
+  }
+
+  // Skillnader mellan arkivkopians utgående balans och nästa års ingående balans.
   function ubMotIb(ar, nasta) {
     var ub = saldon(ar);
     var konton = {};
@@ -2953,6 +2981,8 @@ var VERSIONER = [
     historikForslag: historikForslag,
     lasInHistorik: lasInHistorik,
     ubMotIb: ubMotIb,
+    historikFranAr: historikFranAr,
+    taBortHistorikFranAr: taBortHistorikFranAr,
     arMapp: arMapp,
     underlagSokvag: underlagSokvag,
     kvittoSokvag: kvittoSokvag
@@ -4005,7 +4035,7 @@ var VERSIONER = [
     return Object.keys(store.ar).find(function (id) { return !store.ar[id].grovkopia && store.ar[id].start <= d && d <= store.ar[id].slut; }) || null;
   }
 
-  // Det aktiva året, eller det senaste vanliga året om det aktiva är en grovkopia.
+  // Det aktiva året, eller det senaste vanliga året om det aktiva är en arkivkopia.
   function oppetAr() {
     if (store.ar[store.aktivt] && !store.ar[store.aktivt].grovkopia) return store.aktivt;
     return Object.keys(store.ar).filter(function (id) { return !store.ar[id].grovkopia; }).sort().pop() || store.aktivt;
@@ -4718,7 +4748,7 @@ var VERSIONER = [
     doc.setFont('helvetica', 'bold'); doc.setFontSize(typ === 'hb' ? 14 : 18); doc.setTextColor.apply(doc, SKIFFER);
     doc.text(pt(titel), H, 20, { align: 'right' });
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(26, 26, 26);
-    doc.text(typ === 'medl' ? pt(K.terminNamn(konto)) : 'Räkenskapsår ' + ar.start + ' - ' + ar.slut + (ar.grovkopia ? ' (grovkopia från Excel)' : ar.lastTom === ar.slut ? '' : ' (preliminär)'), H, 26, { align: 'right' });
+    doc.text(typ === 'medl' ? pt(K.terminNamn(konto)) : 'Räkenskapsår ' + ar.start + ' - ' + ar.slut + (ar.grovkopia ? ' (arkivkopia från Excel)' : ar.lastTom === ar.slut ? '' : ' (preliminär)'), H, 26, { align: 'right' });
     doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
     doc.text('Utskriven ' + idag(), H, 30.5, { align: 'right' });
     doc.setTextColor(26, 26, 26);
@@ -5092,7 +5122,7 @@ var VERSIONER = [
       if (ar.grovkopia && (v[0] === 'inlasning' || v[0] === 'ny')) return false;
       return !lasLage() || (v[0] !== 'inlasning' && v[0] !== 'ny' && v[0] !== 'medlemmar');
     }).map(function (v) {
-      return '<button type="button" data-vy="' + v[0] + '"' + (vy === v[0] ? ' aria-current="page"' : '') + '>' + (ar.grovkopia && v[0] === 'bokslut' ? 'Grovkopia' : v[1]) + '</button>';
+      return '<button type="button" data-vy="' + v[0] + '"' + (vy === v[0] ? ' aria-current="page"' : '') + '>' + (ar.grovkopia && v[0] === 'bokslut' ? 'Arkivkopia' : v[1]) + '</button>';
     }).join('');
     var html = {
       inlasning: vyInlasning,
@@ -5138,7 +5168,7 @@ var VERSIONER = [
     el.innerHTML = '<label for="valjAr" style="margin:0">Räkenskapsår</label>' +
       '<select id="valjAr" style="width:auto">' + ids.map(function (id) {
         return '<option value="' + esc(id) + '"' + (id === store.aktivt ? ' selected' : '') + '>' + esc(id) +
-          (store.ar[id].grovkopia ? ' (grovkopia)' : store.ar[id].lastTom === store.ar[id].slut ? ' (låst)' : '') + '</option>';
+          (store.ar[id].grovkopia ? ' (arkivkopia)' : store.ar[id].lastTom === store.ar[id].slut ? ' (låst)' : '') + '</option>';
       }).join('') + '</select>';
   }
 
@@ -5446,7 +5476,7 @@ var VERSIONER = [
       return '<button class="btn ' + (rapportVy === r[0] ? '' : 'btn-secondary') + ' btn-small" data-rapport="' + r[0] + '">' + r[1] + '</button>';
     }).join('') + '</div>' + rapportPdfKnappar(ar, rapportVy);
     var rubrik = (store.forening.namn ? esc(store.forening.namn) + ' · ' : '') + 'Räkenskapsår ' + esc(ar.start) + ' – ' + esc(ar.slut);
-    html += '<div class="card"><p class="faint">' + rubrik + (ar.grovkopia ? ' · grovkopia från Excel' : ar.lastTom === ar.slut ? '' : ' · preliminär') + '</p>';
+    html += '<div class="card"><p class="faint">' + rubrik + (ar.grovkopia ? ' · arkivkopia från Excel' : ar.lastTom === ar.slut ? '' : ' · preliminär') + '</p>';
     if (rapportVy === 'rr') html += rapportRR(ar);
     if (rapportVy === 'br') html += rapportBR(ar);
     if (rapportVy === 'sb') html += rapportSB(ar);
@@ -6115,7 +6145,7 @@ var VERSIONER = [
 
   function vyExcelHistorik() {
     var html = '<h2 id="tidigare-ar">Tidigare år från Excel</h2><div class="card">' +
-      '<p style="margin-top:0">Läs in föreningens årsfiler (.xlsm) så att allt finns samlat i appen. Bokföringen blir en <strong>grovkopia</strong>: ett låst år som du kan läsa rapporter, huvudbok och verifikationer i, men inte ändra. ' +
+      '<p style="margin-top:0">Läs in föreningens årsfiler (.xlsm) så att allt finns samlat i appen. Bokföringen blir en <strong>arkivkopia</strong>: ett låst år som du kan läsa rapporter, huvudbok och verifikationer i, men inte ändra. ' +
       'Avgifterna i bankfliken och Swish-listan läses in i medlemsregistret för statistiken. Filen läses i webbläsaren och skickas ingenstans.</p>' +
       '<div class="row"><button class="btn btn-secondary" data-action="excel-valj">Välj årsfiler</button></div>';
     if (excelForhand) {
@@ -6130,7 +6160,7 @@ var VERSIONER = [
           antal(t.avgifter.length, 'avgiftsbetalning', 'avgiftsbetalningar') + ' · ' + antal(t.swish.length, 'Swish-nummer', 'Swish-nummer') + '</p>';
         if (t.saknas.length) html += '<p class="fel" style="margin:4px 0">Flikar som saknas: ' + esc(t.saknas.join(', ')) + '.</p>';
         html += '<label style="font-weight:normal;display:flex;gap:6px;align-items:center"><input type="checkbox" style="width:auto" data-excel="bokforing" data-i="' + i + '"' + (x.bokforing && kanBokforing ? ' checked' : '') + (kanBokforing ? '' : ' disabled') + '> ' +
-          (finns && !finns.grovkopia ? 'Bokföringen: ' + esc(t.ar) + ' finns redan som vanligt år i appen och läses inte in.' : 'Bokföringen som grovkopia' + (finns ? ' (ersätter den som finns)' : '')) + '</label>';
+          (finns && !finns.grovkopia ? 'Bokföringen: ' + esc(t.ar) + ' finns redan som vanligt år i appen och läses inte in.' : 'Bokföringen som arkivkopia' + (finns ? ' (ersätter den som finns)' : '')) + '</label>';
         if (t.avvikelser.length) html += '<details><summary class="faint">' + antal(t.avvikelser.length, 'avvikelse', 'avvikelser') + ' i bokföringen (läses in ändå)</summary><ul class="faint">' + t.avvikelser.map(function (a) { return '<li>' + esc(a) + '</li>'; }).join('') + '</ul></details>';
         var f = x.forslag;
         html += '<label style="font-weight:normal;display:flex;gap:6px;align-items:center"><input type="checkbox" style="width:auto" data-excel="medlemmar" data-i="' + i + '"' + (x.medlemmar ? ' checked' : '') + '> ' +
@@ -6153,25 +6183,35 @@ var VERSIONER = [
 
   function grovkopiaRuta(ar) {
     if (!ar.grovkopia) return '';
-    return '<div class="card" style="border-left:4px solid var(--guld)"><strong>Grovkopia från Excel</strong> · ' + esc(ar.grovkopia.fil || '') +
+    return '<div class="card" style="border-left:4px solid var(--guld)"><strong>Arkivkopia från Excel</strong> · ' + esc(ar.grovkopia.fil || '') +
       '. Året är låst och kan inte ändras. Den formella bokföringen för året är fortfarande Excel-filen med underlagen.' +
       (ar.grovkopia.avvikelser.length ? ' <button class="tag knapp-tag" data-vy="bokslut">' + antal(ar.grovkopia.avvikelser.length, 'avvikelse', 'avvikelser') + '</button>' : '') + '</div>';
   }
 
   function vyGrovkopia(ar) {
     var g = ar.grovkopia;
-    var html = '<h2>Grovkopia av ' + esc(K.arNamn(ar)) + '</h2><div class="card"><p style="margin-top:0">Inläst från <strong>' + esc(g.fil || '') + '</strong>' + (g.inlast ? ' den ' + esc(g.inlast) : '') + '. ' +
-      'Bokslutet för året gjordes i Excel och fastställdes där. Grovkopian ändras inte. Hittar du ett fel: skriv en anteckning här, och rätta det i det år som är öppet nu om det påverkar saldona i dag.</p></div>';
+    var html = '<h2>Arkivkopia av ' + esc(K.arNamn(ar)) + '</h2><div class="card"><p style="margin-top:0">Inläst från <strong>' + esc(g.fil || '') + '</strong>' + (g.inlast ? ' den ' + esc(g.inlast) : '') + '. ' +
+      'Bokslutet för året gjordes i Excel och fastställdes där. Arkivkopian ändras inte. Hittar du ett fel: skriv en anteckning här, och rätta det i det år som är öppet nu om det påverkar saldona i dag.</p></div>';
     html += '<h2>Avvikelser (' + g.avvikelser.length + ')</h2><div class="card">' + (g.avvikelser.length ? '<ul>' + g.avvikelser.map(function (a) { return '<li>' + esc(a) + '</li>'; }).join('') + '</ul>' : '<p class="ok">Inga. Alla verifikationer går ihop.</p>') + '</div>';
     html += '<h2>Anteckningar</h2><div class="card">' + (g.anteckningar.length ? '<ul>' + g.anteckningar.map(function (a, i) {
       return '<li>' + esc(a.datum) + ': ' + esc(a.text) + (lasLage() ? '' : ' <button class="tag knapp-tag" data-action="grov-ta-bort-anteckning" data-i="' + i + '" aria-label="Ta bort">×</button>') + '</li>';
     }).join('') + '</ul>' : '<p class="faint" style="margin-top:0">Inga anteckningar.</p>') +
       (lasLage() ? '' : '<textarea id="grovAnteckning" rows="2" style="width:100%;font:inherit" placeholder="T.ex. Ver 23: lokalhyran bokförd på fel konto, påverkar inte saldona."></textarea><div class="row" style="margin-top:6px"><button class="btn btn-secondary btn-small" data-action="grov-anteckning">Spara anteckning</button></div>') + '</div>';
+    if (!lasLage()) {
+      var arId = store.aktivt;
+      var h = K.historikFranAr(reg(), arId);
+      html += '<h2>Ta bort arkivkopian</h2><div class="card"><p style="margin-top:0">Tar bort ' + esc(arId) + ' ur appen, till exempel för att läsa in året på nytt. Excel-filen påverkas inte. ' +
+        (g.anteckningar.length ? '<strong>' + antal(g.anteckningar.length, 'anteckning', 'anteckningar') + ' försvinner också.</strong> ' : '') + '</p>' +
+        (h.betalningar ? '<label style="font-weight:normal;display:flex;gap:6px;align-items:center"><input type="checkbox" id="bortBetalningar" checked style="width:auto"> Ta också bort ' + antal(h.betalningar, 'medlemsbetalning', 'medlemsbetalningar') + ' som lästs in från samma år</label>' : '') +
+        (h.medlemmarUtanBetalning.length ? '<label style="font-weight:normal;display:flex;gap:6px;align-items:center"><input type="checkbox" id="bortMedlemmar" checked style="width:auto"> och ' + antal(h.medlemmarUtanBetalning.length, 'medlem', 'medlemmar') + ' som då inte har några betalningar kvar: ' +
+          esc(h.medlemmarUtanBetalning.map(function (m) { return m.namn; }).join(', ')) + '</label>' : '') +
+        '<div class="row" style="margin-top:8px"><button class="btn btn-secondary" data-action="ta-bort-arkivkopia">Ta bort arkivkopian</button></div></div>';
+    }
     var nastaId = Object.keys(store.ar).find(function (id) { return store.ar[id].start === K.laggTillDagar(ar.slut, 1); });
     if (nastaId) {
       var diff = K.ubMotIb(ar, store.ar[nastaId]);
       html += '<h2>Utgående balans mot ' + esc(nastaId) + '</h2><div class="card">' + (diff.length
-        ? '<p style="margin-top:0">Utgående balans enligt grovkopian skiljer sig från ingående balans i ' + esc(nastaId) + ':</p><div class="scroll"><table class="kortlista"><thead><tr><th>Konto</th><th class="num">UB ' + esc(K.arNamn(ar)) + '</th><th class="num">IB ' + esc(nastaId) + '</th></tr></thead><tbody>' +
+        ? '<p style="margin-top:0">Utgående balans enligt arkivkopian skiljer sig från ingående balans i ' + esc(nastaId) + ':</p><div class="scroll"><table class="kortlista"><thead><tr><th>Konto</th><th class="num">UB ' + esc(K.arNamn(ar)) + '</th><th class="num">IB ' + esc(nastaId) + '</th></tr></thead><tbody>' +
           diff.map(function (d) { return '<tr><td>' + esc(d.konto) + ' ' + esc(K.kontonamn(ar, d.konto) || K.kontonamn(store.ar[nastaId], d.konto)) + '</td><td class="num" data-etikett="UB">' + kr(d.ub) + '</td><td class="num" data-etikett="IB">' + kr(d.ib) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
           '<p class="faint">Skillnader kan bero på olika kontoplaner (t.ex. 2010 mot 2067), på fel i den gamla bokföringen eller på att den ingående balansen i ' + esc(nastaId) + ' är fel.</p>'
         : '<p class="ok" style="margin-top:0">Stämmer med ingående balans i ' + esc(nastaId) + '.</p>') + '</div>';
@@ -6823,7 +6863,7 @@ var VERSIONER = [
   document.addEventListener('drop', function (e) {
     if (!aktivt() || !e.dataTransfer || !e.dataTransfer.files.length) return;
     if (lasLage()) { e.preventDefault(); visa('Endast läsning: filer kan inte läsas in.', true); return; }
-    if (aktivt().grovkopia) { e.preventDefault(); visa('Välj ett vanligt räkenskapsår för att läsa in filer. ' + store.aktivt + ' är en grovkopia.', true); return; }
+    if (aktivt().grovkopia) { e.preventDefault(); visa('Välj ett vanligt räkenskapsår för att läsa in filer. ' + store.aktivt + ' är en arkivkopia.', true); return; }
     e.preventDefault();
     vy = 'inlasning';
     lasInFiler(Array.from(e.dataTransfer.files));
@@ -6967,7 +7007,7 @@ var VERSIONER = [
     'excel-avbryt': function () { excelForhand = null; render(); },
     'excel-las-in': function () {
       var ers = excelForhand.filer.filter(function (x) { return !x.fel && x.bokforing && store.ar[x.tolkning.ar] && store.ar[x.tolkning.ar].grovkopia; });
-      if (ers.length && !window.confirm('Ersätta grovkopian för ' + ers.map(function (x) { return x.tolkning.ar; }).join(', ') + '? Anteckningarna följer med.')) return;
+      if (ers.length && !window.confirm('Ersätta arkivkopian för ' + ers.map(function (x) { return x.tolkning.ar; }).join(', ') + '? Anteckningarna följer med.')) return;
       var ar = 0, bet = 0, med = 0, swish = 0;
       excelForhand.filer.forEach(function (x) {
         if (x.fel) return;
@@ -6987,7 +7027,21 @@ var VERSIONER = [
       if (!store.aktivt) store.aktivt = Object.keys(store.ar).sort().pop();
       spara();
       excelForhand = null;
-      visa('Inläst: ' + antal(ar, 'år som grovkopia', 'år som grovkopior') + ', ' + antal(bet, 'medlemsbetalning', 'medlemsbetalningar') + ', ' + antal(med, 'ny medlem', 'nya medlemmar') + ' och ' + antal(swish, 'nytt Swish-nummer', 'nya Swish-nummer') + '.');
+      visa('Inläst: ' + antal(ar, 'år som arkivkopia', 'år som arkivkopior') + ', ' + antal(bet, 'medlemsbetalning', 'medlemsbetalningar') + ', ' + antal(med, 'ny medlem', 'nya medlemmar') + ' och ' + antal(swish, 'nytt Swish-nummer', 'nya Swish-nummer') + '.');
+    },
+    'ta-bort-arkivkopia': function () {
+      var arId = store.aktivt, a = store.ar[arId];
+      if (!a || !a.grovkopia) return;
+      var betalningar = document.getElementById('bortBetalningar'), medlemmar = document.getElementById('bortMedlemmar');
+      var medB = betalningar && betalningar.checked, medM = medB && medlemmar && medlemmar.checked;
+      if (!window.confirm('Ta bort arkivkopian av ' + arId + (medB ? ' och medlemsbetalningarna från samma år' : '') + (medM ? ', och medlemmarna utan andra betalningar' : '') + '? Excel-filen påverkas inte.')) return;
+      if (medB) store.medlemsregister = K.taBortHistorikFranAr(reg(), arId, { medlemmar: medM });
+      delete store.ar[arId];
+      store.aktivt = Object.keys(store.ar).filter(function (id) { return !store.ar[id].grovkopia; }).sort().pop() || Object.keys(store.ar).sort().pop() || null;
+      utkast = nyttUtkast();
+      vy = store.aktivt ? 'rapporter' : 'inlasning';
+      spara();
+      visa('Arkivkopian av ' + arId + ' är borttagen. Du kan läsa in den igen under År och arkiv.');
     },
     'grov-anteckning': function () {
       var text = document.getElementById('grovAnteckning').value.trim();
