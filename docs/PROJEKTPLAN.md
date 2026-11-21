@@ -77,6 +77,10 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Utan konto: kassören skapar ett revisionspaket (zip) för året. Revisorn öppnar det i appen med Öppna revisionspaket; inget sparas hos revisorn. Paketet innehåller också rapporterna som PDF och en SIE-fil.
 - Medlemsregistret ingår aldrig.
 
+## Övningsläge (från version 1.19)
+
+- En kopia av bokföringen och medlemsregistret i webbläsaren (adressen slutar på `?ovning`). Allt går att prova; inget sparas i OneDrive och allt raderas när övningen avslutas.
+
 ## Integritet
 
 - Koden kan vara publik. Bokföringsdata, medlemsnamn och underlag ligger bara i OneDrive.
