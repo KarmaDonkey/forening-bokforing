@@ -163,6 +163,8 @@
   .avgift-panel { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; margin-top: 8px; }
   .avgift-panel table td { border-bottom: 0; padding: 3px 4px; vertical-align: middle; }
   .avgift-panel input.num { width: 110px; text-align: right; }
+  .lank-text { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--lank); cursor: pointer; text-align: left; }
+  .info-falt { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; width: 100%; max-width: 30em; }
   .nyckeltal { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 10px 0; }
   .nyckeltal div { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; }
   .nyckeltal strong { display: block; font-size: 22px; }
@@ -308,6 +310,15 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.18', datum: '2026-11-21',
+    nyheter: [
+      'Tryck på en medlem för att se betalningarna med meddelandet från betalningen, byta namn, slå ihop två medlemmar eller dela en betalning på flera medlemmar.',
+      'Vid inläsning från Excel sparas ursprungstexten, och nya medlemmar kan byta namn eller kopplas till en befintlig medlem innan något sparas.',
+      'Information för kvitto (adress, e-post, telefon och annat) på medlemmar och betalare, högst 40 tecken per rad och 5 rader.',
+      'Kvittot kan ställas till medlemmen, till betalaren (t.ex. en förälder) eller någon annan. När mottagaren inte är medlemmen står medlemmens namn på raderna.'
+    ]
+  },
   {
     version: '1.17', datum: '2026-11-21',
     nyheter: [
@@ -2094,8 +2105,20 @@ var VERSIONER = [
     return { reg: Object.assign({}, reg, { medlemmar: reg.medlemmar.concat([m]) }), medlem: m };
   }
 
+  // "Information för kvitto": fritext som står under mottagaren, högst 40 tecken per rad och 5 rader.
+  var KVITTOINFO = { tecken: 40, rader: 5 };
+  function kontrolleraKvittoinfo(text) {
+    var rader = String(text || '').replace(/\r/g, '').split('\n');
+    while (rader.length && !rader[rader.length - 1].trim()) rader.pop();
+    var fel = [];
+    if (rader.length > KVITTOINFO.rader) fel.push('Högst ' + KVITTOINFO.rader + ' rader (nu ' + rader.length + ').');
+    rader.forEach(function (r, i) { if (r.length > KVITTOINFO.tecken) fel.push('Rad ' + (i + 1) + ' har ' + r.length + ' tecken (högst ' + KVITTOINFO.tecken + ').'); });
+    return { text: rader.map(function (r) { return r.replace(/\s+$/, ''); }).join('\n'), fel: fel };
+  }
+
   function andraMedlem(reg, id, andring) {
     if (!reg.medlemmar.some(function (m) { return m.id === id; })) throw BokforingsFel('Medlemmen finns inte.');
+    if (andring.info != null) { var ki = kontrolleraKvittoinfo(andring.info); if (ki.fel.length) throw BokforingsFel(ki.fel); andring = Object.assign({}, andring, { info: ki.text }); }
     if (andring.namn != null && !String(andring.namn).trim()) throw BokforingsFel('Medlemmen behöver ett namn.');
     if (andring.kategori != null && !KATEGORIER.some(function (k) { return k[0] === andring.kategori; })) throw BokforingsFel('Okänd kategori.');
     return Object.assign({}, reg, {
@@ -2104,6 +2127,7 @@ var VERSIONER = [
         var n = Object.assign({}, m);
         if (andring.namn != null) n.namn = String(andring.namn).trim();
         if (andring.kategori != null) n.kategori = andring.kategori;
+        if (andring.info != null) { if (andring.info) n.info = andring.info; else delete n.info; }
         return n;
       })
     });
@@ -2116,6 +2140,54 @@ var VERSIONER = [
     return Object.assign({}, reg, {
       medlemmar: reg.medlemmar.filter(function (m) { return m.id !== id; }),
       betalare: reg.betalare.map(function (b) { return Object.assign({}, b, { medlemmar: b.medlemmar.filter(function (x) { return x !== id; }) }); })
+    });
+  }
+
+  // Slår ihop två medlemmar: betalningar, betalare och kvitton flyttas från "fran" till "till", och "fran" tas bort.
+  function slaIhopMedlemmar(reg, fran, till) {
+    if (fran === till) throw BokforingsFel('Välj en annan medlem.');
+    var a = reg.medlemmar.find(function (m) { return m.id === fran; }), b = reg.medlemmar.find(function (m) { return m.id === till; });
+    if (!a || !b) throw BokforingsFel('Medlemmen finns inte.');
+    return Object.assign({}, reg, {
+      medlemmar: reg.medlemmar.filter(function (m) { return m.id !== fran; }).map(function (m) {
+        return m.id === till && !m.info && a.info ? Object.assign({}, m, { info: a.info }) : m;
+      }),
+      betalningar: reg.betalningar.map(function (x) {
+        if (!x.poster.some(function (p) { return p.medlem === fran; })) return x;
+        // Poster för samma medlem och typ läggs ihop.
+        var poster = [];
+        x.poster.forEach(function (p) {
+          var q = Object.assign({}, p, { medlem: p.medlem === fran ? till : p.medlem });
+          var finns = poster.find(function (y) { return y.medlem === q.medlem && y.typ === q.typ; });
+          if (finns) finns.belopp += q.belopp; else poster.push(q);
+        });
+        return Object.assign({}, x, { poster: poster });
+      }),
+      betalare: reg.betalare.map(function (x) {
+        if (x.medlemmar.indexOf(fran) < 0) return x;
+        var ids = x.medlemmar.map(function (id) { return id === fran ? till : id; }).filter(function (id, i, l) { return l.indexOf(id) === i; });
+        return Object.assign({}, x, { medlemmar: ids });
+      }),
+      kvitton: reg.kvitton.map(function (k) { return k.medlem === fran ? Object.assign({}, k, { medlem: till }) : k; })
+    });
+  }
+
+  // Ny fördelning av en registrerad betalning på medlemmar, t.ex. när en förälder betalat för två barn.
+  function andraFordelning(reg, betalningId, poster, termin) {
+    var b = reg.betalningar.find(function (x) { return x.id === betalningId; });
+    if (!b) throw BokforingsFel('Betalningen finns inte.');
+    if (!poster || !poster.length) throw BokforingsFel('Välj minst en medlem.');
+    poster.forEach(function (p) {
+      if (!reg.medlemmar.some(function (m) { return m.id === p.medlem; })) throw BokforingsFel('Medlemmen finns inte.');
+      if (!arHeltal(p.belopp) || p.belopp < 0) throw BokforingsFel('Ogiltigt belopp.');
+    });
+    if (summaPoster(poster) !== b.belopp) throw BokforingsFel('Fördelningen (' + formatBelopp(summaPoster(poster)) + ' kr) stämmer inte med beloppet ' + formatBelopp(b.belopp) + ' kr.');
+    if (termin != null && !giltigtTerminId(termin)) throw BokforingsFel('Terminen ska skrivas som VT-27 eller HT-26.');
+    return Object.assign({}, reg, {
+      betalningar: reg.betalningar.map(function (x) {
+        if (x.id !== betalningId) return x;
+        return Object.assign({}, x, { termin: termin || x.termin, poster: poster.map(function (p) { return { medlem: p.medlem, typ: p.typ === 'arsavgift' ? 'arsavgift' : 'termin', belopp: p.belopp }; }) });
+      })
     });
   }
 
@@ -2137,12 +2209,14 @@ var VERSIONER = [
   }
 
   function andraBetalare(reg, nyckel, andring) {
+    if (andring.info != null) { var ki = kontrolleraKvittoinfo(andring.info); if (ki.fel.length) throw BokforingsFel(ki.fel); andring = Object.assign({}, andring, { info: ki.text }); }
     return Object.assign({}, reg, {
       betalare: reg.betalare.map(function (b) {
         if (b.nyckel !== nyckel) return b;
         var n = Object.assign({}, b);
         if (andring.namn != null) n.namn = String(andring.namn).trim();
         if (andring.taBortMedlem) n.medlemmar = n.medlemmar.filter(function (x) { return x !== andring.taBortMedlem; });
+        if (andring.info != null) { if (andring.info) n.info = andring.info; else delete n.info; }
         return n;
       })
     });
@@ -2269,6 +2343,7 @@ var VERSIONER = [
       poster: b.poster.map(function (p) { return { medlem: p.medlem, typ: p.typ === 'arsavgift' ? 'arsavgift' : 'termin', belopp: p.belopp }; })
     };
     if (b.kalla) post.kalla = b.kalla;
+    if (b.meddelande) post.meddelande = String(b.meddelande);
     if (b.historik) post.historik = true;
     return Object.assign({}, reg, { betalningar: reg.betalningar.concat([post]) });
   }
@@ -2526,7 +2601,7 @@ var VERSIONER = [
         var betalare = tolkaBetalare({ text: typ, referens: /^swish/i.test(typ) ? '' : ref });
         ut.avgifter.push({
           datum: datum, belopp: b, termin: terminIText(m[2]) || terminForDatum(datum), typ: /^medlems/i.test(m[1]) ? 'arsavgift' : 'termin',
-          namn: personnamn.trim(), nyckel: betalare ? betalare.nyckel : '', visning: betalare ? betalare.visning : '',
+          namn: personnamn.trim(), meddelande: kom, nyckel: betalare ? betalare.nyckel : '', visning: betalare ? betalare.visning : '',
           kalla: 'excel:' + (ut.ar || '') + ':' + (cellText(r[bkol['konttrans#']]) || cellText(r[bkol['kontotrans#']]) || (br.rad + 2 + i))
         });
       });
@@ -2558,7 +2633,7 @@ var VERSIONER = [
       if (!nyckel) return;
       var medlem = kanda[nyckel] || null;
       if (!medlem) {
-        var n = nya[nyckel] || (nya[nyckel] = { nyckel: nyckel, namn: visningsnamn(a.namn), antal: 0, kategori: gissaKategori(reg, a) });
+        var n = nya[nyckel] || (nya[nyckel] = { nyckel: nyckel, namn: visningsnamn(a.namn), antal: 0, kategori: gissaKategori(reg, a), meddelande: a.meddelande || '' });
         n.antal++;
       }
       betalningar.push(Object.assign({}, a, { medlem: medlem, namnNyckel: nyckel }));
@@ -2575,19 +2650,24 @@ var VERSIONER = [
   }
 
   // Lägger in avgifterna och Swish-listan i registret. kategorier: { namnNyckel: kategori } för nya medlemmar.
-  function lasInHistorik(reg, t, kategorier) {
+  // opt.namn: { namnNyckel: nytt namn }, opt.sammaSom: { namnNyckel: befintlig medlems id }.
+  function lasInHistorik(reg, t, kategorier, opt) {
+    opt = opt || {};
     var f = historikForslag(reg, t);
     var antal = { betalningar: 0, medlemmar: 0, betalare: 0, redan: f.redan };
     var fore = reg.betalare.length;
     var id = {};
     reg.medlemmar.forEach(function (m) { if (!m.avford) id[namnNyckel(m.namn)] = m.id; });
     f.nyaMedlemmar.forEach(function (n) {
-      var res = laggTillMedlem(reg, { namn: n.namn, kategori: (kategorier && kategorier[n.nyckel]) || n.kategori, tillagd: t.ar ? t.ar + '-01-01' : undefined });
+      var samma = opt.sammaSom && opt.sammaSom[n.nyckel];
+      if (samma && reg.medlemmar.some(function (m) { return m.id === samma; })) { id[n.nyckel] = samma; return; }
+      var namn = (opt.namn && String(opt.namn[n.nyckel] || '').trim()) || n.namn;
+      var res = laggTillMedlem(reg, { namn: namn, kategori: (kategorier && kategorier[n.nyckel]) || n.kategori, tillagd: t.ar ? t.ar + '-01-01' : undefined });
       reg = res.reg; id[n.nyckel] = res.medlem.id; antal.medlemmar++;
     });
     f.betalningar.forEach(function (b) {
       var m = id[b.namnNyckel];
-      reg = registreraBetalning(reg, { datum: b.datum, belopp: b.belopp, termin: b.termin, nyckel: b.nyckel, kalla: b.kalla, historik: true, poster: [{ medlem: m, typ: b.typ, belopp: b.belopp }] });
+      reg = registreraBetalning(reg, { datum: b.datum, belopp: b.belopp, termin: b.termin, nyckel: b.nyckel, kalla: b.kalla, historik: true, meddelande: b.meddelande, poster: [{ medlem: m, typ: b.typ, belopp: b.belopp }] });
       if (b.nyckel) reg = kopplaBetalare(reg, { nyckel: b.nyckel, visning: b.visning }, [m]);
       antal.betalningar++;
     });
@@ -2681,8 +2761,11 @@ var VERSIONER = [
       betalare: betalare,
       // Betalarens nummer sparas inte längre på betalningar som bara gällde den här medlemmen.
       betalningar: reg.betalningar.map(function (b) {
-        if (!b.nyckel || kvar[b.nyckel] || !b.poster.every(function (p) { return p.medlem === id; })) return b;
-        return Object.assign({}, b, { nyckel: '' });
+        if (!b.poster.every(function (p) { return p.medlem === id; })) return b;
+        var n = Object.assign({}, b);
+        delete n.meddelande;
+        if (n.nyckel && !kvar[n.nyckel]) n.nyckel = '';
+        return n;
       })
     });
   }
@@ -2730,7 +2813,7 @@ var VERSIONER = [
         if (p.medlem !== medlemId) return;
         if (p.typ === 'termin' && p.belopp === 0 && !familj) return;
         rader.push({
-          betalning: b.id, datum: b.datum, typ: p.typ, termin: b.termin, belopp: p.belopp, betalsatt: betalsatt(b.nyckel),
+          betalning: b.id, datum: b.datum, typ: p.typ, termin: b.termin, belopp: p.belopp, betalsatt: betalsatt(b.nyckel), nyckel: b.nyckel || '',
           text: (p.typ === 'arsavgift' ? 'Medlemsavgift ' + kalenderarForTermin(b.termin) : 'Terminsavgift ' + b.termin) +
             (p.typ === 'termin' && p.belopp === 0 ? ' (ingår i familjeavgift)' : familj ? ' (del av betalning ' + formatBelopp(b.belopp) + ' kr)' : '')
         });
@@ -2964,6 +3047,10 @@ var VERSIONER = [
     laggTillMedlem: laggTillMedlem,
     andraMedlem: andraMedlem,
     taBortMedlem: taBortMedlem,
+    KVITTOINFO: KVITTOINFO,
+    kontrolleraKvittoinfo: kontrolleraKvittoinfo,
+    slaIhopMedlemmar: slaIhopMedlemmar,
+    andraFordelning: andraFordelning,
     hittaBetalare: hittaBetalare,
     kopplaBetalare: kopplaBetalare,
     andraBetalare: andraBetalare,
@@ -6183,9 +6270,14 @@ var VERSIONER = [
         html += '<label style="font-weight:normal;display:flex;gap:6px;align-items:center"><input type="checkbox" style="width:auto" data-excel="medlemmar" data-i="' + i + '"' + (x.medlemmar ? ' checked' : '') + '> ' +
           'Medlemsbetalningar: ' + antal(f.betalningar.length, 'ny', 'nya') + (f.redan ? ', ' + f.redan + ' redan inlästa' : '') + ', ' + antal(f.nyaMedlemmar.length, 'ny medlem', 'nya medlemmar') + ', ' + antal(f.nyaBetalare, 'nytt Swish-nummer', 'nya Swish-nummer') + '</label>';
         if (x.medlemmar && f.nyaMedlemmar.length) {
-          html += '<details><summary class="faint">Nya medlemmar och kategori (kontrollera)</summary><div class="scroll"><table class="kortlista"><tbody>' + f.nyaMedlemmar.map(function (n) {
+          html += '<details><summary class="faint">Nya medlemmar: namn, samma som befintlig och kategori (kontrollera)</summary><div class="scroll"><table class="kortlista"><tbody>' + f.nyaMedlemmar.map(function (n) {
             var vald = (x.kategorier[n.nyckel]) || n.kategori;
-            return '<tr><td><strong>' + esc(n.namn) + '</strong> <span class="faint">' + antal(n.antal, 'betalning', 'betalningar') + '</span></td><td><select data-excel="kategori" data-i="' + i + '" data-nyckel="' + esc(n.nyckel) + '" aria-label="Kategori">' +
+            var samma = x.sammaSom[n.nyckel] || '';
+            return '<tr><td data-etikett="Namn"><input data-excel="namn" data-i="' + i + '" data-nyckel="' + esc(n.nyckel) + '" value="' + esc(x.namn[n.nyckel] != null ? x.namn[n.nyckel] : n.namn) + '"' + (samma ? ' disabled' : '') + ' aria-label="Namn">' +
+              '<div class="faint">' + antal(n.antal, 'betalning', 'betalningar') + (n.meddelande ? ': ' + esc(n.meddelande) : '') + '</div></td>' +
+              '<td data-etikett="Samma som"><select data-excel="samma" data-i="' + i + '" data-nyckel="' + esc(n.nyckel) + '" aria-label="Samma som en befintlig medlem"><option value="">Ny medlem</option>' +
+              sorteradeMedlemmar().map(function (m) { return '<option value="' + esc(m.id) + '"' + (m.id === samma ? ' selected' : '') + '>Samma som ' + esc(m.namn) + '</option>'; }).join('') + '</select></td>' +
+              '<td data-etikett="Kategori"><select data-excel="kategori" data-i="' + i + '" data-nyckel="' + esc(n.nyckel) + '" aria-label="Kategori"' + (samma ? ' disabled' : '') + '>' +
               K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '"' + (k[0] === vald ? ' selected' : '') + '>' + esc(K.KATEGORI_KORT[k[0]]) + '</option>'; }).join('') + '</select></td></tr>';
           }).join('') + '</tbody></table></div><p class="faint">Kategorin gissas från beloppet och avgifterna under Medlemmar, Avgifter. Samma person med namnet skrivet på olika sätt (t.ex. "EFTERNAMN, FÖRNAMN") känns igen.</p></details>';
         }
@@ -6380,8 +6472,96 @@ var VERSIONER = [
       (tips ? '<span class="faint">' + esc(tips) + '</span>' : '') + '</div>';
   }
 
+
+  // Ett textfält för "Information för kvitto" med kontroll av radlängd medan man skriver.
+  function infoFalt(attr, varde, platshallare) {
+    return '<textarea class="info-falt" rows="5" ' + attr + ' placeholder="' + esc(platshallare || 'Adress, e-post, telefon …') + '" spellcheck="false">' + esc(varde || '') + '</textarea>' +
+      '<div class="faint" data-infostatus>' + infoStatus(varde) + '</div>';
+  }
+  function infoStatus(text) {
+    var k = K.kontrolleraKvittoinfo(text);
+    return k.fel.length ? '<span class="fel">' + esc(k.fel.join(' ')) + '</span>' : 'Högst ' + K.KVITTOINFO.tecken + ' tecken per rad och ' + K.KVITTOINFO.rader + ' rader, så att kvittot ser ordentligt ut.';
+  }
+
+  function vyMedlem(m) {
+    var r = reg();
+    var id = esc(m.id);
+    var betalare = r.betalare.filter(function (b) { return b.medlemmar.indexOf(m.id) >= 0; });
+    var betalningar = K.giltigaBetalningar(r, store.ar).filter(function (b) { return b.poster.some(function (p) { return p.medlem === m.id; }); })
+      .sort(function (a, b) { return a.datum < b.datum ? 1 : -1; });
+    var html = '<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">' + esc(m.namn) + '</h2>' +
+      '<button class="btn btn-secondary btn-small" data-action="medl-vy" data-mvy="lista">Tillbaka till listan</button></div>' +
+      '<div class="grid2"><div><label>Namn</label><input data-medl="namn" data-id="' + id + '" value="' + esc(m.namn) + '"></div>' +
+      '<div><label>Kategori</label><select data-medl="kategori" data-id="' + id + '">' + K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '"' + (k[0] === m.kategori ? ' selected' : '') + '>' + esc(k[1]) + '</option>'; }).join('') + '</select></div></div>' +
+      '<label>Information för kvitto</label>' + infoFalt('data-medlinfo="' + id + '"', m.info) +
+      '<div class="row" style="margin-top:10px"><button class="btn btn-small" data-action="kvitto-ny" data-id="' + id + '">Kvitto</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="medlem-uttrade" data-id="' + id + '">Utträde</button>' +
+      (betalningar.length ? '' : '<button class="btn btn-secondary btn-small" data-action="medlem-ta-bort" data-id="' + id + '">Ta bort</button>') + '</div></div>';
+    html += '<h2>Betalare</h2><div class="card">' + (betalare.length ? '<ul style="margin:0">' + betalare.map(function (b) {
+      return '<li>' + esc(b.namn ? b.namn + ' (' + b.visning + ')' : b.visning) + (b.medlemmar.length > 1 ? ' <span class="faint">betalar också för ' + esc(b.medlemmar.filter(function (x) { return x !== m.id; }).map(function (x) { var y = medlemAv(x); return y ? y.namn : '?'; }).join(', ')) + '</span>' : '') + '</li>';
+    }).join('') + '</ul><p class="faint">Namn och information för kvitto på betalarna ändrar du under Betalare.</p>' : '<p class="faint" style="margin:0">Ingen betalare är kopplad.</p>') + '</div>';
+    html += '<h2>Betalningar (' + betalningar.length + ')</h2>';
+    if (!betalningar.length) html += '<p class="muted">Inga registrerade betalningar.</p>';
+    betalningar.forEach(function (b) {
+      var egen = b.poster.filter(function (p) { return p.medlem === m.id; }).reduce(function (s, p) { return s + p.belopp; }, 0);
+      var andra = b.poster.filter(function (p) { return p.medlem !== m.id; }).map(function (p) { var y = medlemAv(p.medlem); return y ? y.namn : '?'; }).filter(function (x, i, l) { return l.indexOf(x) === i; });
+      var bet = K.hittaBetalare(r, b.nyckel);
+      html += '<div class="card"><div class="row" style="justify-content:space-between"><div><strong>' + esc(b.datum) + '</strong> · ' + esc(b.termin) +
+        (bet ? ' · från ' + esc(bet.namn || bet.visning) : '') + (b.historik ? ' <span class="tag">från Excel</span>' : '') + '</div>' +
+        '<div class="belopp">' + kr(egen) + (egen !== b.belopp ? ' <span class="faint">av ' + kr(b.belopp) + '</span>' : '') + '</div></div>' +
+        (b.meddelande ? '<p class="faint" style="margin:4px 0">Meddelande: ' + esc(b.meddelande) + '</p>' : '') +
+        (andra.length ? '<p class="faint" style="margin:4px 0">Betalningen gäller också ' + esc(andra.join(', ')) + '.</p>' : '');
+      if (fordelning && fordelning.betalning === b.id) html += fordelningPanel(b);
+      else html += '<div class="row" style="margin-top:6px"><button class="btn btn-secondary btn-small" data-action="fordelning-oppna" data-id="' + esc(b.id) + '">Ändra fördelning</button></div>';
+      html += '</div>';
+    });
+    var andraMedlemmar = sorteradeMedlemmar().filter(function (x) { return x.id !== m.id; });
+    if (andraMedlemmar.length) {
+      html += '<h2>Slå ihop</h2><div class="card"><p class="faint" style="margin-top:0">Finns samma person två gånger, eller är det här en förälder och inte en medlem? Flytta allt till en annan medlem: betalningar, betalare och kvitton flyttas, och ' + esc(m.namn) + ' tas bort.</p>' +
+        '<div class="row"><select id="slaIhopMed" style="width:auto;max-width:100%"><option value="">Välj medlem…</option>' + andraMedlemmar.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.namn) + '</option>'; }).join('') + '</select>' +
+        '<button class="btn btn-secondary btn-small" data-action="medlem-sla-ihop" data-id="' + id + '">Slå ihop</button></div></div>';
+    }
+    return html;
+  }
+
+  function fordelningSumma() {
+    try { return fordelningPoster().reduce(function (s, p) { return s + p.belopp; }, 0); } catch (e) { return NaN; }
+  }
+
+  function fordelningPanel(b) {
+    var u = fordelning;
+    var valda = u.rader.map(function (x) { return x.medlem; });
+    return '<div class="avgift-panel"><div class="row"><strong>Fördelning</strong><label style="margin:0 0 0 auto">Termin <input data-ford="termin" value="' + esc(u.termin) + '" style="width:80px;display:inline-block"></label></div>' +
+      '<div class="scroll"><table><thead><tr><th>Medlem</th><th class="num">Terminsavgift</th><th class="num">Årsavgift</th><th></th></tr></thead><tbody>' + u.rader.map(function (x, i) {
+        var y = medlemAv(x.medlem) || { namn: '?' };
+        return '<tr><td>' + esc(y.namn) + '</td><td class="num"><input class="num" inputmode="decimal" data-ford="tb" data-i="' + i + '" value="' + esc(x.termin) + '"></td>' +
+          '<td class="num"><input class="num" inputmode="decimal" data-ford="ab" data-i="' + i + '" value="' + esc(x.ars) + '"></td>' +
+          '<td><button class="btn btn-secondary btn-small" data-action="fordelning-ta-bort" data-i="' + i + '">×</button></td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<div class="row" style="margin-top:6px"><select data-ford="lagg-till" style="width:auto;max-width:100%"><option value="">Lägg till medlem…</option>' +
+      sorteradeMedlemmar().filter(function (x) { return valda.indexOf(x.id) < 0; }).map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.namn) + '</option>'; }).join('') + '</select>' +
+      '<input data-ford="nynamn" placeholder="Ny medlem: namn" style="width:auto;flex:1 1 140px" value="' + esc(u.nyNamn || '') + '">' +
+      '<select data-ford="nykategori" style="width:auto">' + K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '"' + ((u.nyKategori || 'barn') === k[0] ? ' selected' : '') + '>' + esc(K.KATEGORI_KORT[k[0]]) + '</option>'; }).join('') + '</select>' +
+      '<button class="btn btn-secondary btn-small" data-action="fordelning-ny-medlem">Lägg till ny</button></div>' +
+      '<p style="margin:8px 0 4px" data-fordsumma>' + summaText(fordelningSumma(), b.belopp) + '</p>' +
+      '<div class="row"><button class="btn btn-small" data-action="fordelning-spara">Spara fördelningen</button><button class="btn btn-secondary btn-small" data-action="fordelning-avbryt">Avbryt</button></div></div>';
+  }
+
+  function fordelningPoster() {
+    var poster = [];
+    fordelning.rader.forEach(function (x) {
+      var t = x.termin.trim() ? Math.abs(K.parseBelopp(x.termin)) : 0, a = x.ars.trim() ? Math.abs(K.parseBelopp(x.ars)) : 0;
+      var m = medlemAv(x.medlem);
+      if (t || (m && m.kategori !== 'funktionar')) poster.push({ medlem: x.medlem, typ: 'termin', belopp: t });
+      if (a) poster.push({ medlem: x.medlem, typ: 'arsavgift', belopp: a });
+    });
+    return poster;
+  }
+
   var MEDLEMVYER = [['statistik', 'Statistik'], ['koppla', 'Att koppla'], ['lista', 'Medlemmar'], ['betalare', 'Betalare'], ['avgifter', 'Avgifter'], ['personuppgifter', 'Personuppgifter']];
   var kvittoUtkast = null;
+  var valdMedlem = null;
+  var fordelning = null;
 
   function vyMedlemmar(ar) {
     var r = reg();
@@ -6397,6 +6577,7 @@ var VERSIONER = [
     if (medlemVy === 'avgifter') return html + vyAvgifter(ar);
     if (medlemVy === 'personuppgifter') return html + vyPersonuppgifter();
     if (medlemVy === 'kvitto' && kvittoUtkast) return html + vyKvitto();
+    if (medlemVy === 'medlem' && medlemAv(valdMedlem)) return html + vyMedlem(medlemAv(valdMedlem));
     return html + vyMedlemStatistik(ar);
   }
 
@@ -6507,7 +6688,7 @@ var VERSIONER = [
     if (!aktiva.length) return html + '<p class="muted">Inga medlemmar ännu.</p>' + (avforda ? '<p class="faint">' + antal(avforda, 'tidigare medlem är avförd', 'tidigare medlemmar är avförda') + ' och anonymiserad' + (avforda === 1 ? '' : 'e') + '.</p>' : '');
     html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Namn</th><th>Kategori</th><th>Betalare</th><th>Senast betalt</th><th></th></tr></thead><tbody>' +
       sorteradeMedlemmar().map(function (m) {
-        return '<tr><td data-etikett="Namn"><input data-medl="namn" data-id="' + esc(m.id) + '" value="' + esc(m.namn) + '" aria-label="Namn"></td>' +
+        return '<tr><td data-etikett="Namn"><button class="lank-text" data-action="medlem-visa" data-id="' + esc(m.id) + '">' + esc(m.namn) + '</button>' + (m.info ? ' <span class="faint" title="Har information för kvitto">✉</span>' : '') + '</td>' +
           '<td data-etikett="Kategori"><select data-medl="kategori" data-id="' + esc(m.id) + '" aria-label="Kategori">' + K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '"' + (k[0] === m.kategori ? ' selected' : '') + '>' + esc(K.KATEGORI_KORT[k[0]]) + '</option>'; }).join('') + '</select></td>' +
           '<td data-etikett="Betalare">' + esc(betalareFor(m.id).join(', ')) + '</td><td data-etikett="Senast betalt">' + esc(senast[m.id] || '') + '</td>' +
           '<td style="white-space:nowrap"><button class="btn btn-secondary btn-small" data-action="kvitto-ny" data-id="' + esc(m.id) + '">Kvitto</button> ' +
@@ -6528,6 +6709,7 @@ var VERSIONER = [
       html += '<div class="card"><div class="row" style="justify-content:space-between"><strong>' + esc(b.visning) + '</strong>' +
         '<button class="btn btn-secondary btn-small" data-action="betalare-ta-bort" data-nyckel="' + n + '">Ta bort betalaren</button></div>' +
         '<label>Namn (frivilligt)</label><input data-betn="1" data-nyckel="' + n + '" value="' + esc(b.namn || '') + '" placeholder="t.ex. förälder till …">' +
+        '<details' + (b.info ? ' open' : '') + '><summary class="faint">Information för kvitto</summary>' + infoFalt('data-betinfo="' + n + '"', b.info) + '</details>' +
         '<div class="row" style="margin-top:8px">Betalar för: ' + (b.medlemmar.length ? b.medlemmar.map(function (id) {
           var m = medlemAv(id);
           return '<span class="tag">' + esc(m ? m.namn : '?') + ' <button class="knapp-tag" style="border:0;padding:0 2px" data-action="betalare-slapp" data-nyckel="' + n + '" data-id="' + esc(id) + '" aria-label="Ta bort koppling">×</button></span>';
@@ -6628,10 +6810,30 @@ var VERSIONER = [
     var rader = K.kvittorader(reg(), medlemId, store.ar);
     var ar = rader.length ? rader[rader.length - 1].datum.slice(0, 4) : idag().slice(0, 4);
     kvittoUtkast = {
-      medlem: medlemId, ar: ar, mottagare: m.namn, ovrigt: '',
+      medlem: medlemId, ar: ar, mottagare: m.namn, info: m.info || '', ovrigt: '', val: 'medlem',
       adressId: store.adresser[0] ? store.adresser[0].id : '', kontaktId: store.kontakter[0] ? store.kontakter[0].id : '',
       valda: null, skapat: null
     };
+    // Betalade någon annan, t.ex. en förälder, föreslås den som mottagare.
+    var senaste = rader.length ? K.hittaBetalare(reg(), rader[rader.length - 1].nyckel) : null;
+    if (senaste && senaste.namn && K.namnNyckel(senaste.namn) !== K.namnNyckel(m.namn)) valjKvittomottagare('b:' + senaste.nyckel);
+  }
+
+  function kvittomottagare(medlemId) {
+    var m = medlemAv(medlemId);
+    var lista = [{ val: 'medlem', namn: m.namn, info: m.info || '', text: m.namn + ' (medlemmen)' }];
+    reg().betalare.filter(function (b) { return b.medlemmar.indexOf(medlemId) >= 0; }).forEach(function (b) {
+      lista.push({ val: 'b:' + b.nyckel, namn: b.namn || '', info: b.info || '', text: (b.namn || b.visning) + ' (betalare)' });
+    });
+    lista.push({ val: 'annan', namn: '', info: '', text: 'Någon annan' });
+    return lista;
+  }
+
+  function valjKvittomottagare(val) {
+    var u = kvittoUtkast;
+    var x = kvittomottagare(u.medlem).find(function (y) { return y.val === val; });
+    if (!x) return;
+    u.val = val; u.mottagare = x.namn; u.info = x.info;
   }
 
   function kvittoValdaRader() {
@@ -6659,7 +6861,10 @@ var VERSIONER = [
     }
     html += '<div class="grid2"><div><label>Gäller</label><select data-kvitto="ar">' + arLista.map(function (a) { return '<option value="' + a + '"' + (u.ar === a ? ' selected' : '') + '>' + a + '</option>'; }).join('') +
       '<option value="alla"' + (u.ar === 'alla' ? ' selected' : '') + '>Alla betalningar</option></select></div>' +
-      '<div><label>Mottagare</label><input data-kvitto="mottagare" value="' + esc(u.mottagare) + '"></div></div>';
+      '<div><label>Mottagare</label><select data-kvitto="val">' + kvittomottagare(u.medlem).map(function (x) { return '<option value="' + esc(x.val) + '"' + (x.val === u.val ? ' selected' : '') + '>' + esc(x.text) + '</option>'; }).join('') + '</select>' +
+      '<input data-kvitto="mottagare" value="' + esc(u.mottagare) + '" placeholder="Namn på mottagaren" style="margin-top:6px"></div></div>' +
+      '<label>Information för kvitto</label>' + infoFalt('data-kvitto="info"', u.info) +
+      '<p class="faint" style="margin-top:2px">' + (u.val === 'annan' ? 'Skriv mottagarens uppgifter.' : 'Hämtas från ' + (u.val === 'medlem' ? 'medlemmen' : 'betalaren') + '. Ändringar här gäller bara det här kvittot.') + '</p>';
     var rader = K.kvittorader(reg(), u.medlem, store.ar, u.ar === 'alla' ? null : u.ar);
     html += '<div class="scroll"><table class="kortlista" style="margin-top:10px"><thead><tr><th></th><th>Datum</th><th>Avser</th><th>Betalsätt</th><th class="num">Belopp</th></tr></thead><tbody>' +
       rader.map(function (r) {
@@ -6667,7 +6872,7 @@ var VERSIONER = [
         return '<tr><td><input type="checkbox" style="width:auto" data-kvitto="rad" data-rad="' + esc(nyckel) + '"' + (u.valda && u.valda[nyckel] === false ? '' : ' checked') + ' aria-label="Ta med"></td>' +
           '<td data-etikett="Datum">' + esc(r.datum) + '</td><td data-etikett="Avser">' + esc(r.text) + '</td><td data-etikett="Betalsätt">' + esc(r.betalsatt) + '</td><td class="num" data-etikett="Belopp">' + kr(r.belopp) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
-    html += '<label>Övriga uppgifter på kvittot (sparas inte)</label><textarea data-kvitto="ovrigt" rows="3" style="width:100%;font:inherit" placeholder="T.ex. personnummer, vad avgiften gäller eller vad mottagaren behöver">' + esc(u.ovrigt) + '</textarea>';
+    html += '<label>Övriga uppgifter på kvittot (sparas inte)</label>' + infoFalt('data-kvitto="ovrigt"', u.ovrigt, 'T.ex. personnummer eller vad avgiften gäller');
     html += '<div class="grid2"><div><label>Avsändaradress</label><select data-kvitto="adressId"><option value="">Ingen</option>' + store.adresser.map(function (a) { return '<option value="' + esc(a.id) + '"' + (a.id === u.adressId ? ' selected' : '') + '>' + esc(a.etikett || rader0(a.text)) + '</option>'; }).join('') + '</select></div>' +
       '<div><label>Vår referens</label><select data-kvitto="kontaktId"><option value="">Ingen</option>' + store.kontakter.map(function (k) { return '<option value="' + esc(k.id) + '"' + (k.id === u.kontaktId ? ' selected' : '') + '>' + esc(k.namn) + '</option>'; }).join('') + '</select></div></div>';
     html += '<div class="row" style="margin-top:12px"><button class="btn" data-action="kvitto-skapa">Skapa kvitto</button></div></div>';
@@ -6690,13 +6895,14 @@ var VERSIONER = [
       '<p>' + esc(f) + ' är personuppgiftsansvarig. Så här hanteras uppgifterna om medlemmar i appen.</p>' +
       '<h3>Vilka uppgifter</h3><ul><li>Namn och medlemskategori (barn, student, vuxen, familj eller funktionär).</li>' +
       '<li>Vilka Swish-nummer eller bankgiroreferenser som har betalat för vilken medlem.</li>' +
-      '<li>Betalda avgifter: datum, termin och belopp.</li><li>Nummer och datum för kvitton som lämnats ut. Övriga uppgifter på kvittot, till exempel personnummer, sparas inte.</li></ul>' +
+      '<li>Information för kvitto som du skriver in på en medlem eller betalare, till exempel adress, e-post och telefon.</li>' +
+      '<li>Betalda avgifter: datum, termin, belopp och meddelandet från betalningen.</li><li>Nummer och datum för kvitton som lämnats ut. Övriga uppgifter på kvittot, till exempel personnummer, sparas inte.</li></ul>' +
       '<h3>Varför</h3><p>För att administrera medlemskap och avgifter enligt stadgarna, kunna lämna kvitto på betalda avgifter och ta fram statistik.</p>' +
       '<h3>Var</h3><p>I en egen fil, ' + esc(REGFIL) + (od.regMapp ? ', i mappen <strong>' + esc(od.regMapp.namn) + '</strong>' : '') + ' i föreningens OneDrive, och i webbläsaren på de enheter där kassören använder appen. ' +
       'Registret är skilt från bokföringen. Den som får läsa bokföringen, till exempel revisorn, ser inga namn. Verifikationerna innehåller inga namn, bara antal medlemmar. ' +
       'Kontoutdragen i bokföringen innehåller betalarens Swish-nummer, eftersom de är underlag till bokföringen.</p>' +
       '<h3>Hur länge</h3><p>Den som anmäler utträde avförs direkt. Den som inte har betalat årsavgift ' + esc(ar) + ' verksamhetsår i följd avförs enligt stadgarna. ' +
-      'När en medlem avförs tas namnet och kopplingen till betalarens nummer bort. Betalningarna finns kvar utan namn, för statistiken. ' +
+      'När en medlem avförs tas namnet, informationen för kvitto, meddelandena och kopplingen till betalarens nummer bort. Betalningarna finns kvar utan namn, för statistiken. ' +
       'Bokföringen, med kontoutdragen, sparas i sju år enligt bokföringslagen.</p>' +
       '<h3>Vem ser uppgifterna</h3><p>Kassören. Statistiken till styrelse och årsmöte tas fram utan namn.</p>' +
       '<h3>Medlemmens rättigheter</h3><p>En medlem kan be att få veta vilka uppgifter som finns om hen, få fel rättade och begära utträde. Kontakta föreningen' +
@@ -6731,7 +6937,17 @@ var VERSIONER = [
     if (t.dataset.inkorg) {
       inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { [t.dataset.inkorg]: t.value });
     }
-    if (t.dataset.kvitto && kvittoUtkast && (t.dataset.kvitto === 'mottagare' || t.dataset.kvitto === 'ovrigt')) kvittoUtkast[t.dataset.kvitto] = t.value;
+    if (t.dataset.kvitto && kvittoUtkast && (t.dataset.kvitto === 'mottagare' || t.dataset.kvitto === 'ovrigt' || t.dataset.kvitto === 'info')) kvittoUtkast[t.dataset.kvitto] = t.value;
+    if (t.classList && t.classList.contains('info-falt')) { var st = t.nextElementSibling; if (st && st.hasAttribute('data-infostatus')) st.innerHTML = infoStatus(t.value); }
+    if (t.dataset.ford && fordelning) {
+      if (t.dataset.ford === 'tb') fordelning.rader[Number(t.dataset.i)].termin = t.value;
+      if (t.dataset.ford === 'ab') fordelning.rader[Number(t.dataset.i)].ars = t.value;
+      if (t.dataset.ford === 'termin') fordelning.termin = t.value.trim().toUpperCase();
+      if (t.dataset.ford === 'nynamn') fordelning.nyNamn = t.value;
+      var b0 = reg().betalningar.find(function (x) { return x.id === fordelning.betalning; });
+      var fs = document.querySelector('[data-fordsumma]');
+      if (fs && b0) fs.innerHTML = summaText(fordelningSumma(), b0.belopp);
+    }
     if (t.dataset.avg && avgiftUtkast[t.dataset.id]) {
       var au = avgiftUtkast[t.dataset.id];
       if (t.dataset.avg === 'tb') au.rader[Number(t.dataset.i)].termin = t.value;
@@ -6769,7 +6985,7 @@ var VERSIONER = [
       }
       render();
     }
-    if (lasLage() && (t.dataset.forening || t.dataset.lista || t.dataset.underlag || t.dataset.arsmote || t.dataset.avg || t.dataset.medl || t.dataset.betn || t.dataset.betl || t.dataset.mkonto || t.dataset.mars || t.dataset.mtermin || t.dataset.mavfor || t.dataset.kvitto)) { visa('Endast läsning.', true); return; }
+    if (lasLage() && (t.dataset.forening || t.dataset.lista || t.dataset.underlag || t.dataset.arsmote || t.dataset.avg || t.dataset.medl || t.dataset.betn || t.dataset.betl || t.dataset.mkonto || t.dataset.mars || t.dataset.mtermin || t.dataset.mavfor || t.dataset.kvitto || t.dataset.ford || t.dataset.betinfo || t.dataset.medlinfo)) { visa('Endast läsning.', true); return; }
     if (t.dataset.avg && avgiftUtkast[t.dataset.id]) {
       var au2 = avgiftUtkast[t.dataset.id];
       if (t.dataset.avg === 'lagg-till' && t.value) au2.rader.push(standardRad(t.value, K.giltigtTerminId(au2.termin) ? au2.termin : K.terminForDatum(idag())));
@@ -6782,9 +6998,17 @@ var VERSIONER = [
     if (t.dataset.excel && excelForhand) {
       var x = excelForhand.filer[Number(t.dataset.i)];
       if (t.dataset.excel === 'kategori') x.kategorier[t.dataset.nyckel] = t.value;
+      else if (t.dataset.excel === 'namn') x.namn[t.dataset.nyckel] = t.value;
+      else if (t.dataset.excel === 'samma') { if (t.value) x.sammaSom[t.dataset.nyckel] = t.value; else delete x.sammaSom[t.dataset.nyckel]; render(); }
       else { x[t.dataset.excel] = t.checked; render(); }
       return;
     }
+    if (t.dataset.ford && fordelning) {
+      if (t.dataset.ford === 'lagg-till' && t.value) { fordelning.rader.push({ medlem: t.value, termin: '', ars: '' }); render(); }
+      if (t.dataset.ford === 'nykategori') fordelning.nyKategori = t.value;
+      return;
+    }
+    if (t.dataset.kvitto === 'val' && kvittoUtkast) { valjKvittomottagare(t.value); render(); return; }
     if (t.dataset.kvitto && kvittoUtkast) {
       if (t.dataset.kvitto === 'rad') { kvittoUtkast.valda = kvittoUtkast.valda || {}; kvittoUtkast.valda[t.dataset.rad] = t.checked; }
       else kvittoUtkast[t.dataset.kvitto] = t.value;
@@ -6797,8 +7021,10 @@ var VERSIONER = [
         if (!Number.isInteger(n) || n < 1 || n > 10) throw new Error('Ange ett antal år mellan 1 och 10.');
         sparaReg(Object.assign({}, reg(), { avforEfterAr: n })); render(); return;
       }
-      if (t.dataset.medl) { var andr = {}; andr[t.dataset.medl] = t.value; sparaReg(K.andraMedlem(reg(), t.dataset.id, andr)); if (t.dataset.medl === 'kategori') render(); return; }
+      if (t.dataset.medl) { var andr = {}; andr[t.dataset.medl] = t.value; sparaReg(K.andraMedlem(reg(), t.dataset.id, andr)); if (t.dataset.medl === 'kategori') render(); else { var h2 = document.querySelector('main .card h2'); if (h2 && medlemVy === 'medlem') h2.textContent = t.value.trim(); } return; }
       if (t.dataset.betn) { sparaReg(K.andraBetalare(reg(), t.dataset.nyckel, { namn: t.value })); return; }
+      if (t.dataset.betinfo) { sparaReg(K.andraBetalare(reg(), t.dataset.betinfo, { info: t.value })); return; }
+      if (t.dataset.medlinfo) { sparaReg(K.andraMedlem(reg(), t.dataset.medlinfo, { info: t.value })); return; }
       if (t.dataset.betl && t.value) { var bet = K.hittaBetalare(reg(), t.dataset.nyckel); sparaReg(K.kopplaBetalare(reg(), bet, [t.value])); render(); return; }
       if (t.dataset.mkonto) {
         var nr = t.value.trim();
@@ -7006,7 +7232,7 @@ var VERSIONER = [
         excelForhand = { filer: [], laser: 'Läser filerna…' };
         render();
         for (var i = 0; i < filer.length; i++) {
-          var post = { filnamn: filer[i].name, bokforing: true, medlemmar: true, kategorier: {} };
+          var post = { filnamn: filer[i].name, bokforing: true, medlemmar: true, kategorier: {}, namn: {}, sammaSom: {} };
           try {
             excelForhand.laser = 'Läser ' + filer[i].name + '…'; render();
             post.tolkning = K.tolkaArsbok(await lasArbetsbok(filer[i]), filer[i].name);
@@ -7036,7 +7262,7 @@ var VERSIONER = [
           ar++;
         }
         if (x.medlemmar) {
-          var res = K.lasInHistorik(reg(), t, x.kategorier);
+          var res = K.lasInHistorik(reg(), t, x.kategorier, { namn: x.namn, sammaSom: x.sammaSom });
           store.medlemsregister = res.reg;
           bet += res.antal.betalningar; med += res.antal.medlemmar; swish += res.antal.betalare;
         }
@@ -7118,6 +7344,41 @@ var VERSIONER = [
       sparaReg(res.reg);
       visa(res.medlem.namn + ' är tillagd.');
     },
+    'medlem-visa': function (t) { valdMedlem = t.dataset.id; fordelning = null; medlemVy = 'medlem'; meddelande = null; render(); window.scrollTo(0, 0); },
+    'medlem-sla-ihop': function (t) {
+      var till = document.getElementById('slaIhopMed').value;
+      if (!till) throw new Error('Välj vilken medlem som ska finnas kvar.');
+      var a = medlemAv(t.dataset.id), b = medlemAv(till);
+      if (!window.confirm('Flytta allt från ' + a.namn + ' till ' + b.namn + '? ' + a.namn + ' tas bort.')) return;
+      sparaReg(K.slaIhopMedlemmar(reg(), a.id, b.id));
+      valdMedlem = b.id;
+      visa(a.namn + ' är ihopslagen med ' + b.namn + '.');
+    },
+    'fordelning-oppna': function (t) {
+      var b = reg().betalningar.find(function (x) { return x.id === t.dataset.id; });
+      var rader = [];
+      b.poster.forEach(function (p) {
+        var x = rader.find(function (y) { return y.medlem === p.medlem; });
+        if (!x) { x = { medlem: p.medlem, termin: '', ars: '' }; rader.push(x); }
+        if (p.typ === 'arsavgift') x.ars = K.formatBelopp(p.belopp); else x.termin = K.formatBelopp(p.belopp);
+      });
+      fordelning = { betalning: b.id, termin: b.termin, rader: rader };
+      render();
+    },
+    'fordelning-avbryt': function () { fordelning = null; render(); },
+    'fordelning-ta-bort': function (t) { fordelning.rader.splice(Number(t.dataset.i), 1); render(); },
+    'fordelning-ny-medlem': function () {
+      var res = K.laggTillMedlem(reg(), { namn: fordelning.nyNamn, kategori: fordelning.nyKategori || 'barn', tillagd: idag() });
+      sparaReg(res.reg);
+      fordelning.rader.push({ medlem: res.medlem.id, termin: '', ars: '' });
+      fordelning.nyNamn = '';
+      render();
+    },
+    'fordelning-spara': function () {
+      sparaReg(K.andraFordelning(reg(), fordelning.betalning, fordelningPoster(), fordelning.termin));
+      fordelning = null;
+      visa('Fördelningen är sparad.');
+    },
     'medlem-avfor': function (t) {
       var m = medlemAv(t.dataset.id);
       if (!window.confirm('Avföra ' + m.namn + ' enligt stadgarna? Namnet och kopplingen till betalarens nummer tas bort. Har du tagit fram de kvitton som behövs?')) return;
@@ -7139,13 +7400,18 @@ var VERSIONER = [
       visa(m.namn + ' är avförd.');
     },
     'kvitto-ny': function (t) { nyttKvitto(t.dataset.id); medlemVy = 'kvitto'; meddelande = null; render(); },
-    'kvitto-stang': function () { kvittoUtkast = null; medlemVy = 'lista'; render(); },
+    'kvitto-stang': function () { var id = kvittoUtkast && kvittoUtkast.medlem; kvittoUtkast = null; medlemVy = valdMedlem === id && medlemAv(id) ? 'medlem' : 'lista'; render(); },
     'kvitto-andra': function () { kvittoUtkast.skapat = null; render(); },
     'kvitto-skapa': function () {
       var u = kvittoUtkast;
       var valda = kvittoValdaRader();
       if (!valda.length) throw new Error('Välj minst en betalning.');
       if (!u.mottagare.trim()) throw new Error('Kvittot behöver en mottagare.');
+      var ki = K.kontrolleraKvittoinfo(u.info), ko = K.kontrolleraKvittoinfo(u.ovrigt);
+      if (ki.fel.length) throw new Error('Information för kvitto: ' + ki.fel.join(' '));
+      if (ko.fel.length) throw new Error('Övriga uppgifter: ' + ko.fel.join(' '));
+      var medlemsnamn = (medlemAv(u.medlem) || {}).namn || '';
+      var visaMedlem = K.namnNyckel(u.mottagare) !== K.namnNyckel(medlemsnamn);
       var nr = K.nastaKvittonummer(reg(), idag().slice(0, 4));
       var adress = hitta('adresser', u.adressId), kontakt = hitta('kontakter', u.kontaktId);
       var betalsatt = valda.map(function (r) { return r.betalsatt; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; });
@@ -7155,8 +7421,8 @@ var VERSIONER = [
         betalsatt: betalsatt.length === 1 ? betalsatt[0] : '',
         forening: { namn: store.forening.namn, orgnr: store.forening.orgnr, bankgiro: store.forening.bankgiro, swish: store.forening.swish, webb: store.forening.webb, epost: store.forening.epost },
         avsandare: adress ? adress.text : '', referens: kontakt ? { namn: kontakt.namn, epost: kontakt.epost, mobil: kontakt.mobil } : null,
-        mottagare: { namn: u.mottagare.trim(), adress: u.ovrigt },
-        rader: valda.map(function (r) { return { beskrivning: r.datum + '  ' + r.text, antal: 1, pris: r.belopp }; })
+        mottagare: { namn: u.mottagare.trim(), adress: [ki.text, ko.text].filter(Boolean).join('\n') },
+        rader: valda.map(function (r) { return { beskrivning: r.datum + '  ' + r.text + (visaMedlem ? ' – ' + medlemsnamn : ''), antal: 1, pris: r.belopp }; })
       };
       var nyckel = 'kvitto-' + nr + '-' + Date.now().toString(36) + '|' + K.sakertNamn('Kvitto ' + nr + '.pdf');
       forbered(nyckel, function () { return skapaDokumentPdf(d); });

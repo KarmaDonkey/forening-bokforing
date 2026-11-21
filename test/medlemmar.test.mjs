@@ -288,3 +288,47 @@ test('kvitto: rader för en medlem, löpnummer och registrering', () => {
   assert.equal(K.nastaKvittonummer(reg, '2030'), 'M-2030-002');
   assert.equal(K.nastaKvittonummer(reg, '2031'), 'M-2031-001');
 });
+
+test('information för kvitto: högst 40 tecken per rad och 5 rader', () => {
+  eq(K.kontrolleraKvittoinfo('Påhittad gatan 1\n111 11 Staden\n\n'), { text: 'Påhittad gatan 1\n111 11 Staden', fel: [] });
+  assert.match(K.kontrolleraKvittoinfo('x'.repeat(41)).fel[0], /Rad 1 har 41 tecken/);
+  assert.match(K.kontrolleraKvittoinfo('1\n2\n3\n4\n5\n6').fel[0], /Högst 5 rader/);
+  let reg = registret();
+  reg = K.andraMedlem(reg, 'm1', { info: 'anna@example.se\n070-000 00 00' });
+  assert.equal(reg.medlemmar[0].info, 'anna@example.se\n070-000 00 00');
+  assert.throws(() => K.andraMedlem(reg, 'm1', { info: 'x'.repeat(50) }), /50 tecken/);
+  reg = K.andraMedlem(reg, 'm1', { info: '' });
+  assert.ok(!('info' in reg.medlemmar[0]));
+  reg = K.kopplaBetalare(reg, { nyckel: '+46701111111' }, ['m1']);
+  reg = K.andraBetalare(reg, '+46701111111', { info: 'Förälder Exempel\nPåhittad väg 2' });
+  assert.equal(reg.betalare[0].info, 'Förälder Exempel\nPåhittad väg 2');
+  reg = K.avforMedlem(reg, 'm1', '2033-01-01', 'utträde');
+  assert.ok(!('info' in reg.medlemmar[0]), 'avförd medlem har inga uppgifter kvar');
+});
+
+test('två medlemmar slås ihop: betalningar, betalare och kvitton följer med', () => {
+  let reg = registret();
+  reg = K.andraMedlem(reg, 'm2', { info: 'Adress 1' });
+  reg = K.kopplaBetalare(reg, { nyckel: '+46701111111' }, ['m1', 'm2']);
+  reg = K.registreraBetalning(reg, { datum: '2030-02-01', belopp: kr(2000), termin: 'VT-30', poster: [{ medlem: 'm1', typ: 'termin', belopp: kr(1000) }, { medlem: 'm2', typ: 'termin', belopp: kr(1000) }] });
+  reg = K.registreraBetalning(reg, { datum: '2030-08-01', belopp: kr(1000), termin: 'HT-30', meddelande: 'Terminsavgift HT30 - påhittad text', poster: [{ medlem: 'm2', typ: 'termin', belopp: kr(1000) }] });
+  reg = K.registreraKvitto(reg, { nr: 'M-2030-001', datum: '2030-09-01', medlem: 'm2' });
+  const r = K.slaIhopMedlemmar(reg, 'm2', 'm1');
+  eq(r.medlemmar.map((m) => m.id), ['m1', 'm3', 'm4']);
+  assert.equal(r.medlemmar[0].info, 'Adress 1');
+  eq(r.betalningar[0].poster, [{ medlem: 'm1', typ: 'termin', belopp: kr(2000) }]);
+  eq(r.betalningar[1].poster, [{ medlem: 'm1', typ: 'termin', belopp: kr(1000) }]);
+  assert.equal(r.betalningar[1].meddelande, 'Terminsavgift HT30 - påhittad text');
+  eq(r.betalare[0].medlemmar, ['m1']);
+  assert.equal(r.kvitton[0].medlem, 'm1');
+  assert.throws(() => K.slaIhopMedlemmar(reg, 'm1', 'm1'), /annan/);
+});
+
+test('ny fördelning av en betalning på flera medlemmar', () => {
+  let reg = registret();
+  reg = K.registreraBetalning(reg, { datum: '2030-02-01', belopp: kr(2000), termin: 'VT-30', poster: [{ medlem: 'm1', typ: 'termin', belopp: kr(2000) }] });
+  const r = K.andraFordelning(reg, 'b1', [{ medlem: 'm1', typ: 'termin', belopp: kr(1000) }, { medlem: 'm2', typ: 'termin', belopp: kr(1000) }]);
+  assert.equal(K.terminsstatistik(r, 'VT-30').totalt.antal, 2);
+  assert.throws(() => K.andraFordelning(reg, 'b1', [{ medlem: 'm1', typ: 'termin', belopp: kr(1500) }]), /stämmer inte/);
+  assert.equal(K.andraFordelning(reg, 'b1', [{ medlem: 'm1', typ: 'termin', belopp: kr(2000) }], 'HT-30').betalningar[0].termin, 'HT-30');
+});
