@@ -300,6 +300,15 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.6', datum: '2026-11-21',
+    nyheter: [
+      'Att läsa in föreningsfilen återställer logotypen när den saknas på enheten, även efter en säkerhetskopia.',
+      'En ny eller borttagen logotyp sparas i OneDrive, och dina andra enheter hämtar den nya.',
+      'Saknas logotypen på enheten står det tydligt, i stället för "Ingen logotyp".',
+      'Inställningarna i din appmapp (mapp och API-nyckel) sparas i tur och ordning så att ingen ändring skriver över en annan.'
+    ]
+  },
+  {
     version: '1.5', datum: '2026-11-21',
     nyheter: [
       'Bättre på telefon (iPhone och Android): kompakt sidhuvud, menyn är en rad som man sveper i sidled och som stannar kvar överst när man scrollar.',
@@ -2378,11 +2387,17 @@ var VERSIONER = [
     return res.json().catch(function () { return {}; });
   }
 
-  async function sparaAppinstallningar(andring) {
-    var nu = await lasAppinstallningar();
-    await graf('/me/drive/special/approot:/' + INSTALLNINGSFIL + ':/content', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({}, nu, andring))
+  // Skrivningar görs i tur och ordning, så att två ändringar nästan samtidigt inte skriver över varandra.
+  var appinstallningsko = Promise.resolve();
+  function sparaAppinstallningar(andring) {
+    var steg = appinstallningsko.then(async function () {
+      var nu = await lasAppinstallningar();
+      await graf('/me/drive/special/approot:/' + INSTALLNINGSFIL + ':/content', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({}, nu, andring))
+      });
     });
+    appinstallningsko = steg.catch(function () { /* nästa ändring försöker igen */ });
+    return steg;
   }
 
   function nyckelAndrad() { try { return Number(localStorage.getItem(NYCKEL_ANDRAD)) || 0; } catch (e) { return 0; } }
@@ -2678,6 +2693,7 @@ var VERSIONER = [
       if (logo) {
         var lp = await laddaUpp('Föreningsbokföring logotyp.' + ((logo.blob.type || '').split('/')[1] || 'png'), logo.blob);
         store.forening.logoOdId = lp.id;
+        await sparaFil('logotyp', logo.blob, lp.id);
         andrat = true;
       }
     }
@@ -2904,16 +2920,23 @@ var VERSIONER = [
   function hitta(lista, id) { return (store[lista] || []).find(function (x) { return x.id === id; }) || null; }
   function rader(text) { return String(text || '').split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean); }
 
+  var logoSaknas = false;
+
+  // Logotypen ligger i webbläsaren och, när appen är kopplad, i OneDrive. Den lokala kopian märks
+  // med OneDrive-filens id så att en ny logotyp från en annan enhet hämtas igen.
   function laddaLogo() {
+    logoSaknas = false;
     if (!store.forening.harLogotyp) { logoUrl = null; return Promise.resolve(); }
+    var odId = store.forening.logoOdId;
     return hamtaFil('logotyp').then(function (rec) {
-      if (rec || !store.forening.logoOdId || !odAnslutet()) return rec;
-      return graf('/drives/' + od.mapp.driveId + '/items/' + store.forening.logoOdId + '/content', { ra: true })
+      var inaktuell = rec && odId && rec.namn !== odId && rec.namn !== 'lokal';
+      if ((rec && !inaktuell) || !odId || !odAnslutet()) return rec;
+      return graf('/drives/' + od.mapp.driveId + '/items/' + odId + '/content', { ra: true })
         .then(function (res) { return res.blob(); })
-        .then(function (blob) { return sparaFil('logotyp', blob, 'logotyp').then(function () { return { blob: blob }; }); })
-        .catch(function () { return null; });
+        .then(function (blob) { return sparaFil('logotyp', blob, odId).then(function () { return { blob: blob }; }); })
+        .catch(function () { return rec || null; });
     }).then(function (rec) {
-      if (!rec) { logoUrl = null; return; }
+      if (!rec) { logoUrl = null; logoSaknas = true; return; }
       return blobTillBase64(rec.blob).then(function (b64) { logoUrl = 'data:' + (rec.blob.type || 'image/png') + ';base64,' + b64; });
     }).catch(function () { logoUrl = null; });
   }
@@ -3806,7 +3829,9 @@ var VERSIONER = [
         return '<div><label>' + x[1] + '</label><input data-forening="' + x[0] + '" value="' + esc(f[x[0]]) + '"></div>';
       }).join('') + '</div>' +
       '<div class="row" style="margin-top:12px"><button class="btn btn-secondary btn-small" data-action="las-in-forening">Läs in föreningsuppgifter från fil</button></div>' +
-      '<h3>Logotyp</h3><div class="row">' + (logoUrl ? '<img src="' + esc(logoUrl) + '" alt="Logotyp" style="max-height:60px;background:#fff;padding:4px;border-radius:4px">' : '<span class="faint">Ingen logotyp.</span>') +
+      '<h3>Logotyp</h3><div class="row">' + (logoUrl ? '<img src="' + esc(logoUrl) + '" alt="Logotyp" style="max-height:60px;background:#fff;padding:4px;border-radius:4px">'
+        : logoSaknas ? '<span class="fel">Logotypen finns inte på den här enheten. Ladda upp den igen' + (odAnslutet() ? ', så sparas den i OneDrive.' : '.') + '</span>'
+        : '<span class="faint">Ingen logotyp.</span>') +
       '<button class="btn btn-secondary btn-small" data-action="valj-logo">' + (logoUrl ? 'Byt logotyp' : 'Ladda upp logotyp') + '</button>' +
       (logoUrl ? '<button class="btn btn-secondary btn-small" data-action="ta-bort-logo">Ta bort</button>' : '') + '</div>';
     ['adresser', 'kontakter', 'artiklar'].forEach(function (k) { html += listRedigerare(k); });
@@ -4449,8 +4474,9 @@ var VERSIONER = [
         var fil = input.files[0];
         if (!fil) return;
         if (fil.size > 1500000) { visa('Bilden är för stor. Använd en logotyp under 1,5 MB.', true); return; }
-        sparaFil('logotyp', fil, fil.name).then(function () {
+        sparaFil('logotyp', fil, 'lokal').then(function () {
           store.forening.harLogotyp = true;
+          store.forening.logoOdId = null;
           spara();
           return laddaLogo();
         }).then(function () { visa('Logotypen är sparad.'); });
@@ -4538,13 +4564,15 @@ var VERSIONER = [
           var data = JSON.parse(txt);
           var res = K.slaIhopForening(store, data, nyttId);
           Object.assign(store, res.data);
+          // Logotypen återställs när den saknas på enheten, oavsett vad en säkerhetskopia säger.
           var logo = Promise.resolve(false);
-          if (data.logotyp && data.logotyp.data && !store.forening.harLogotyp) {
+          if (data.logotyp && data.logotyp.data && !logoUrl) {
             var bin = atob(data.logotyp.data);
             var bytes = new Uint8Array(bin.length);
             for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            logo = sparaFil('logotyp', new Blob([bytes], { type: data.logotyp.typ || 'image/png' }), 'logotyp').then(function () {
+            logo = sparaFil('logotyp', new Blob([bytes], { type: data.logotyp.typ || 'image/png' }), 'lokal').then(function () {
               store.forening.harLogotyp = true;
+              store.forening.logoOdId = null;
               return laddaLogo().then(function () { return true; });
             });
           }
@@ -4560,6 +4588,7 @@ var VERSIONER = [
     'ta-bort-logo': function () {
       taBortFil('logotyp');
       store.forening.harLogotyp = false;
+      store.forening.logoOdId = null;
       logoUrl = null;
       spara();
       visa('Logotypen är borttagen.');
