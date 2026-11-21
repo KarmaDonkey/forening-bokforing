@@ -303,6 +303,15 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.11', datum: '2026-11-21',
+    nyheter: [
+      'Alla rapporter (resultaträkning, balansräkning, saldobalans, grundbok, huvudbok och bankavstämning) kan delas, sparas, laddas ner eller skrivas ut som PDF, även på iPhone.',
+      'PDF:erna har föreningens namn och logotyp, räkenskapsår, sidnummer och "preliminär" tills året är låst.',
+      'Skriv ut visas inte i hemskärmsappen på iPhone, där utskrift inte fungerar.',
+      'Bankavstämningen visas som kort på telefonen så att inget klipps.'
+    ]
+  },
+  {
     version: '1.10', datum: '2026-11-21',
     nyheter: [
       'Ny knapp "Dela som bild" på fakturor och kvitton. Den skapar en skarp bild av A4-sidan som går att skicka i Messenger, WhatsApp och andra chattappar som inte tar emot PDF.',
@@ -3424,6 +3433,170 @@ var VERSIONER = [
 
   function dokumentBildnamn(d) { return K.sakertNamn((d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + d.nummer + '.jpg'); }
 
+  // ---------- Rapporter som PDF ----------
+
+  var RAPPORTTITLAR = { rr: 'Resultaträkning', br: 'Balansräkning', sb: 'Saldobalans', gb: 'Grundbok', hb: 'Huvudbok', bank: 'Bankavstämning' };
+
+  async function skapaRapportPdf(ar, typ, konto) {
+    var doc = nyPdf(await laddaJsPdf());
+    var f = store.forening;
+    var V = 15, H = 195, NED = 278;
+    var titel = RAPPORTTITLAR[typ] + (typ === 'hb' ? ' ' + konto + ' ' + K.kontonamn(ar, konto) : '');
+    var y;
+    // Sidhuvud
+    var logoH = ritaLogo(doc, V, 12, 18, 16);
+    var ny = 12 + (logoH ? logoH + 5 : 4);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(pt(f.namn || ''), V, ny);
+    if (f.orgnr) { doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.text('Org.nr ' + pt(f.orgnr), V, ny + 4.5); }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(typ === 'hb' ? 14 : 18); doc.setTextColor.apply(doc, SKIFFER);
+    doc.text(pt(titel), H, 20, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(26, 26, 26);
+    doc.text('Räkenskapsår ' + ar.start + ' - ' + ar.slut + (ar.lastTom === ar.slut ? '' : ' (preliminär)'), H, 26, { align: 'right' });
+    doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
+    doc.text('Utskriven ' + idag(), H, 30.5, { align: 'right' });
+    doc.setTextColor(26, 26, 26);
+    y = Math.max(ny + 10, 40);
+
+    var kol = null;
+    var kolumnrubriker = function () {
+      if (!kol) return;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor.apply(doc, GRA);
+      kol.forEach(function (k) { doc.text(pt(k.r).toUpperCase(), k.x, y, { align: k.align || 'left' }); });
+      doc.setTextColor(26, 26, 26);
+      doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.3); doc.line(V, y + 1.5, H, y + 1.5);
+      y += 6;
+    };
+    var nySida = function () { doc.addPage(); y = 18; kolumnrubriker(); };
+    var rad = function (celler, stil) {
+      doc.setFont('helvetica', stil ? 'bold' : 'normal'); doc.setFontSize(9);
+      var delar = celler.map(function (c, i) { return kol[i] && kol[i].w ? doc.splitTextToSize(pt(c), kol[i].w) : [pt(c)]; });
+      var hojd = Math.max.apply(null, delar.map(function (d) { return d.length; })) * 4 + 1;
+      if (y + hojd > NED) { nySida(); doc.setFont('helvetica', stil ? 'bold' : 'normal'); doc.setFontSize(9); }
+      if (stil === 'summa' || stil === 'total') {
+        doc.setDrawColor.apply(doc, stil === 'total' ? [26, 26, 26] : [150, 150, 150]); doc.setLineWidth(stil === 'total' ? 0.4 : 0.2);
+        doc.line(V, y - 3.3, H, y - 3.3);
+      }
+      if (stil === 'grupp' && y > 50) y += 1.5;
+      delar.forEach(function (d, i) { if (kol[i]) doc.text(d, kol[i].x, y, { align: kol[i].align || 'left' }); });
+      y += hojd + (stil === 'total' ? 1.5 : 0);
+    };
+    var avsnitt = function (text) {
+      if (y + 14 > NED) { doc.addPage(); y = 18; }
+      y += 3;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor.apply(doc, SKIFFER);
+      doc.text(pt(text), V, y);
+      doc.setTextColor(26, 26, 26);
+      y += 6;
+    };
+    var text = function (t) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+      doc.splitTextToSize(pt(t), H - V).forEach(function (r) { if (y + 4.5 > NED) { doc.addPage(); y = 18; } doc.text(r, V, y); y += 4.3; });
+    };
+    var R = 'right';
+
+    if (typ === 'rr') {
+      var fg = foregaende(ar);
+      var rr = K.resultatrakning(ar, { foregaende: fg });
+      kol = [{ r: 'Konto', x: V, w: 120 }, { r: K.arNamn(ar), x: fg ? 160 : H, align: R }].concat(fg ? [{ r: K.arNamn(fg), x: H, align: R }] : []);
+      kolumnrubriker();
+      rr.grupper.forEach(function (g) {
+        rad([g.namn], 'grupp');
+        g.konton.forEach(function (r) { rad([r.nr + ' ' + r.namn, kr(r.belopp)].concat(fg ? [kr(r.jamforelse)] : [])); });
+        rad(['Summa ' + g.namn.toLowerCase(), kr(g.summa)].concat(fg ? [kr(g.jamforelse)] : []), 'summa');
+      });
+      rad(['Årets resultat', kr(rr.aretsResultat)].concat(fg ? [kr(rr.jamforelseResultat)] : []), 'total');
+    } else if (typ === 'br') {
+      var br = K.balansrakning(ar);
+      kol = [{ r: 'Konto', x: V, w: 115 }, { r: 'Ingående', x: 160, align: R }, { r: 'Utgående', x: H, align: R }];
+      kolumnrubriker();
+      [['Tillgångar', br.tillgangar], ['Eget kapital och skulder', br.egetKapitalOchSkulder]].forEach(function (d) {
+        avsnitt(d[0]);
+        d[1].grupper.forEach(function (g) {
+          rad([g.namn], 'grupp');
+          g.konton.forEach(function (r) { rad([(r.nr ? r.nr + ' ' : '') + r.namn, kr(r.jamforelse), kr(r.belopp)]); });
+          rad(['Summa ' + g.namn.toLowerCase(), kr(g.jamforelse), kr(g.summa)], 'summa');
+        });
+        rad(['Summa ' + d[0].toLowerCase(), kr(d[1].ingaende), kr(d[1].summa)], 'total');
+      });
+      text(br.balanserar ? 'Balansräkningen går ihop.' : 'Balansräkningen går inte ihop. Kontrollera ingående balanser.');
+    } else if (typ === 'sb') {
+      var sb = K.saldobalans(ar);
+      kol = [{ r: 'Konto', x: V, w: 95 }, { r: 'Ingående', x: 130, align: R }, { r: 'Period', x: 162, align: R }, { r: 'Utgående', x: H, align: R }];
+      kolumnrubriker();
+      var t = { ib: 0, rorelse: 0, ub: 0 };
+      sb.forEach(function (r) { t.ib += r.ib; t.rorelse += r.rorelse; t.ub += r.ub; rad([r.nr + ' ' + r.namn, kr(r.ib), kr(r.rorelse), kr(r.ub)]); });
+      rad(['Summa (ska vara noll)', kr(t.ib), kr(t.rorelse), kr(t.ub)], 'total');
+    } else if (typ === 'gb') {
+      kol = [{ r: 'Datum', x: V }, { r: 'Ver', x: 40, align: R }, { r: 'Konto och text', x: 45, w: 90 }, { r: 'Debet', x: 165, align: R }, { r: 'Kredit', x: H, align: R }];
+      kolumnrubriker();
+      K.grundbok(ar).forEach(function (v) {
+        rad([v.datum, String(v.nr), v.text, '', ''], 'grupp');
+        v.rader.forEach(function (r) { rad(['', '', '   ' + r.konto + ' ' + K.kontonamn(ar, r.konto), r.belopp > 0 ? kr(r.belopp) : '', r.belopp < 0 ? kr(-r.belopp) : '']); });
+      });
+    } else if (typ === 'hb') {
+      var hb = K.huvudbok(ar, konto);
+      kol = [{ r: 'Datum', x: V }, { r: 'Ver', x: 40, align: R }, { r: 'Text', x: 45, w: 72 }, { r: 'Debet', x: 145, align: R }, { r: 'Kredit', x: 170, align: R }, { r: 'Saldo', x: H, align: R }];
+      kolumnrubriker();
+      rad([ar.start, '', 'Ingående balans', '', '', kr(hb.ib)], 'grupp');
+      hb.rader.forEach(function (r) { rad([r.datum, String(r.nr), r.text, r.belopp > 0 ? kr(r.belopp) : '', r.belopp < 0 ? kr(-r.belopp) : '', kr(r.saldo)]); });
+      rad(['', '', 'Utgående balans', '', '', kr(hb.ub)], 'total');
+    } else if (typ === 'bank') {
+      var sista = (ar.bankrader || []).reduce(function (m, r) { return r.datum.slice(0, 7) > m ? r.datum.slice(0, 7) : m; }, '');
+      kol = [{ r: 'Månad', x: V, w: 40 }, { r: 'Banken', x: 95, align: R }, { r: 'Bokfört', x: 125, align: R }, { r: 'Skillnad', x: 155, align: R }, { r: 'Status', x: 160, w: 35 }];
+      kolumnrubriker();
+      K.bankavstamningPerManad(ar).filter(function (m) { return m.manad <= sista; }).forEach(function (m) {
+        var status = !m.antal ? 'inga transaktioner' : m.skillnad == null ? 'utan saldo' : (m.skillnad === 0 && !m.obokforda) ? 'stämmer'
+          : m.obokforda ? m.obokforda + ' ej bokförd' + (m.obokforda === 1 ? '' : 'a') : 'skiljer';
+        rad([manadsnamn(m.manad), m.bankSaldo != null ? kr(m.bankSaldo) : '', m.bokfortSaldo != null ? kr(m.bokfortSaldo) : '', m.skillnad != null ? kr(m.skillnad) : '', status]);
+      });
+      var a = K.bankavvikelser(ar);
+      kol = null;
+      avsnitt('Banktransaktioner som inte är bokförda (' + a.obokforda.length + ')');
+      if (a.obokforda.length) {
+        kol = [{ r: 'Datum', x: V }, { r: 'Text', x: 45, w: 120 }, { r: 'Belopp', x: H, align: R }];
+        kolumnrubriker();
+        a.obokforda.forEach(function (r) { rad([r.datum, r.text, kr(r.belopp)]); });
+        kol = null;
+      } else text('Alla är bokförda.');
+      avsnitt('Bokfört på 1930 men saknas i kontoutdraget (' + a.utanBank.length + ')');
+      if (a.utanBank.length) {
+        kol = [{ r: 'Datum', x: V }, { r: 'Ver', x: 40, align: R }, { r: 'Text', x: 45, w: 120 }, { r: 'Belopp', x: H, align: R }];
+        kolumnrubriker();
+        a.utanBank.forEach(function (v) { rad([v.datum, String(v.nr), v.text, kr(v.belopp)]); });
+        kol = null;
+      } else text('Inga.');
+      avsnitt('Saldot går inte ihop i kontoutdraget (' + a.saldofel.length + ')');
+      a.saldofel.length ? a.saldofel.forEach(text) : text('Inga.');
+    }
+
+    var sidor = doc.getNumberOfPages();
+    for (var i = 1; i <= sidor; i++) {
+      doc.setPage(i);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
+      doc.text(pt((f.namn || '') + ' · ' + titel + ' ' + K.arNamn(ar)), V, 290);
+      doc.text('Sida ' + i + ' av ' + sidor, H, 290, { align: 'right' });
+      doc.setTextColor(26, 26, 26);
+    }
+    doc.setProperties({ title: titel + ' ' + K.arNamn(ar), author: f.namn || '', creator: 'Föreningsbokföring' });
+    return doc.output('blob');
+  }
+
+  // Liten kontrollsumma över året, så att en ny PDF skapas när bokföringen ändras.
+  function datastampel(ar, extra) {
+    var t = JSON.stringify(ar) + '|' + (extra || '');
+    var h = 5381;
+    for (var i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+
+  function rapportPdfKnappar(ar, typ, konto) {
+    var fg = foregaende(ar);
+    var namn = K.sakertNamn(RAPPORTTITLAR[typ] + (typ === 'hb' ? ' ' + konto : '') + ' ' + K.arNamn(ar).replace('/', '-') + '.pdf');
+    var nyckel = 'rapport-' + typ + '-' + store.aktivt + '-' + datastampel(ar, (konto || '') + (fg ? datastampel(fg) : '') + (store.forening.namn || '') + (logoUrl ? logoUrl.length : 0)) + '|' + namn;
+    forbered(nyckel, function () { return skapaRapportPdf(ar, typ, konto); });
+    return '<div class="row ej-utskrift" style="margin:10px 0">' + pdfKnappar(nyckel, 'skriv-ut') + '</div>';
+  }
+
   function dokumentFilnamn(d) { return K.sakertNamn((d.typ === 'faktura' ? 'Faktura ' : 'Kvitto ') + d.nummer + '.pdf'); }
   function arsmoteFilnamn(ar) { return K.sakertNamn('Ekonomisk redovisning ' + K.arNamn(ar).replace('/', '-') + '.pdf'); }
 
@@ -3936,7 +4109,7 @@ var VERSIONER = [
     var html = '<h2>Huvudbok</h2><label for="hbKonto">Konto</label><select id="hbKonto" style="max-width:420px">' +
       ar.kontoplan.map(function (k) {
         return '<option value="' + k.nr + '"' + (k.nr === valtKonto ? ' selected' : '') + '>' + k.nr + ' ' + esc(k.namn) + (K.kontoAnvands(ar, k.nr) ? '' : ' (oanvänt)') + '</option>';
-      }).join('') + '</select>';
+      }).join('') + '</select>' + rapportPdfKnappar(ar, 'hb', valtKonto);
     html += '<div class="scroll"><table class="kortlista" style="margin-top:12px"><thead><tr><th>Datum</th><th>Ver</th><th>Text</th><th class="num">Debet</th><th class="num">Kredit</th><th class="num">Saldo</th></tr></thead><tbody>' +
       '<tr><td class="nowrap" data-etikett="Datum">' + esc(ar.start) + '</td><td></td><td><strong>Ingående balans</strong></td><td></td><td></td><td class="num" data-etikett="Saldo">' + kr(hb.ib) + '</td></tr>';
     hb.rader.forEach(function (r) {
@@ -3952,7 +4125,7 @@ var VERSIONER = [
   function vyRapporter(ar) {
     var html = '<div class="row ej-utskrift" style="margin-top:12px">' + RAPPORTER.map(function (r) {
       return '<button class="btn ' + (rapportVy === r[0] ? '' : 'btn-secondary') + ' btn-small" data-rapport="' + r[0] + '">' + r[1] + '</button>';
-    }).join('') + '<button class="btn btn-secondary btn-small" data-action="skriv-ut">Skriv ut / PDF</button></div>';
+    }).join('') + '</div>' + rapportPdfKnappar(ar, rapportVy);
     var rubrik = (store.forening.namn ? esc(store.forening.namn) + ' · ' : '') + 'Räkenskapsår ' + esc(ar.start) + ' – ' + esc(ar.slut);
     html += '<div class="card"><p class="faint">' + rubrik + (ar.lastTom === ar.slut ? '' : ' · preliminär') + '</p>';
     if (rapportVy === 'rr') html += rapportRR(ar);
@@ -4029,7 +4202,7 @@ var VERSIONER = [
     if (!(ar.bankrader || []).length) return html + '<p class="muted">Inga kontoutdrag är inlästa för året ännu. Läs in ett kontoutdrag under Läs in.</p>';
     var sistaMedData = (ar.bankrader || []).reduce(function (m, r) { return r.datum.slice(0, 7) > m ? r.datum.slice(0, 7) : m; }, '');
     var manader = K.bankavstamningPerManad(ar).filter(function (m) { return m.manad <= sistaMedData; });
-    html += '<div class="scroll"><table><thead><tr><th>Månad</th><th class="num">Banken</th><th class="num">Bokfört</th><th class="num">Skillnad</th><th>Status</th></tr></thead><tbody>';
+    html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Månad</th><th class="num">Banken</th><th class="num">Bokfört</th><th class="num">Skillnad</th><th>Status</th></tr></thead><tbody>';
     manader.forEach(function (m) {
       var status;
       if (!m.antal) status = '<span class="faint">inga transaktioner inlästa</span>';
@@ -4037,9 +4210,9 @@ var VERSIONER = [
       else if (m.skillnad === 0 && !m.obokforda) status = '<span class="ok">stämmer</span>';
       else if (m.obokforda) status = '<span class="fel">' + antal(m.obokforda, 'transaktion', 'transaktioner') + ' ej bokförd' + (m.obokforda === 1 ? '' : 'a') + '</span>';
       else status = '<span class="fel">skiljer</span>';
-      html += '<tr><td>' + esc(manadsnamn(m.manad)) + (m.datum ? '<div class="faint">saldo ' + esc(m.datum) + '</div>' : '') + '</td>' +
-        '<td class="num">' + (m.bankSaldo != null ? kr(m.bankSaldo) : '') + '</td><td class="num">' + (m.bokfortSaldo != null ? kr(m.bokfortSaldo) : '') + '</td>' +
-        '<td class="num' + (m.skillnad ? ' fel' : '') + '">' + (m.skillnad != null ? kr(m.skillnad) : '') + '</td><td>' + status + '</td></tr>';
+      html += '<tr><td><strong>' + esc(manadsnamn(m.manad)) + '</strong>' + (m.datum ? '<div class="faint">saldo ' + esc(m.datum) + '</div>' : '') + '</td>' +
+        '<td class="num"' + (m.bankSaldo != null ? ' data-etikett="Banken">' + kr(m.bankSaldo) : '>') + '</td><td class="num"' + (m.bokfortSaldo != null ? ' data-etikett="Bokfört">' + kr(m.bokfortSaldo) : '>') + '</td>' +
+        '<td class="num' + (m.skillnad ? ' fel' : '') + '"' + (m.skillnad != null ? ' data-etikett="Skillnad">' + kr(m.skillnad) : '>') + '</td><td data-etikett="Status">' + status + '</td></tr>';
     });
     html += '</tbody></table></div>';
     var a = K.bankavvikelser(ar);
@@ -4112,7 +4285,7 @@ var VERSIONER = [
       '<div class="grid2"><div><label for="amOrt">Ort</label><input id="amOrt" data-arsmote="ort" value="' + esc(a.ort) + '"' + lasbar + '></div>' +
       '<div><label for="amDatum">Datum för underskrift</label><input id="amDatum" type="date" data-arsmote="datum" value="' + esc(a.datum) + '"' + lasbar + '></div></div>' +
       '<label for="amUnderskrifter">Styrelsen (ett namn per rad, gärna med roll)</label><textarea id="amUnderskrifter" data-arsmote="underskrifter" rows="4" placeholder="Förnamn Efternamn, ordförande"' + lasbar + '>' + esc(a.underskrifter) + '</textarea>' +
-      '<div class="row" style="margin-top:12px"><button class="btn" data-action="skriv-ut-arsmote">Förhandsgranska och skriv ut</button></div></div>';
+      '<div class="row" style="margin-top:12px"><button class="btn" data-action="skriv-ut-arsmote">' + (arIosHemskarm() ? 'Förhandsgranska och dela' : 'Förhandsgranska och skriv ut') + '</button></div></div>';
     if (odNu.visaArsmote) {
       // Ny PDF varje gång förhandsvisningen öppnas, så att ändringar i texterna kommer med.
       var amNyckel = 'arsmote-' + store.aktivt + '-' + (odNu.arsmoteVersion || 0) + '|' + arsmoteFilnamn(ar);
