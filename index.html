@@ -345,6 +345,16 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.34', datum: '2026-11-22',
+    nyheter: [
+      'Utläggsredovisning under Bokföring, Läs in: välj vem som lagt ut, kryssa för kvittona och skriv den ersättningsbara delen och vad som är privat.',
+      'Utbetalningen matchas mot kvittona i redovisningen, även när kvittona är äldre än 60 dagar och när redovisningen betalas ut i flera delar. Står personens namn i bankens text väljs hens kvitton först.',
+      'Verifikationen får texten "Utlägg …" och kvittona som underlag, med var sitt konto.',
+      'Sammanställningen kan laddas ner som PDF, med kvittobelopp, privat del, ersättning och rad för attest.',
+      'Översikten visar utlägg som väntar på utbetalning.'
+    ]
+  },
+  {
     version: '1.33', datum: '2026-11-22',
     nyheter: [
       'Flera bankkonton: under Bokföring, Kontoplan anger du föreningens bankkonton, till exempel 1930 för företagskontot och 1940 för placeringskontot, med namn och kontonummer.',
@@ -1762,10 +1772,72 @@ var VERSIONER = [
     });
   }
 
+  // ---------- Utläggsredovisningar ----------
+  // Kvitton som någon betalat själv och som föreningen ersätter. Varje kvitto får den ersättningsbara delen som belopp;
+  // kvittots belopp och det som är privat sparas. ar.utlagg: [{ id, person, text, datum, poster: [underlagId] }].
+
+  function skapaUtlagg(ar, uppgifter) {
+    var person = String(uppgifter.person || '').trim();
+    if (!person) throw BokforingsFel('Ange vem som har lagt ut.');
+    var poster = uppgifter.poster || [];
+    if (!poster.length) throw BokforingsFel('Välj minst ett kvitto.');
+    var id = uppgifter.id || ('ut' + ((ar.utlagg || []).length + 1) + '-' + Date.now().toString(36));
+    var andringar = {};
+    poster.forEach(function (p) {
+      var u = (ar.underlag || []).find(function (x) { return x.id === p.underlagId; });
+      if (!u) throw BokforingsFel('Kvittot finns inte.');
+      if (u.verifikation != null) throw BokforingsFel((u.motpart || u.filnamn) + ' är redan bokfört.');
+      if (u.utlagg) throw BokforingsFel((u.motpart || u.filnamn) + ' finns redan i en utläggsredovisning.');
+      if (u.riktning === 'intakt') throw BokforingsFel((u.motpart || u.filnamn) + ' är en intäkt, inte ett utlägg.');
+      var kvitto = u.belopp;
+      var belopp = p.belopp == null ? kvitto : p.belopp;
+      if (!arHeltal(belopp) || belopp <= 0) throw BokforingsFel('Det ersättningsbara beloppet för ' + (u.motpart || u.filnamn) + ' måste vara större än noll.');
+      if (belopp > kvitto) throw BokforingsFel('Det ersättningsbara beloppet för ' + (u.motpart || u.filnamn) + ' är större än kvittot.');
+      andringar[u.id] = { utlagg: id, utlaggPerson: person, kvittobelopp: kvitto, belopp: belopp, privat: String(p.privat || '').trim(),
+        beskrivning: p.beskrivning != null ? String(p.beskrivning).trim() : u.beskrivning };
+    });
+    var utlagg = { id: id, person: person, text: String(uppgifter.text || '').trim(), datum: uppgifter.datum || null, poster: poster.map(function (p) { return p.underlagId; }) };
+    return {
+      ar: Object.assign({}, ar, {
+        underlag: ar.underlag.map(function (u) { return andringar[u.id] ? Object.assign({}, u, andringar[u.id]) : u; }),
+        utlagg: (ar.utlagg || []).concat([utlagg])
+      }),
+      utlagg: utlagg
+    };
+  }
+
+  // Tar bort redovisningen, om inget av kvittona är utbetalt. Kvittona får tillbaka sina belopp.
+  function taBortUtlagg(ar, id) {
+    var x = (ar.utlagg || []).find(function (a) { return a.id === id; });
+    if (!x) throw BokforingsFel('Utläggsredovisningen finns inte.');
+    if ((ar.underlag || []).some(function (u) { return u.utlagg === id && u.verifikation != null; })) throw BokforingsFel('Något av kvittona är redan utbetalt och bokfört.');
+    return Object.assign({}, ar, {
+      underlag: ar.underlag.map(function (u) {
+        if (u.utlagg !== id) return u;
+        var n = Object.assign({}, u, { belopp: u.kvittobelopp != null ? u.kvittobelopp : u.belopp });
+        ['utlagg', 'utlaggPerson', 'kvittobelopp', 'privat'].forEach(function (k) { delete n[k]; });
+        return n;
+      }),
+      utlagg: ar.utlagg.filter(function (a) { return a.id !== id; })
+    });
+  }
+
+  function utlaggStatus(ar, id) {
+    var x = (ar.utlagg || []).find(function (a) { return a.id === id; });
+    if (!x) return null;
+    var poster = x.poster.map(function (uid) { return (ar.underlag || []).find(function (u) { return u.id === uid; }); }).filter(Boolean);
+    var summa = poster.reduce(function (s, u) { return s + u.belopp; }, 0);
+    var betalt = poster.filter(function (u) { return u.verifikation != null; }).reduce(function (s, u) { return s + u.belopp; }, 0);
+    var verifikationer = poster.map(function (u) { return u.verifikation; }).filter(function (v, i, l) { return v != null && l.indexOf(v) === i; }).sort(function (a, b) { return a - b; });
+    return { utlagg: x, poster: poster, summa: summa, kvittosumma: poster.reduce(function (s, u) { return s + (u.kvittobelopp != null ? u.kvittobelopp : u.belopp); }, 0),
+      betalt: betalt, kvar: summa - betalt, verifikationer: verifikationer, klar: summa === betalt };
+  }
+
   function taBortUnderlag(ar, id) {
     var u = (ar.underlag || []).find(function (x) { return x.id === id; });
     if (!u) throw BokforingsFel('Underlaget finns inte.');
     if (u.verifikation != null) throw BokforingsFel('Underlaget hör till verifikation ' + u.verifikation + ' och kan inte tas bort.');
+    if (u.utlagg) throw BokforingsFel('Underlaget ingår i en utläggsredovisning. Ta bort redovisningen först.');
     return Object.assign({}, ar, { underlag: ar.underlag.filter(function (x) { return x.id !== id; }) });
   }
 
@@ -1782,6 +1854,8 @@ var VERSIONER = [
   function inomFonster(u, bankrad) {
     var fran = u.datum || u.forfallodatum;
     if (!fran) return true;
+    // Kvitton i en utläggsredovisning betalas ofta ut långt senare: upp till ett år.
+    if (u.utlagg) return bankrad.datum >= laggTillDagar(fran, -7) && bankrad.datum <= laggTillDagar(fran, 366);
     var till = u.forfallodatum && u.forfallodatum > fran ? u.forfallodatum : fran;
     return bankrad.datum >= laggTillDagar(fran, -7) && bankrad.datum <= laggTillDagar(till, 60);
   }
@@ -1793,6 +1867,7 @@ var VERSIONER = [
     if (u.fakturanummer && String(u.fakturanummer).length >= 4 && bt.indexOf(String(u.fakturanummer).replace(/\s/g, '')) >= 0) p += 500;
     var mal = u.forfallodatum || u.datum;
     if (mal) p -= Math.abs(dagarMellan(mal, bankrad.datum));
+    if (u.utlaggPerson && namnIText(u.utlaggPerson, bankrad.text + ' ' + bankrad.referens)) p += 400;
     return p;
   }
 
@@ -1802,9 +1877,16 @@ var VERSIONER = [
     var kandidater = oppnaUnderlag(ar).filter(function (u) {
       return inomFonster(u, bankrad) && (bankbelopp(u) < 0) === (bankrad.belopp < 0);
     });
+    // Står utläggspersonens namn i bankens text prövas hens utläggsredovisning först.
+    var text = bankrad.text + ' ' + bankrad.referens;
+    var namngiven = utlaggSomMatchar(kandidater.filter(function (u) { return u.utlagg && namnIText(u.utlaggPerson, text); }), bankrad);
+    if (namngiven) return namngiven;
     var exakta = kandidater.filter(function (u) { return bankbelopp(u) === bankrad.belopp; })
       .sort(function (a, b) { return matchpoang(b, bankrad) - matchpoang(a, bankrad); });
     if (exakta.length) return [exakta[0].id];
+    // En utläggsredovisning: hela eller en del av den (en utbetalning kan gälla några av kvittona).
+    var iUtlagg = utlaggSomMatchar(kandidater, bankrad);
+    if (iUtlagg) return iUtlagg;
     var narmast = kandidater.filter(function (u) { return Math.abs(u.belopp) < Math.abs(bankrad.belopp); })
       .sort(function (a, b) { return matchpoang(b, bankrad) - matchpoang(a, bankrad); }).slice(0, 12);
     for (var storlek = 2; storlek <= 4; storlek++) {
@@ -1812,6 +1894,40 @@ var VERSIONER = [
       if (hit) return hit.map(function (u) { return u.id; });
     }
     return [];
+  }
+
+  // Ett namn (t.ex. apelido) som eget ord i bankens text, utan hänsyn till skiftläge.
+  function namnIText(namn, text) {
+    var n = String(namn || '').trim().toLowerCase();
+    if (n.length < 3) return false;
+    return (' ' + String(text || '').toLowerCase().replace(/[^0-9a-zåäöéü]+/g, ' ') + ' ').indexOf(' ' + n.split(/\s+/)[0] + ' ') >= 0 ||
+      String(text || '').toLowerCase().replace(/\s/g, '').indexOf(n.replace(/\s/g, '')) >= 0;
+  }
+
+  // Kvitton i samma utläggsredovisning som tillsammans blir exakt bankbeloppet: helst alla, annars så många som möjligt.
+  // Redovisningar där personens namn står i bankens text provas först.
+  function utlaggSomMatchar(kandidater, bankrad) {
+    var grupper = {};
+    kandidater.forEach(function (u) { if (u.utlagg) (grupper[u.utlagg] = grupper[u.utlagg] || []).push(u); });
+    var ids = Object.keys(grupper).sort(function (a, b) {
+      var na = namnIText(grupper[a][0].utlaggPerson, bankrad.text + ' ' + bankrad.referens) ? 1 : 0;
+      var nb = namnIText(grupper[b][0].utlaggPerson, bankrad.text + ' ' + bankrad.referens) ? 1 : 0;
+      return nb - na;
+    });
+    for (var g = 0; g < ids.length; g++) {
+      // Flest kvitton vinner; vid lika antal de som ligger närmast varandra i tid (inköp till samma tillfälle).
+      var lista = grupper[ids[g]].slice(0, 16), bast = null, bastSpann = 0;
+      for (var mask = 1; mask < (1 << lista.length); mask++) {
+        var summa = 0, val = [], datum = [];
+        for (var i = 0; i < lista.length; i++) if (mask & (1 << i)) { summa += bankbelopp(lista[i]); val.push(lista[i].id); if (lista[i].datum) datum.push(lista[i].datum); }
+        if (summa !== bankrad.belopp) continue;
+        datum.sort();
+        var spann = datum.length ? dagarMellan(datum[0], datum[datum.length - 1]) : 0;
+        if (!bast || val.length > bast.length || (val.length === bast.length && spann < bastSpann)) { bast = val; bastSpann = spann; }
+      }
+      if (bast) return bast;
+    }
+    return null;
   }
 
   function sokKombination(lista, storlek, mal) {
@@ -1855,7 +1971,9 @@ var VERSIONER = [
       kalla = 'underlag';
     } else if (us.length && summaUnderlag === bankrad.belopp) {
       us.forEach(function (u) { rader.push({ konto: giltigt(u.foreslagetKonto) || giltigt(regelKonto), belopp: -bankbelopp(u) }); });
-      text = us.length === 1
+      var person = us[0].utlaggPerson && us.every(function (u) { return u.utlagg === us[0].utlagg; }) ? us[0].utlaggPerson : null;
+      text = person ? 'Utlägg ' + person + ': ' + us.map(function (u) { return u.beskrivning || u.motpart; }).filter(function (t, i, l) { return t && l.indexOf(t) === i; }).join(', ')
+        : us.length === 1
         ? [us[0].motpart, us[0].beskrivning].filter(Boolean).join(': ')
         : bankrad.text + ' (' + us.length + ' underlag)';
       kalla = 'underlag';
@@ -3891,6 +4009,9 @@ var VERSIONER = [
     balansrakning: balansrakning,
     nastaAr: nastaAr,
     arFranArkiv: arFranArkiv,
+    skapaUtlagg: skapaUtlagg,
+    taBortUtlagg: taBortUtlagg,
+    utlaggStatus: utlaggStatus,
     overforingFor: overforingFor,
     bankkontonIAr: bankkontonIAr,
     kontoForUtdrag: kontoForUtdrag,
@@ -6921,7 +7042,8 @@ var VERSIONER = [
       html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Datum</th><th>Underlag</th><th class="num">Belopp</th><th>Konto</th><th></th></tr></thead><tbody>';
       oppnaU.forEach(function (u) {
         html += '<tr><td class="nowrap" data-etikett="Datum">' + esc(u.datum || '') + (u.forfallodatum ? '<div class="faint">förfaller ' + esc(u.forfallodatum) + '</div>' : '') + '</td>' +
-          '<td data-etikett="Underlag"><div>' + esc(u.motpart) + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') + underlagChip(u) +
+          '<td data-etikett="Underlag"><div>' + esc(u.motpart) + (u.utlagg ? ' <span class="tag">utlägg ' + esc(u.utlaggPerson) + '</span>' : '') + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') +
+          (u.utlagg && u.kvittobelopp !== u.belopp ? '<div class="faint">Kvitto ' + kr(u.kvittobelopp) + ' kr' + (u.privat ? ', privat: ' + esc(u.privat) : '') + '</div>' : '') + underlagChip(u) +
           (u.valuta ? '<div class="faint">' + esc(u.valuta) + ' ' + (u.originalbelopp != null ? kr(u.originalbelopp) : '') + '</div>' : '') + '</div></td>' +
           '<td class="num" data-etikett="Belopp"><div><input class="num" style="width:110px" data-underlag="belopp" data-id="' + esc(u.id) + '" value="' + (u.belopp ? kr(u.belopp) : '') + '" aria-label="Belopp i kronor">' +
           '<div class="faint">' + (u.riktning === 'intakt' ? 'intäkt' : 'utgift') + '</div></div></td>' +
@@ -6932,6 +7054,7 @@ var VERSIONER = [
       });
       html += '</tbody></table></div>';
     }
+    html += vyUtlagg(ar);
 
     K.bankkontonIAr(ar).forEach(function (konto) {
     var avst = K.bankavstamning(ar, konto);
@@ -7709,6 +7832,12 @@ var VERSIONER = [
   };
 
   var HJALP = {
+    utlagg: {
+      rubrik: 'Utlägg',
+      vad: 'När någon i föreningen betalat något själv, till exempel mat till en workshop, och föreningen ersätter det.',
+      varfor: 'Kvittot är underlag för föreningens kostnad. Ofta ska bara en del ersättas, och ibland betalas redovisningen ut i flera omgångar. Sammanställningen visar revisorn vad som ersattes och vad som var privat.',
+      gor: 'Läs in kvittona, välj Ny utläggsredovisning, kryssa för kvittona och skriv den ersättningsbara delen där det behövs. När utbetalningen syns på kontoutdraget föreslår appen kvittona som hör till den, även om de är gamla. Föreningen är inte momsregistrerad, så hela beloppet med moms är kostnaden.'
+    },
     bankkonton: {
       rubrik: 'Bankkonton',
       vad: 'Varje bankkonto får ett eget konto i bokföringen, till exempel 1930 för företagskontot och 1940 för placeringskontot.',
@@ -8370,6 +8499,8 @@ var VERSIONER = [
       else {
         var bank = K.oppnaBankrader(ar).length;
         if (bank) gor += rad(antal(bank, 'banktransaktion', 'banktransaktioner') + ' att bokföra.', '<button class="btn btn-small" data-vy="inlasning">Läs in</button>');
+        var vantarUt = (ar.utlagg || []).map(function (x) { return K.utlaggStatus(ar, x.id); }).filter(function (st) { return !st.klar; });
+        if (vantarUt.length) gor += rad(antal(vantarUt.length, 'utläggsredovisning väntar', 'utläggsredovisningar väntar') + ' på utbetalning (' + kr(vantarUt.reduce(function (s, st) { return s + st.kvar; }, 0)) + ' kr): ' + esc(vantarUt.map(function (st) { return st.utlagg.person; }).join(', ')) + '.', '<button class="btn btn-secondary btn-small" data-vy="inlasning">Läs in</button>');
         var u = K.oppnaUnderlag(ar).length;
         if (u) gor += rad(antal(u, 'underlag väntar', 'underlag väntar') + ' på betalning.', '<button class="btn btn-secondary btn-small" data-vy="inlasning">Visa</button>');
         var fel = [].concat.apply([], K.bankkontonIAr(ar).map(function (k) { return K.bankavstamningPerManad(ar, k).filter(function (m) { return m.skillnad; }); }));
@@ -8892,6 +9023,107 @@ var VERSIONER = [
       await sparaFil(ref.lokalId, fil, namn);
     }
     await styrOperation(function (d) { return K.registreraPapper(d, m.id, ref, new Date().toISOString()); });
+  }
+
+  // ---------- Utlägg ----------
+  var utlaggUtkast = null;
+
+  function utlaggPersoner() {
+    var namn = {};
+    if (K.registerHarData(reg())) sorteradeMedlemmar().forEach(function (m) { namn[K.visaNamn(m)] = true; });
+    if (odNu.roller) odNu.roller.personer.forEach(function (p) { namn[K.visaPerson(odNu.roller, p.epost)] = true; });
+    return Object.keys(namn).sort();
+  }
+
+  function utlaggUtkastSumma(ar) {
+    var s = 0, k = 0;
+    Object.keys(utlaggUtkast.val).forEach(function (id) {
+      var v = utlaggUtkast.val[id], u = ar.underlag.find(function (x) { return x.id === id; });
+      if (!v.med || !u) return;
+      k += u.belopp;
+      try { s += v.belopp.trim() ? Math.abs(K.parseBelopp(v.belopp)) : u.belopp; } catch (e) { /* ofullständigt belopp */ }
+    });
+    return { ersatts: s, kvitton: k };
+  }
+
+  function vyUtlagg(ar) {
+    var lasbar = lasLage() || ar.grovkopia;
+    var html = '<h2>Utlägg' + hjalp('utlagg') + '</h2>';
+    if (utlaggUtkast && !lasbar) {
+      var kvitton = K.oppnaUnderlag(ar).filter(function (u) { return u.riktning !== 'intakt' && !u.utlagg; });
+      html += '<div class="card arsmote-form"><h3 style="margin-top:0">Ny utläggsredovisning</h3>' +
+        '<datalist id="utlaggPersoner">' + utlaggPersoner().map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>' +
+        '<div class="grid2"><div><label for="utPerson">Vem har lagt ut?</label><input id="utPerson" list="utlaggPersoner" data-ut-f="person" value="' + esc(utlaggUtkast.person) + '" placeholder="Apelido eller namn"></div>' +
+        '<div><label for="utText">Avser</label><input id="utText" data-ut-f="text" value="' + esc(utlaggUtkast.text) + '" placeholder="T.ex. workshop i november"></div></div>' +
+        '<p class="faint">Kryssa för kvittona som ingår. Ska bara en del ersättas skriver du det ersättningsbara beloppet och vad som är privat. Läs in kvittona först, så visas de här.</p>' +
+        (kvitton.length ? '<div class="scroll"><table class="kortlista"><thead><tr><th></th><th>Datum</th><th>Kvitto</th><th class="num">Kvitto</th><th class="num">Ersätts</th><th>Privat</th></tr></thead><tbody>' + kvitton.map(function (u) {
+          var v = utlaggUtkast.val[u.id] || {};
+          return '<tr><td><input type="checkbox" style="width:auto" data-ut="med" data-id="' + esc(u.id) + '"' + (v.med ? ' checked' : '') + ' aria-label="Ta med"></td>' +
+            '<td data-etikett="Datum">' + esc(u.datum || '') + '</td><td data-etikett="Kvitto">' + esc(u.motpart || u.filnamn) + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') + '</td>' +
+            '<td class="num" data-etikett="Kvitto">' + kr(u.belopp) + '</td>' +
+            '<td class="num" data-etikett="Ersätts"><input class="num" style="width:110px" data-ut="belopp" data-id="' + esc(u.id) + '" value="' + esc(v.belopp || '') + '" placeholder="' + esc(kr(u.belopp)) + '" inputmode="decimal" aria-label="Ersätts"></td>' +
+            '<td data-etikett="Privat"><input data-ut="privat" data-id="' + esc(u.id) + '" value="' + esc(v.privat || '') + '" placeholder="T.ex. sminkspegel" style="min-width:140px" aria-label="Privat"></td></tr>';
+        }).join('') + '</tbody></table></div>' : '<p class="faint">Inga kvitton väntar. Läs in kvittona under Läs in ovan.</p>') +
+        '<p id="utSumma" style="margin:8px 0"></p>' +
+        '<div class="row"><button class="btn btn-small" data-action="utlagg-spara">Spara redovisningen</button><button class="btn btn-secondary btn-small" data-action="utlagg-avbryt">Avbryt</button></div></div>';
+    } else if (!lasbar) {
+      html += '<div class="row" style="margin-bottom:8px"><button class="btn btn-secondary btn-small" data-action="utlagg-ny">Ny utläggsredovisning</button>' +
+        '<span class="faint">När någon betalat själv och föreningen ersätter det. Utbetalningen kopplas till kvittona, även om de är gamla.</span></div>';
+    }
+    var lista = (ar.utlagg || []).slice().reverse();
+    if (!lista.length) return html + (utlaggUtkast ? '' : '<p class="muted">Inga utläggsredovisningar.</p>');
+    return html + lista.map(function (x) {
+      var st = K.utlaggStatus(ar, x.id);
+      var tag = st.klar ? '<span class="tag ok">utbetald</span>' : st.betalt ? '<span class="tag varning">delvis utbetald, ' + kr(st.kvar) + ' kr kvar</span>' : '<span class="tag">väntar på utbetalning</span>';
+      return '<div class="card"><div class="row" style="justify-content:space-between"><div><strong>' + esc(x.person) + '</strong>' + (x.text ? ' · ' + esc(x.text) : '') + ' ' + tag + '</div><div class="belopp">' + kr(st.summa) + '</div></div>' +
+        '<details><summary class="faint">' + antal(st.poster.length, 'kvitto', 'kvitton') + (st.kvittosumma !== st.summa ? ', kvitton ' + kr(st.kvittosumma) + ' kr, privat ' + kr(st.kvittosumma - st.summa) + ' kr' : '') +
+        (st.verifikationer.length ? ', ver ' + st.verifikationer.join(', ') : '') + '</summary><ul style="margin:6px 0">' + st.poster.map(function (u) {
+          return '<li>' + esc(u.datum || '') + ' ' + esc(u.beskrivning || u.motpart) + ': <strong>' + kr(u.belopp) + '</strong>' +
+            (u.kvittobelopp !== u.belopp ? ' <span class="faint">(kvitto ' + kr(u.kvittobelopp) + (u.privat ? ', privat: ' + esc(u.privat) : '') + ')</span>' : '') +
+            (u.verifikation != null ? ' <span class="tag ok">ver ' + u.verifikation + '</span>' : '') + '</li>';
+        }).join('') + '</ul></details>' +
+        '<div class="row" style="margin-top:6px"><button class="btn btn-secondary btn-small" data-action="utlagg-pdf" data-id="' + esc(x.id) + '">Sammanställning (PDF)</button>' +
+        (!lasbar && !st.betalt ? '<button class="btn btn-secondary btn-small" data-action="utlagg-bort" data-id="' + esc(x.id) + '">Ta bort</button>' : '') + '</div></div>';
+    }).join('');
+  }
+
+  async function skapaUtlaggPdf(ar, id) {
+    var st = K.utlaggStatus(ar, id), x = st.utlagg;
+    var doc = nyPdf(await laddaJsPdf());
+    var V = 18, H = 192, y, f = store.forening;
+    var logoH = ritaLogo(doc, V, 12, 18, 16);
+    y = 12 + (logoH ? logoH + 5 : 4);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(pt(f.namn || ''), V, y);
+    if (f.orgnr) { doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.text('Org.nr ' + pt(f.orgnr), V, y + 4.5); }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor.apply(doc, SKIFFER); doc.text('Utläggsredovisning', H, 20, { align: 'right' });
+    doc.setTextColor(26, 26, 26); doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    y = Math.max(y + 12, 40);
+    doc.text(pt('Utlägg av: ' + x.person), V, y); y += 5.5;
+    if (x.text) { doc.text(pt('Avser: ' + x.text), V, y); y += 5.5; }
+    y += 4;
+    var kol = [V, 42, 128, 156, H];
+    doc.setFontSize(7.5); doc.setTextColor.apply(doc, GRA);
+    ['DATUM', 'KVITTO', 'KVITTO, KR', 'PRIVAT, KR', 'ERSÄTTS, KR'].forEach(function (t, i) { doc.text(t, kol[i], y, { align: i >= 2 ? 'right' : 'left' }); });
+    doc.setTextColor(26, 26, 26); doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.3); doc.line(V, y + 1.5, H, y + 1.5); y += 6;
+    doc.setFontSize(9);
+    st.poster.forEach(function (u) {
+      var text = doc.splitTextToSize(pt((u.motpart || '') + (u.beskrivning ? ', ' + u.beskrivning : '') + (u.privat ? ' (privat: ' + u.privat + ')' : '') + (u.verifikation != null ? ' · ver ' + u.verifikation : '')), 70);
+      if (y + text.length * 4 > 275) { doc.addPage(); y = 20; }
+      doc.text(pt(u.datum || ''), kol[0], y); doc.text(text, kol[1], y);
+      var kvitto = u.kvittobelopp != null ? u.kvittobelopp : u.belopp;
+      doc.text(pt(kr(kvitto)), kol[2], y, { align: 'right' }); doc.text(kvitto !== u.belopp ? pt(kr(kvitto - u.belopp)) : '', kol[3], y, { align: 'right' }); doc.text(pt(kr(u.belopp)), kol[4], y, { align: 'right' });
+      y += text.length * 4 + 1.5;
+    });
+    doc.line(V, y - 2.5, H, y - 2.5); y += 2;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Summa', kol[1], y); doc.text(pt(kr(st.kvittosumma)), kol[2], y, { align: 'right' }); doc.text(pt(kr(st.kvittosumma - st.summa)), kol[3], y, { align: 'right' }); doc.text(pt(kr(st.summa)), kol[4], y, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); y += 10;
+    doc.text(pt(st.klar ? 'Utbetald i sin helhet' + (st.verifikationer.length ? ' (verifikation ' + st.verifikationer.join(', ') + ').' : '.') : st.betalt ? 'Utbetalt ' + kr(st.betalt) + ' kr, kvar att betala ' + kr(st.kvar) + ' kr.' : 'Ej utbetald.'), V, y);
+    y += 22;
+    doc.line(V, y, V + 70, y); doc.line(110, y, 180, y);
+    doc.setFontSize(8); doc.setTextColor.apply(doc, GRA); doc.text(pt(x.person), V, y + 4.5); doc.text('Attesteras av', 110, y + 4.5); doc.setTextColor(26, 26, 26);
+    doc.setFontSize(7.5); doc.setTextColor.apply(doc, GRA); doc.text(pt('Utskriven ' + idag()), V, 290); doc.setTextColor(26, 26, 26);
+    return doc.output('blob');
   }
 
   // ---------- Övningsläge ----------
@@ -9909,7 +10141,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport],[data-grupp]');
@@ -9937,6 +10169,16 @@ var VERSIONER = [
   document.addEventListener('input', function (e) {
     var t = e.target;
     if (t.dataset.mf || t.dataset.pf || t.dataset.bf || t.dataset.ff) { try { styrInput(t); } catch (err) { visa(err.message, true); } return; }
+    if (utlaggUtkast && (t.dataset.ut || t.dataset.utF)) {
+      if (t.dataset.utF) utlaggUtkast[t.dataset.utF] = t.value;
+      else {
+        var uv = utlaggUtkast.val[t.dataset.id] = utlaggUtkast.val[t.dataset.id] || { med: false, belopp: '', privat: '' };
+        if (t.dataset.ut === 'med') uv.med = t.checked; else { uv[t.dataset.ut] = t.value; if (t.value) uv.med = true; var box = document.querySelector('[data-ut="med"][data-id="' + t.dataset.id + '"]'); if (box) box.checked = uv.med; }
+      }
+      var us = utlaggUtkastSumma(aktivt()), el = document.getElementById('utSumma');
+      if (el) el.innerHTML = us.kvitton ? 'Ersätts <strong>' + kr(us.ersatts) + ' kr</strong>' + (us.kvitton !== us.ersatts ? ' av kvitton på ' + kr(us.kvitton) + ' kr (privat ' + kr(us.kvitton - us.ersatts) + ' kr)' : '') + '.' : '';
+      return;
+    }
     if (t.dataset.u) { utkast[t.dataset.u] = t.value; uppdateraUtkastStatus(); }
     if (t.dataset.rad != null && t.dataset.f) { utkast.rader[Number(t.dataset.rad)][t.dataset.f] = t.value; uppdateraUtkastStatus(); }
     if (t.dataset.inkorg) {
@@ -10856,6 +11098,31 @@ var VERSIONER = [
       vy = 'ny';
       meddelande = null;
       render();
+    },
+    'utlagg-ny': function () { utlaggUtkast = { person: '', text: '', val: {} }; render(); },
+    'utlagg-avbryt': function () { utlaggUtkast = null; render(); },
+    'utlagg-spara': function () {
+      var ar = aktivt();
+      var poster = Object.keys(utlaggUtkast.val).filter(function (id) { return utlaggUtkast.val[id].med; }).map(function (id) {
+        var v = utlaggUtkast.val[id];
+        var belopp;
+        try { belopp = v.belopp.trim() ? Math.abs(K.parseBelopp(v.belopp)) : null; } catch (e) { throw new Error('Beloppet "' + v.belopp + '" går inte att läsa.'); }
+        return { underlagId: id, belopp: belopp, privat: v.privat };
+      });
+      var res = K.skapaUtlagg(ar, { person: utlaggUtkast.person, text: utlaggUtkast.text, datum: idag(), poster: poster });
+      setAktivt(res.ar);
+      utlaggUtkast = null;
+      var st = K.utlaggStatus(res.ar, res.utlagg.id);
+      visa('Utläggsredovisningen för ' + res.utlagg.person + ' är sparad: ' + kr(st.summa) + ' kr. När utbetalningen syns på kontoutdraget kopplas den till kvittona.');
+    },
+    'utlagg-bort': function (t) {
+      if (!window.confirm('Ta bort utläggsredovisningen? Kvittona finns kvar med sina ursprungliga belopp.')) return;
+      setAktivt(K.taBortUtlagg(aktivt(), t.dataset.id));
+      visa('Utläggsredovisningen är borttagen.');
+    },
+    'utlagg-pdf': function (t) {
+      var ar = aktivt(), x = (ar.utlagg || []).find(function (a) { return a.id === t.dataset.id; });
+      skapaUtlaggPdf(ar, t.dataset.id).then(function (blob) { laddaNer(K.sakertNamn('Utläggsredovisning ' + x.person + ' ' + (x.datum || idag()) + '.pdf'), blob, 'application/pdf'); }, function (err) { visa(err.message, true); });
     },
     'bank-ny': function () {
       var anvanda = bankkonton().map(function (b) { return b.konto; });

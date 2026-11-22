@@ -134,6 +134,12 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Överföringar mellan egna konton (samma belopp, omvänt tecken, högst tre dagar ifrån) föreslås som en verifikation, och raden på det andra utdraget kopplas till den.
 - Bankavstämning per konto i Läs in, rapporten, Översikt och bokslutet.
 
+## Utlägg (från version 1.34)
+
+- Utläggsredovisning under Läs in: person, kvitton, ersättningsbar del och privat del per kvitto. Kvittots belopp sparas, och det ersättningsbara blir underlagets belopp.
+- Utbetalningen matchas mot redovisningens kvitton i upp till ett år, hela eller i delar (flest kvitton, därefter närmast i tid), och personens namn i banktexten prioriteras. Verifikationen får texten "Utlägg …" och ett konto per kvitto.
+- Sammanställning som PDF med kvittobelopp, privat del, ersättning och rad för attest. Översikten visar utlägg som väntar.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
