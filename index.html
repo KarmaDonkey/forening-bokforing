@@ -345,6 +345,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.37', datum: '2026-11-22',
+    nyheter: [
+      'En utbetalning som gäller flera kvitton i en utläggsredovisning matchas även om den är avrundad, med högst 1 kr. Skillnaden bokförs på 3740 Öres- och kronutjämning, som läggs till i kontoplanen om det behövs.',
+      'Kontot syns vid varje kvitto i utläggsredovisningarna.'
+    ]
+  },
+  {
     version: '1.36', datum: '2026-11-22',
     nyheter: [
       'Förslag på konteringsregler kan avfärdas med ett skäl, till exempel "Personnamn, kontera för hand". De försvinner ur listan och föreslås inte igen.',
@@ -874,7 +881,8 @@ var VERSIONER = [
 
   function kontonamn(ar, nr) {
     var k = ar.kontoplan.find(function (x) { return x.nr === nr; });
-    return k ? k.namn : '(okänt konto)';
+    // Avrundningskontot läggs till automatiskt när det bokförs första gången.
+    return k ? k.namn : nr === AVRUNDNINGSKONTO.nr ? AVRUNDNINGSKONTO.namn : '(okänt konto)';
   }
 
   function sorteraKonton(lista) {
@@ -1967,7 +1975,15 @@ var VERSIONER = [
       var hit = sokKombination(narmast, storlek, bankrad.belopp);
       if (hit) return hit.map(function (u) { return u.id; });
     }
-    return [];
+    // Till sist: flera kvitton i en utläggsredovisning där utbetalningen är avrundad (högst 1 kr).
+    return utlaggSomMatchar(kandidater, bankrad, AVRUNDNING_MAX) || [];
+  }
+
+  // Avrundning när flera kvitton i samma utläggsredovisning betalats med ett något annat belopp (ören, 0 om ingen).
+  function utlaggAvrundning(us, bankrad) {
+    if (us.length < 2 || !us.every(function (u) { return u.utlagg; })) return 0;
+    var diff = us.reduce(function (s, u) { return s + bankbelopp(u); }, 0) - bankrad.belopp;
+    return diff && Math.abs(diff) <= AVRUNDNING_MAX ? diff : 0;
   }
 
   // Ett namn (t.ex. apelido) som eget ord i bankens text, utan hänsyn till skiftläge.
@@ -1980,7 +1996,11 @@ var VERSIONER = [
 
   // Kvitton i samma utläggsredovisning som tillsammans blir exakt bankbeloppet: helst alla, annars så många som möjligt.
   // Redovisningar där personens namn står i bankens text provas först.
-  function utlaggSomMatchar(kandidater, bankrad) {
+  // Största avrundning (ören) när en utbetalning gäller flera kvitton i en utläggsredovisning.
+  var AVRUNDNING_MAX = 100;
+  var AVRUNDNINGSKONTO = { nr: '3740', namn: 'Öres- och kronutjämning' };
+
+  function utlaggSomMatchar(kandidater, bankrad, tolerans) {
     var grupper = {};
     kandidater.forEach(function (u) { if (u.utlagg) (grupper[u.utlagg] = grupper[u.utlagg] || []).push(u); });
     var ids = Object.keys(grupper).sort(function (a, b) {
@@ -1990,14 +2010,16 @@ var VERSIONER = [
     });
     for (var g = 0; g < ids.length; g++) {
       // Flest kvitton vinner; vid lika antal de som ligger närmast varandra i tid (inköp till samma tillfälle).
-      var lista = grupper[ids[g]].slice(0, 16), bast = null, bastSpann = 0;
+      // Med tolerans: minst avvikelse först, sedan som utan.
+      var lista = grupper[ids[g]].slice(0, 16), bast = null, bastSpann = 0, bastDiff = 0;
       for (var mask = 1; mask < (1 << lista.length); mask++) {
         var summa = 0, val = [], datum = [];
         for (var i = 0; i < lista.length; i++) if (mask & (1 << i)) { summa += bankbelopp(lista[i]); val.push(lista[i].id); if (lista[i].datum) datum.push(lista[i].datum); }
-        if (summa !== bankrad.belopp) continue;
+        var diff = Math.abs(summa - bankrad.belopp);
+        if (diff > (tolerans || 0) || (diff && val.length < 2)) continue;
         datum.sort();
         var spann = datum.length ? dagarMellan(datum[0], datum[datum.length - 1]) : 0;
-        if (!bast || val.length > bast.length || (val.length === bast.length && spann < bastSpann)) { bast = val; bastSpann = spann; }
+        if (!bast || diff < bastDiff || (diff === bastDiff && (val.length > bast.length || (val.length === bast.length && spann < bastSpann)))) { bast = val; bastSpann = spann; bastDiff = diff; }
       }
       if (bast) return bast;
     }
@@ -2038,18 +2060,21 @@ var VERSIONER = [
     var rader = [{ konto: bankrad.konto, belopp: bankrad.belopp }];
     var text, kalla, kommentar = '', motrad;
     var summaUnderlag = us.reduce(function (s, u) { return s + bankbelopp(u); }, 0);
+    var avrundning = utlaggAvrundning(us, bankrad);
     if (us.length === 1 && opt && opt.ungefar && summaUnderlag !== bankrad.belopp) {
       // Ett underlag som troligen hör hit men vars belopp skiljer: banken avgör beloppet.
       rader.push({ konto: giltigt(us[0].foreslagetKonto) || giltigt(regelKonto), belopp: -bankrad.belopp });
       text = [us[0].motpart, us[0].beskrivning].filter(Boolean).join(': ');
       kalla = 'underlag';
-    } else if (us.length && summaUnderlag === bankrad.belopp) {
+    } else if (us.length && (summaUnderlag === bankrad.belopp || avrundning)) {
       us.forEach(function (u) { rader.push({ konto: giltigt(u.foreslagetKonto) || giltigt(regelKonto), belopp: -bankbelopp(u) }); });
+      if (avrundning) rader.push({ konto: AVRUNDNINGSKONTO.nr, belopp: avrundning });
       var person = us[0].utlaggPerson && us.every(function (u) { return u.utlagg === us[0].utlagg; }) ? us[0].utlaggPerson : null;
       text = person ? 'Utlägg ' + person + ': ' + us.map(function (u) { return u.beskrivning || u.motpart; }).filter(function (t, i, l) { return t && l.indexOf(t) === i; }).join(', ')
         : us.length === 1
         ? [us[0].motpart, us[0].beskrivning].filter(Boolean).join(': ')
         : bankrad.text + ' (' + us.length + ' underlag)';
+      if (avrundning) text += ' (avrundat ' + formatBelopp(Math.abs(avrundning)) + ' kr)';
       kalla = 'underlag';
     } else if (!us.length && (motrad = overforingFor(ar, bankrad))) {
       // Samma belopp med omvänt tecken på ett annat eget bankkonto: en överföring mellan kontona.
@@ -2074,7 +2099,9 @@ var VERSIONER = [
       underlagIds: us.map(function (u) { return u.id; }),
       underlagKommentar: kommentar,
       kalla: kalla,
-      komplett: rader.every(function (r) { return !!giltigt(r.konto); })
+      avrundning: kalla === 'underlag' ? avrundning : 0,
+      // Avrundningskontot läggs till i kontoplanen när verifikationen bokförs, om det saknas.
+      komplett: rader.every(function (r) { return !!giltigt(r.konto) || (avrundning && r.konto === AVRUNDNINGSKONTO.nr); })
     };
   }
 
@@ -2135,6 +2162,9 @@ var VERSIONER = [
       return u;
     });
     var namn = us.map(function (u) { return arkivnamn(nr, u.filnamn); });
+    if ((utkast.rader || []).some(function (r) { return r.konto === AVRUNDNINGSKONTO.nr; }) && !ar.kontoplan.some(function (k) { return k.nr === AVRUNDNINGSKONTO.nr; })) {
+      ar = laggTillKonto(ar, AVRUNDNINGSKONTO.nr, AVRUNDNINGSKONTO.namn);
+    }
     var res = bokfor(ar, Object.assign({}, utkast, { underlag: (utkast.underlag || []).concat(namn) }));
     var nyttAr = res.ar;
     if (bankrad) {
@@ -4085,6 +4115,7 @@ var VERSIONER = [
     arFranArkiv: arFranArkiv,
     STANDARDREGLER: STANDARDREGLER,
     forslagRegler: forslagRegler,
+    AVRUNDNINGSKONTO: AVRUNDNINGSKONTO,
     AVFARDA_SKAL: AVFARDA_SKAL,
     avfardaForslag: avfardaForslag,
     angraAvfardat: angraAvfardat,
@@ -5931,7 +5962,7 @@ var VERSIONER = [
         f.avgift = a;
       } catch (e) { f.avgiftFel = e.fel ? e.fel.join(' ') : e.message; if (a.manuell) f.rader = [f.rader[0], { konto: '', belopp: -rad.belopp }]; }
     }
-    f.komplett = f.rader.every(function (r) { return ar.kontoplan.some(function (k) { return k.nr === r.konto; }); });
+    f.komplett = f.rader.every(function (r) { return ar.kontoplan.some(function (k) { return k.nr === r.konto; }) || (f.avrundning && r.konto === K.AVRUNDNINGSKONTO.nr); });
     return f;
   }
 
@@ -9215,6 +9246,8 @@ var VERSIONER = [
         '<details><summary class="faint">' + antal(st.poster.length, 'kvitto', 'kvitton') + (st.kvittosumma !== st.summa ? ', kvitton ' + kr(st.kvittosumma) + ' kr, privat ' + kr(st.kvittosumma - st.summa) + ' kr' : '') +
         (st.verifikationer.length ? ', ver ' + st.verifikationer.join(', ') : '') + '</summary><ul style="margin:6px 0">' + st.poster.map(function (u) {
           return '<li>' + esc(u.datum || '') + ' ' + esc(u.beskrivning || u.motpart) + ': <strong>' + kr(u.belopp) + '</strong>' +
+            (u.foreslagetKonto ? ' · <span class="faint" title="' + esc(K.kontonamn(ar, u.foreslagetKonto) || '') + '">' + esc(u.foreslagetKonto) + ' ' + esc(K.kontonamn(ar, u.foreslagetKonto) || '') + '</span>'
+              : ' · <span class="fel">inget konto</span>') +
             (u.kvittobelopp !== u.belopp ? ' <span class="faint">(kvitto ' + kr(u.kvittobelopp) + (u.privat ? ', privat: ' + esc(u.privat) : '') + ')</span>' : '') +
             (u.verifikation != null ? ' <span class="tag ok">ver ' + u.verifikation + '</span>' : '') + '</li>';
         }).join('') + '</ul></details>' +
