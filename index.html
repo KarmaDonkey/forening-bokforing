@@ -156,6 +156,10 @@
   .tag.varning { color: var(--over); border-color: var(--over); }
   .ok { color: var(--good); }
   .fel { color: var(--over); }
+  #toast { position: fixed; left: 16px; right: 16px; bottom: 16px; margin: 0 auto; width: fit-content; max-width: 560px; transform: translateY(20px); z-index: 100;
+    background: var(--surface); color: var(--over); border: 1px solid var(--over); border-radius: 10px; padding: 12px 16px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+    font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; }
+  #toast.visas { opacity: 1; transform: none; pointer-events: auto; cursor: pointer; }
   .fellista { color: var(--over); margin: 8px 0; padding-left: 18px; }
   .rader-tabell input { padding: 5px 7px; }
   .rader-tabell td { border-bottom: 0; padding: 3px 4px; }
@@ -344,6 +348,15 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.38', datum: '2026-11-22',
+    nyheter: [
+      'Felmeddelanden visas också längst ner på skärmen, så att de syns även när du har scrollat ner.',
+      'Försöker du ta bort ett kvitto som ingår i en utläggsredovisning får du direkt veta vilken redovisning och vad du kan göra.',
+      'Knappen "Ta ur" vid varje kvitto i en utläggsredovisning som inte är utbetald. Är det sista kvittot tas redovisningen bort.',
+      'Kvittot kan öppnas direkt från utläggsredovisningen.'
+    ]
+  },
   {
     version: '1.37', datum: '2026-11-22',
     nyheter: [
@@ -1904,6 +1917,31 @@ var VERSIONER = [
     });
   }
 
+  // Tar ett kvitto ur en redovisning som inte är utbetald. Kvittot får tillbaka sitt belopp; tom redovisning tas bort.
+  function taUrUtlagg(ar, id, underlagId) {
+    var x = (ar.utlagg || []).find(function (a) { return a.id === id; });
+    if (!x) throw BokforingsFel('Utläggsredovisningen finns inte.');
+    var u = (ar.underlag || []).find(function (v) { return v.id === underlagId; });
+    if (!u || u.utlagg !== id || x.poster.indexOf(underlagId) < 0) throw BokforingsFel('Kvittot ingår inte i utläggsredovisningen.');
+    if (u.verifikation != null) throw BokforingsFel('Kvittot är redan utbetalt och bokfört i verifikation ' + u.verifikation + '.');
+    var poster = x.poster.filter(function (p) { return p !== underlagId; });
+    return Object.assign({}, ar, {
+      underlag: ar.underlag.map(function (v) {
+        if (v.id !== underlagId) return v;
+        var n = Object.assign({}, v, { belopp: v.kvittobelopp != null ? v.kvittobelopp : v.belopp });
+        ['utlagg', 'utlaggPerson', 'kvittobelopp', 'privat'].forEach(function (k) { delete n[k]; });
+        return n;
+      }),
+      utlagg: poster.length ? ar.utlagg.map(function (a) { return a.id === id ? Object.assign({}, a, { poster: poster }) : a; })
+        : ar.utlagg.filter(function (a) { return a.id !== id; })
+    });
+  }
+
+  function utlaggNamn(ar, id) {
+    var x = (ar.utlagg || []).find(function (a) { return a.id === id; });
+    return x ? x.person + (x.text ? ' · ' + x.text : '') : '';
+  }
+
   function utlaggStatus(ar, id) {
     var x = (ar.utlagg || []).find(function (a) { return a.id === id; });
     if (!x) return null;
@@ -1919,7 +1957,7 @@ var VERSIONER = [
     var u = (ar.underlag || []).find(function (x) { return x.id === id; });
     if (!u) throw BokforingsFel('Underlaget finns inte.');
     if (u.verifikation != null) throw BokforingsFel('Underlaget hör till verifikation ' + u.verifikation + ' och kan inte tas bort.');
-    if (u.utlagg) throw BokforingsFel('Underlaget ingår i en utläggsredovisning. Ta bort redovisningen först.');
+    if (u.utlagg) throw BokforingsFel('Kvittot ingår i utläggsredovisningen ' + utlaggNamn(ar, u.utlagg) + '. Ta först ur det ur redovisningen med knappen "Ta ur" under Utlägg, eller ta bort hela redovisningen. Sedan kan kvittot tas bort.');
     return Object.assign({}, ar, { underlag: ar.underlag.filter(function (x) { return x.id !== id; }) });
   }
 
@@ -4121,6 +4159,8 @@ var VERSIONER = [
     angraAvfardat: angraAvfardat,
     skapaUtlagg: skapaUtlagg,
     taBortUtlagg: taBortUtlagg,
+    taUrUtlagg: taUrUtlagg,
+    utlaggNamn: utlaggNamn,
     utlaggStatus: utlaggStatus,
     overforingFor: overforingFor,
     bankkontonIAr: bankkontonIAr,
@@ -4484,7 +4524,18 @@ var VERSIONER = [
     if (d > ar.slut) return ar.slut;
     return d;
   }
-  function visa(text, arFel) { meddelande = { text: text, fel: !!arFel }; render(); }
+  function visa(text, arFel) { meddelande = { text: text, fel: !!arFel }; render(); if (arFel) visaToast(text); }
+
+  // Felmeddelanden visas också längst ner på skärmen en stund, så att de syns även när man scrollat ner.
+  var toastTimer = null;
+  function visaToast(text) {
+    var el = document.getElementById('toast');
+    if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'alert'); document.body.appendChild(el); el.addEventListener('click', function () { el.classList.remove('visas'); }); }
+    el.textContent = text;
+    el.classList.add('visas');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('visas'); }, 8000);
+  }
 
   function nyttUtkast() {
     return { datum: '', text: '', underlag: '', underlagKommentar: '', rader: [tomRad(), tomRad()] };
@@ -9249,7 +9300,9 @@ var VERSIONER = [
             (u.foreslagetKonto ? ' · <span class="faint" title="' + esc(K.kontonamn(ar, u.foreslagetKonto) || '') + '">' + esc(u.foreslagetKonto) + ' ' + esc(K.kontonamn(ar, u.foreslagetKonto) || '') + '</span>'
               : ' · <span class="fel">inget konto</span>') +
             (u.kvittobelopp !== u.belopp ? ' <span class="faint">(kvitto ' + kr(u.kvittobelopp) + (u.privat ? ', privat: ' + esc(u.privat) : '') + ')</span>' : '') +
-            (u.verifikation != null ? ' <span class="tag ok">ver ' + u.verifikation + '</span>' : '') + '</li>';
+            (u.verifikation != null ? ' <span class="tag ok">ver ' + u.verifikation + '</span>' : '') +
+            (u.filnamn ? ' ' + underlagChip(u) : '') +
+            (!lasbar && u.verifikation == null ? ' <button class="btn btn-secondary btn-small" data-action="utlagg-ta-ur" data-id="' + esc(x.id) + '" data-u="' + esc(u.id) + '">Ta ur</button>' : '') + '</li>';
         }).join('') + '</ul></details>' +
         '<div class="row" style="margin-top:6px"><button class="btn btn-secondary btn-small" data-action="utlagg-pdf" data-id="' + esc(x.id) + '">Sammanställning (PDF)</button>' +
         (!lasbar && !st.betalt ? '<button class="btn btn-secondary btn-small" data-action="utlagg-bort" data-id="' + esc(x.id) + '">Ta bort</button>' : '') + '</div></div>';
@@ -11290,6 +11343,15 @@ var VERSIONER = [
       var st = K.utlaggStatus(res.ar, res.utlagg.id);
       visa('Utläggsredovisningen för ' + res.utlagg.person + ' är sparad: ' + kr(st.summa) + ' kr. När utbetalningen syns på kontoutdraget kopplas den till kvittona.');
     },
+    'utlagg-ta-ur': function (t) {
+      var ar = aktivt(), u = (ar.underlag || []).find(function (v) { return v.id === t.dataset.u; });
+      var x = (ar.utlagg || []).find(function (a) { return a.id === t.dataset.id; });
+      var sista = x && x.poster.length === 1;
+      if (!window.confirm('Ta ur ' + (u ? (u.beskrivning || u.motpart || u.filnamn) : 'kvittot') + ' ur utläggsredovisningen?' +
+        (sista ? ' Det är det sista kvittot, så redovisningen tas bort.' : '') + ' Kvittot finns kvar under Underlag som väntar på betalning och kan tas bort där.')) return;
+      setAktivt(K.taUrUtlagg(ar, t.dataset.id, t.dataset.u));
+      visa(sista ? 'Kvittot är uttaget och redovisningen borttagen.' : 'Kvittot är uttaget ur redovisningen.');
+    },
     'utlagg-bort': function (t) {
       if (!window.confirm('Ta bort utläggsredovisningen? Kvittona finns kvar med sina ursprungliga belopp.')) return;
       setAktivt(K.taBortUtlagg(aktivt(), t.dataset.id));
@@ -11446,6 +11508,7 @@ var VERSIONER = [
     'ta-bort-underlag': function (t) {
       var dokU = (aktivt().underlag || []).find(function (x) { return x.id === t.dataset.id; });
       if (dokU && dokU.dokumentId) { HANDLINGAR['makulera-dok']({ dataset: { id: dokU.dokumentId } }); return; }
+      if (dokU && dokU.utlagg) { K.taBortUnderlag(aktivt(), dokU.id); return; } // kastar ett fel som förklarar varför
       if (!window.confirm('Ta bort underlaget? Filen raderas från den här webbläsaren.')) return;
       setAktivt(K.taBortUnderlag(aktivt(), t.dataset.id));
       taBortFil(t.dataset.id);
