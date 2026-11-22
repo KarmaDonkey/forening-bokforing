@@ -29,7 +29,7 @@ function testdata() {
   ar.underlag = [{ id: 'u1', odId: 'OD1', filnamn: 'kvitto.pdf' }, { id: 'u2', filnamn: 'lokal.pdf' }];
   const bokforing = {
     format: 1, forening: { namn: 'Testföreningen Påhittad', orgnr: '000000-0000', logoOdId: 'L1' }, ar: { 2030: arkiv2030(), 2031: ar }, aktivt: '2031',
-    regler: [{ monster: 'hyra', konto: '5010' }], motpartsregler: [{ x: 1 }], adresser: [{ id: 'a' }], kontakter: [], artiklar: [{ id: 'art' }], mottagare: [{ id: 'm' }],
+    regler: [{ monster: 'hyra', konto: '5010' }], motpartsregler: [{ x: 1 }], avfardadeForslag: [{ monster: 'exempelperson', riktning: 'ut', skal: 'Personnamn' }], adresser: [{ id: 'a' }], kontakter: [], artiklar: [{ id: 'art' }], mottagare: [{ id: 'm' }],
     dokument: [{ typ: 'kvitto', nummer: 3, odId: 'OD2' }], medlemsregister: { gammalt: true }, egenInstallning: 'ja'
   };
   let register = K.tomtRegister();
@@ -52,7 +52,7 @@ test('börja om med förvalen: föreningen, arkivkopiorna och medlemmarna finns 
   assert.equal(r.bokforing.forening.logoOdId, 'L1');
   assert.equal(r.bokforing.egenInstallning, 'ja');
   assert.equal(r.bokforing.medlemsregister, undefined);
-  assert.deepEqual(json([r.bokforing.regler, r.bokforing.motpartsregler, r.bokforing.dokument]), [[], [], []]);
+  assert.deepEqual(json([r.bokforing.regler, r.bokforing.motpartsregler, r.bokforing.avfardadeForslag, r.bokforing.dokument]), [[], [], [], []]);
   assert.equal(r.bokforing.artiklar.length, 1);
   assert.equal(r.register.medlemmar.length, 1);
   assert.deepEqual(json([r.register.betalningar, r.register.kvitton, r.register.ignorerade]), [[], [], []]);
@@ -86,4 +86,5 @@ test('behåll medlemmar med betalningar och de inlärda förslagen', () => {
   assert.equal(r.register.betalningar.length, 1);
   assert.equal(r.register.konton.medlemsavgift, '');
   assert.equal(r.bokforing.regler.length, 1);
+  assert.equal(r.bokforing.avfardadeForslag.length, 1, 'avfärdade förslag följer med reglerna');
 });

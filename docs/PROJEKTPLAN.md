@@ -145,6 +145,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Regler text → konto syns och kan ändras under Kontoplan. Appen lär sig av både text och referens i kontoutdraget.
 - Förslag på regler från tidigare års bokföring (ord som minst två gånger och i minst 80 % av fallen hört till samma kostnads- eller bidragskonto). Föreningens egna regler sparas i bokföringsfilen, aldrig i koden.
 - Allmänna regler för bankavgifter (6570) gäller från början.
+- Förslag kan avfärdas med ett skäl (från 1.36). Avfärdade förslag sparas i bokföringsfilen med skäl, vem och när, föreslås inte igen och kan ångras. Vid "Börja om" följer de med reglerna.
 
 ## Kommande
 
