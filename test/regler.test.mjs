@@ -47,3 +47,28 @@ test('förslag på regler från tidigare års bokföring', () => {
   assert.equal(som('material'), undefined, 'ett ord som bara förekommer en gång föreslås inte');
   assert.equal(K.forslagRegler([ar], [{ monster: 'exempelskolan', riktning: 'ut', konto: '5010' }]).some((x) => x.monster === 'exempelskolan'), false, 'redan inlagda regler föreslås inte');
 });
+
+test('avfärdade förslag föreslås inte igen, och kan ångras', () => {
+  let ar = K.skapaAr({ start: '2030-01-01', ingaendeBalans: { 1930: kr(50000), 2067: kr(-50000) } });
+  const ver = (datum, text, konto, belopp) => { ar = K.bokfor(ar, { datum, text, rader: [{ konto, belopp: kr(belopp) }, { konto: '1930', belopp: kr(-belopp) }] }).ar; };
+  ver('2030-01-10', 'Exempelperson kursavgift', '5400', 100);
+  ver('2030-02-10', 'Exempelperson material', '5400', 200);
+  ver('2030-03-10', 'Lokalhyra Exempelhallen', '5010', 1000);
+  ver('2030-04-10', 'Lokalhyra Exempelhallen', '5010', 1000);
+  assert.ok(K.forslagRegler([ar], []).some((f) => f.monster === 'exempelperson'));
+  assert.throws(() => K.avfardaForslag([], { monster: 'exempelperson', riktning: 'ut', skal: ' ' }), /varför/);
+  let avf = K.avfardaForslag([], { monster: 'Exempelperson', riktning: 'ut', skal: 'Personnamn, kontera för hand', av: 'kassor@example.com', tid: '2031-01-05T10:00:00Z' });
+  assert.deepEqual(json(avf), [{ monster: 'exempelperson', riktning: 'ut', skal: 'Personnamn, kontera för hand', av: 'kassor@example.com', tid: '2031-01-05T10:00:00Z' }]);
+  const kvar = K.forslagRegler([ar], [], avf).map((f) => f.monster);
+  assert.equal(kvar.includes('exempelperson'), false);
+  assert.ok(kvar.includes('exempelhallen'), 'andra förslag finns kvar');
+  // Samma ord avfärdat för inbetalningar påverkar inte utbetalningsförslaget.
+  assert.ok(K.forslagRegler([ar], [], [{ monster: 'exempelperson', riktning: 'in', skal: 'x' }]).some((f) => f.monster === 'exempelperson'));
+  // Nytt skäl ersätter det gamla.
+  avf = K.avfardaForslag(avf, { monster: 'exempelperson', riktning: 'ut', skal: 'Blandade kostnader' });
+  assert.equal(avf.length, 1);
+  assert.equal(avf[0].skal, 'Blandade kostnader');
+  avf = K.angraAvfardat(avf, 'exempelperson', 'ut');
+  assert.equal(avf.length, 0);
+  assert.ok(K.forslagRegler([ar], [], avf).some((f) => f.monster === 'exempelperson'));
+});

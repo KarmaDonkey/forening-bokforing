@@ -345,6 +345,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.36', datum: '2026-11-22',
+    nyheter: [
+      'Förslag på konteringsregler kan avfärdas med ett skäl, till exempel "Personnamn, kontera för hand". De försvinner ur listan och föreslås inte igen.',
+      'Avfärdade förslag syns under "Avfärdade förslag" med skäl, vem som avfärdade och när, och kan ångras.',
+      'Bredare rutor för kontonummer, så att hela numret syns även när listpilen visas.'
+    ]
+  },
+  {
     version: '1.35', datum: '2026-11-22',
     nyheter: [
       'Konteringsregler under Bokföring, Kontoplan: se, ändra och ta bort reglerna, och lägg till egna (till exempel hyresvärdens namn → 5010).',
@@ -1274,6 +1282,7 @@ var VERSIONER = [
       format: 1, forening: val.forening ? b.forening : { namn: '', orgnr: '' }, ar: arkiv,
       aktivt: Object.keys(arkiv).sort().pop() || null,
       regler: val.regler ? (b.regler || []) : [], motpartsregler: val.regler ? (b.motpartsregler || []) : [],
+      avfardadeForslag: val.regler ? (b.avfardadeForslag || []) : [],
       adresser: behall('adresser'), kontakter: behall('kontakter'), artiklar: behall('artiklar'), mottagare: behall('mottagare'), dokument: []
     });
     delete ny.medlemsregister;
@@ -1776,7 +1785,25 @@ var VERSIONER = [
   // Förslag på regler från tidigare år (arkivkopior och vanliga år): ord i verifikationstexten som nästan alltid
   // hör till samma kostnads- eller bidragskonto, t.ex. hyresvärdens namn. Ord som redan har en regel föreslås inte.
   var REGELSTOPP = ['utlägg', 'ersättning', 'betalning', 'internet', 'faktura', 'överföring', 'terminsavgift', 'medlemsavgift', 'swish', 'bankgiro', 'inbetalning', 'kvitto', 'enligt', 'avser'];
-  function forslagRegler(arLista, regler) {
+  // Skäl att avfärda ett förslag på konteringsregel. Visas som val i appen; ett eget skäl går också bra.
+  var AVFARDA_SKAL = ['För allmänt ord', 'Personnamn, kontera för hand', 'Utlägg, kopplas till kvitton', 'Blandade kostnader, kontera för hand',
+    'Täcks redan av en allmän regel', 'Engångshändelse'];
+
+  // Avfärdade förslag: [{ monster, riktning, skal, av, tid }]. Samma ord och riktning ersätts.
+  function avfardaForslag(lista, post) {
+    var monster = normaliseraText(post && post.monster), skal = String((post && post.skal) || '').trim();
+    if (!monster) throw BokforingsFel('Förslaget saknar ord.');
+    if (!skal) throw BokforingsFel('Skriv varför förslaget avfärdas, så att andra bokförare förstår det senare.');
+    var riktning = post.riktning === 'in' ? 'in' : 'ut';
+    return (lista || []).filter(function (a) { return !(a.monster === monster && a.riktning === riktning); })
+      .concat([{ monster: monster, riktning: riktning, skal: skal, av: post.av || '', tid: post.tid || '' }]);
+  }
+
+  function angraAvfardat(lista, monster, riktning) {
+    return (lista || []).filter(function (a) { return !(a.monster === monster && a.riktning === riktning); });
+  }
+
+  function forslagRegler(arLista, regler, avfardade) {
     var ord = {};
     (arLista || []).forEach(function (ar) {
       (ar.verifikationer || []).forEach(function (v) {
@@ -1797,7 +1824,8 @@ var VERSIONER = [
     return Object.keys(ord).map(function (w) {
       var o = ord[w], bast = Object.keys(o.konton).sort(function (a, b) { return o.konton[b] - o.konton[a]; })[0];
       return { monster: w, konto: bast.split('|')[0], riktning: bast.split('|')[1], antal: o.konton[bast], totalt: o.totalt };
-    }).filter(function (f) { return f.antal >= 2 && f.antal / f.totalt >= 0.8 && finns.indexOf(f.monster) < 0; })
+    }).filter(function (f) { return f.antal >= 2 && f.antal / f.totalt >= 0.8 && finns.indexOf(f.monster) < 0 &&
+      !(avfardade || []).some(function (a) { return a.monster === f.monster && a.riktning === f.riktning; }); })
       .sort(function (a, b) { return b.antal - a.antal || (a.monster < b.monster ? -1 : 1); }).slice(0, 20);
   }
 
@@ -4057,6 +4085,9 @@ var VERSIONER = [
     arFranArkiv: arFranArkiv,
     STANDARDREGLER: STANDARDREGLER,
     forslagRegler: forslagRegler,
+    AVFARDA_SKAL: AVFARDA_SKAL,
+    avfardaForslag: avfardaForslag,
+    angraAvfardat: angraAvfardat,
     skapaUtlagg: skapaUtlagg,
     taBortUtlagg: taBortUtlagg,
     utlaggStatus: utlaggStatus,
@@ -7095,7 +7126,7 @@ var VERSIONER = [
           (u.valuta ? '<div class="faint">' + esc(u.valuta) + ' ' + (u.originalbelopp != null ? kr(u.originalbelopp) : '') + '</div>' : '') + '</div></td>' +
           '<td class="num" data-etikett="Belopp"><div><input class="num" style="width:110px" data-underlag="belopp" data-id="' + esc(u.id) + '" value="' + (u.belopp ? kr(u.belopp) : '') + '" aria-label="Belopp i kronor">' +
           '<div class="faint">' + (u.riktning === 'intakt' ? 'intäkt' : 'utgift') + '</div></div></td>' +
-          '<td data-etikett="Konto"><div><input list="kontolista" style="width:90px" data-underlag="foreslagetKonto" data-id="' + esc(u.id) + '" value="' + esc(u.foreslagetKonto || '') + '" aria-label="Konto">' +
+          '<td data-etikett="Konto"><div><input list="kontolista" style="width:120px" data-underlag="foreslagetKonto" data-id="' + esc(u.id) + '" value="' + esc(u.foreslagetKonto || '') + '" aria-label="Konto">' +
           '<div class="faint">' + esc(u.foreslagetKonto ? K.kontonamn(ar, u.foreslagetKonto) : 'inget förslag') + (kontoKallaText(u) ? '<br>' + esc(kontoKallaText(u)) : '') + '</div></div></td>' +
           '<td style="white-space:nowrap"><button class="btn btn-secondary btn-small" data-action="bokfor-underlag" data-id="' + esc(u.id) + '">Bokför utan bank…</button> ' +
           '<button class="btn btn-secondary btn-small" data-action="ta-bort-underlag" data-id="' + esc(u.id) + '" aria-label="Ta bort underlag">×</button></td></tr>';
@@ -7537,6 +7568,8 @@ var VERSIONER = [
   }
 
   // Konteringsregler: text i kontoutdraget -> konto. Föreningens egna, förslag från tidigare år och de allmänna.
+  var avfardadeOppna = false, avfardarForslag = null; // index för förslaget som håller på att avfärdas
+  function tidigareAr() { return Object.keys(store.ar).filter(function (id) { return id !== store.aktivt; }).map(function (id) { return store.ar[id]; }); }
   function vyRegler(ar) {
     var regler = store.regler || [], lasbar = lasLage();
     var namn = function (k) { return K.kontonamn(ar, k) || '(finns inte i kontoplanen)'; };
@@ -7544,26 +7577,42 @@ var VERSIONER = [
       'Appen lär sig själv när du bokför, och du kan lägga till regler här. De sparas i föreningens bokföringsfil.</p>';
     html += regler.length ? '<div class="scroll"><table class="kortlista"><thead><tr><th>Texten innehåller</th><th>In/ut</th><th>Konto</th><th></th></tr></thead><tbody>' + regler.map(function (r, i) {
       return '<tr><td><strong>' + esc(r.monster) + '</strong></td><td data-etikett="In/ut">' + (r.riktning === 'in' ? 'in' : r.riktning === 'ut' ? 'ut' : 'båda') + '</td>' +
-        '<td data-etikett="Konto"><input list="kontolista" data-regel="' + i + '" value="' + esc(r.konto) + '" style="width:80px" aria-label="Konto"' + (lasbar ? ' disabled' : '') + '> <span class="faint">' + esc(namn(r.konto)) + '</span></td>' +
+        '<td data-etikett="Konto"><input list="kontolista" data-regel="' + i + '" value="' + esc(r.konto) + '" style="width:120px" aria-label="Konto"' + (lasbar ? ' disabled' : '') + '> <span class="faint">' + esc(namn(r.konto)) + '</span></td>' +
         '<td>' + (lasbar ? '' : '<button class="btn btn-secondary btn-small" data-action="regel-bort" data-i="' + i + '">Ta bort</button>') + '</td></tr>';
     }).join('') + '</tbody></table></div>' : '<p class="faint">Inga egna regler ännu.</p>';
     html += '<datalist id="kontolista">' + ar.kontoplan.map(function (k) { return '<option value="' + k.nr + '">' + esc(k.namn) + '</option>'; }).join('') + '</datalist>';
     if (!lasbar) {
       html += '<div class="row" style="margin-top:8px"><input id="nyRegelText" placeholder="Ord i texten, t.ex. hyresvärdens namn" style="max-width:260px" aria-label="Ord i texten">' +
         '<select id="nyRegelRiktning" style="width:auto" aria-label="In eller ut"><option value="ut">utbetalning</option><option value="in">inbetalning</option></select>' +
-        '<input id="nyRegelKonto" list="kontolista" placeholder="Konto" style="width:90px" aria-label="Konto">' +
+        '<input id="nyRegelKonto" list="kontolista" placeholder="Konto" style="width:120px" aria-label="Konto">' +
         '<button class="btn btn-small" data-action="regel-ny">Lägg till regel</button></div>';
-      var tidigare = Object.keys(store.ar).filter(function (id) { return id !== store.aktivt; }).map(function (id) { return store.ar[id]; });
-      var forslag = K.forslagRegler(tidigare, regler);
+      var forslag = K.forslagRegler(tidigareAr(), regler, store.avfardadeForslag);
       if (forslag.length) {
         html += '<h3>Förslag från tidigare år</h3><p class="faint" style="margin-top:0">Ord som nästan alltid hört till samma konto i bokföringen ' +
           esc(Object.keys(store.ar).filter(function (id) { return id !== store.aktivt; }).sort().join(', ')) + '. Byt konto om du vill konterar annorlunda nu.</p>' +
           '<div class="scroll"><table class="kortlista"><tbody>' + forslag.map(function (f, i) {
             return '<tr><td><strong>' + esc(f.monster) + '</strong> <span class="faint">' + (f.riktning === 'in' ? 'inbetalning' : 'utbetalning') + ', ' + f.antal + ' av ' + f.totalt + ' gånger</span></td>' +
-              '<td data-etikett="Konto"><input list="kontolista" id="forslagKonto' + i + '" value="' + esc(f.konto) + '" style="width:80px" aria-label="Konto"> <span class="faint">' + esc(namn(f.konto)) + '</span></td>' +
-              '<td><button class="btn btn-secondary btn-small" data-action="regel-forslag" data-i="' + i + '">Lägg till</button></td></tr>';
+              '<td data-etikett="Konto"><input list="kontolista" id="forslagKonto' + i + '" value="' + esc(f.konto) + '" style="width:120px" aria-label="Konto"> <span class="faint">' + esc(namn(f.konto)) + '</span></td>' +
+              '<td style="white-space:nowrap"><button class="btn btn-secondary btn-small" data-action="regel-forslag" data-i="' + i + '">Lägg till</button> ' +
+              '<button class="btn btn-secondary btn-small" data-action="avfarda-visa" data-i="' + i + '">Avfärda</button></td></tr>' +
+              (avfardarForslag === i ? '<tr><td colspan="3" class="hel"><div class="row" style="align-items:center;margin:4px 0 8px">' +
+                '<label for="avfardaSkal" style="margin:0">Varför ska <strong>' + esc(f.monster) + '</strong> inte bli en regel?</label>' +
+                '<select id="avfardaSkal" style="width:auto">' + K.AVFARDA_SKAL.map(function (x) { return '<option>' + esc(x) + '</option>'; }).join('') + '</select>' +
+                '<input id="avfardaEget" placeholder="Eller skriv ett eget skäl" style="max-width:260px" aria-label="Eget skäl">' +
+                '<button class="btn btn-small" data-action="avfarda-forslag" data-i="' + i + '">Avfärda</button>' +
+                '<button class="btn btn-secondary btn-small" data-action="avfarda-avbryt">Avbryt</button></div></td></tr>' : '');
           }).join('') + '</tbody></table></div>';
       }
+    }
+    var avfardade = store.avfardadeForslag || [];
+    if (avfardade.length) {
+      html += '<details style="margin-top:12px"' + (avfardadeOppna ? ' open' : '') + '><summary>Avfärdade förslag (' + avfardade.length + ')</summary><p class="faint">Ord som någon har bestämt inte ska bli regler, och varför. De föreslås inte igen.</p>' +
+        '<div class="scroll"><table class="kortlista"><thead><tr><th>Ord</th><th>Skäl</th><th>Avfärdat av</th><th></th></tr></thead><tbody>' + avfardade.map(function (a, i) {
+          return '<tr><td><strong>' + esc(a.monster) + '</strong> <span class="faint">' + (a.riktning === 'in' ? 'inbetalning' : 'utbetalning') + '</span></td>' +
+            '<td data-etikett="Skäl">' + esc(a.skal) + '</td>' +
+            '<td data-etikett="Avfärdat av"><span class="faint">' + esc(a.av || '–') + (a.tid ? ', ' + esc(a.tid.slice(0, 10)) : '') + '</span></td>' +
+            '<td>' + (lasbar ? '' : '<button class="btn btn-secondary btn-small" data-action="avfarda-angra" data-i="' + i + '">Ångra</button>') + '</td></tr>';
+        }).join('') + '</tbody></table></div></details>';
     }
     html += '<p class="faint" style="margin-bottom:0">Allmänna regler som alltid gäller: ' + esc(K.STANDARDREGLER.map(function (r) { return r.monster + ' → ' + r.konto; }).join(', ')) + '.</p></div>';
     return html;
@@ -7652,7 +7701,7 @@ var VERSIONER = [
         '<td data-etikett="Antal"><input class="num" style="width:70px" inputmode="decimal" data-dokrad="' + i + '" data-f="antal" value="' + esc(r.antal) + '"></td>' +
         '<td class="hel" data-etikett="Beskrivning"><input style="min-width:220px" data-dokrad="' + i + '" data-f="beskrivning" value="' + esc(r.beskrivning) + '"></td>' +
         '<td data-etikett="á pris"><input class="num" style="width:110px" inputmode="decimal" data-dokrad="' + i + '" data-f="pris" value="' + esc(r.pris) + '"></td>' +
-        (arF ? '<td data-etikett="Konto"><input list="kontolista" style="width:80px" data-dokrad="' + i + '" data-f="konto" value="' + esc(r.konto) + '"></td>' : '') +
+        (arF ? '<td data-etikett="Konto"><input list="kontolista" style="width:120px" data-dokrad="' + i + '" data-f="konto" value="' + esc(r.konto) + '"></td>' : '') +
         '<td class="num" data-etikett="Total" id="dokTotal-' + i + '"></td><td>' + (u.rader.length > 1 ? '<button class="btn btn-secondary btn-small" data-action="dok-ta-bort-rad" data-rad="' + i + '" aria-label="Ta bort rad">×</button>' : '') + '</td></tr>';
     });
     html += '</tbody></table></div>';
@@ -11229,9 +11278,25 @@ var VERSIONER = [
       store.regler = (store.regler || []).filter(function (r, i) { return i !== Number(t.dataset.i); });
       spara(); render();
     },
+    'avfarda-visa': function (t) { avfardarForslag = Number(t.dataset.i); render(); var s = document.getElementById('avfardaSkal'); if (s) s.focus(); },
+    'avfarda-avbryt': function () { avfardarForslag = null; render(); },
+    'avfarda-forslag': function (t) {
+      var f = K.forslagRegler(tidigareAr(), store.regler || [], store.avfardadeForslag)[Number(t.dataset.i)];
+      if (!f) return;
+      var skal = varde('avfardaEget').trim() || varde('avfardaSkal');
+      store.avfardadeForslag = K.avfardaForslag(store.avfardadeForslag, { monster: f.monster, riktning: f.riktning, skal: skal, av: od.konto || 'den här enheten', tid: new Date().toISOString() });
+      avfardarForslag = null;
+      spara(); render();
+    },
+    'avfarda-angra': function (t) {
+      var a = (store.avfardadeForslag || [])[Number(t.dataset.i)];
+      if (!a) return;
+      store.avfardadeForslag = K.angraAvfardat(store.avfardadeForslag, a.monster, a.riktning);
+      avfardadeOppna = true;
+      spara(); render();
+    },
     'regel-forslag': function (t) {
-      var tidigare = Object.keys(store.ar).filter(function (id) { return id !== store.aktivt; }).map(function (id) { return store.ar[id]; });
-      var f = K.forslagRegler(tidigare, store.regler || [])[Number(t.dataset.i)];
+      var f = K.forslagRegler(tidigareAr(), store.regler || [], store.avfardadeForslag)[Number(t.dataset.i)];
       var konto = varde('forslagKonto' + t.dataset.i) || f.konto;
       if (!aktivt().kontoplan.some(function (k) { return k.nr === konto; })) throw new Error('Konto ' + konto + ' finns inte i kontoplanen för ' + store.aktivt + '. Välj ett annat konto, eller lägg till det i kontoplanen nedan.');
       store.regler = (store.regler || []).concat([{ monster: f.monster, riktning: f.riktning, konto: konto }]);
