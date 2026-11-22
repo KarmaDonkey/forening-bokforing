@@ -114,3 +114,32 @@ test('avrundning gäller bara utlägg med flera kvitton och högst 1 kr, och exa
   const a = bankrad(ar, '2031-01-08', -318, 'Ersattning');
   assert.equal(K.forslagForBankrad(a, a.bankrader[0], []).avrundning, kr(-0.2), 'utbetalt mindre ger kredit på 3740');
 });
+
+test('ett kvitto kan tas ur en redovisning som inte är utbetald', () => {
+  let ar = utlagg(arMedKvitton()).ar;
+  const id = ar.utlagg[0].id;
+  assert.equal(K.utlaggNamn(ar, id), 'Exempel · Hösten 2030');
+  assert.throws(() => K.taBortUnderlag(ar, 'b'), /Exempel · Hösten 2030.*Ta ur/);
+  ar = K.taUrUtlagg(ar, id, 'b');
+  const b = ar.underlag.find((u) => u.id === 'b');
+  assert.deepEqual([b.belopp, b.utlagg, b.kvittobelopp, b.privat], [kr(512.3), undefined, undefined, undefined], 'kvittot får tillbaka hela beloppet');
+  assert.equal(ar.utlagg[0].poster.includes('b'), false);
+  assert.equal(K.utlaggStatus(ar, id).summa, kr(1687.7));
+  ar = K.taBortUnderlag(ar, 'b');
+  assert.equal(ar.underlag.some((u) => u.id === 'b'), false);
+  assert.throws(() => K.taUrUtlagg(ar, id, 'x'), /ingår inte/);
+  // Ett utbetalt kvitto kan inte tas ur; de andra kan.
+  ar = bankrad(ar, '2031-01-20', -600, 'Exempel ers ovrigt');
+  const f = K.forslagForBankrad(ar, ar.bankrader[0], []);
+  ar = K.bokforKopplat(ar, { datum: f.datum, text: f.text, rader: f.rader }, { bankradId: f.bankradId, underlagIds: f.underlagIds }).ar;
+  assert.throws(() => K.taUrUtlagg(ar, id, f.underlagIds[0]), /redan utbetalt/);
+  ar = K.taUrUtlagg(ar, id, 'd');
+  assert.equal(ar.utlagg.length, 1);
+});
+
+test('när sista kvittot tas ur försvinner redovisningen', () => {
+  let ar = K.skapaUtlagg(arMedKvitton(), { person: 'Exempel', poster: [{ underlagId: 'a' }] }).ar;
+  ar = K.taUrUtlagg(ar, ar.utlagg[0].id, 'a');
+  assert.equal(ar.utlagg.length, 0);
+  assert.equal(ar.underlag.find((u) => u.id === 'a').utlagg, undefined);
+});
