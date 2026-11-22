@@ -345,6 +345,15 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.33', datum: '2026-11-22',
+    nyheter: [
+      'Flera bankkonton: under Bokföring, Kontoplan anger du föreningens bankkonton, till exempel 1930 för företagskontot och 1940 för placeringskontot, med namn och kontonummer.',
+      'När du läser in ett kontoutdrag känner appen igen kontot på kontonumret i filen, eller så väljer du konto i listan.',
+      'Överföringar mellan egna konton känns igen och bokförs en gång, och raden på det andra kontoutdraget kopplas till samma verifikation.',
+      'Bankavstämningen görs för varje konto: under Läs in, i rapporten Bankavstämning, på Översikt och i bokslutet. Ekonomitexten till årsmötet räknar med alla bankkonton.'
+    ]
+  },
+  {
     version: '1.32', datum: '2026-11-21',
     nyheter: [
       'När appen är kopplad till OneDrive sparas kopian av testdatat i mappen Testdata i OneDrive innan något tas bort, i stället för att laddas ner. Det fungerar också på telefonen, och appen lämnas aldrig.',
@@ -1290,7 +1299,7 @@ var VERSIONER = [
 
   function bokslutsKontroller(ar) {
     var obokforda = oppnaBankrader(ar).length;
-    var avst = bankavstamning(ar);
+    var avst = samladAvstamning(ar);
     var utanUnderlag = kontroller(ar).filter(function (w) { return w.typ === 'saknarUnderlag'; }).length;
     var s = saldon(ar);
     var resultat = aretsResultat(ar);
@@ -1299,6 +1308,7 @@ var VERSIONER = [
       { id: 'avstamning', klar: !!avst && avst.skillnad === 0 && avst.obokforda === 0,
         text: !avst ? 'Inget kontoutdrag med saldo är inläst, så banken kan inte stämmas av.'
           : avst.skillnad === 0 ? 'Bokfört saldo stämmer med banken ' + avst.datum + '.' + (avst.datum < laggTillDagar(ar.slut, -31) ? ' Kontoutdraget slutar dock mer än en månad före årets slut.' : '')
+          : avst.konton.length > 1 ? 'Bokfört saldo skiljer från banken: ' + avst.konton.filter(function (a) { return a.skillnad; }).map(function (a) { return a.konto + ' ' + formatBelopp(a.skillnad) + ' kr (' + a.datum + ')'; }).join(', ') + '.'
           : 'Bokfört saldo skiljer ' + formatBelopp(avst.skillnad) + ' kr från banken ' + avst.datum + '.' },
       { id: 'underlag', klar: utanUnderlag === 0, varning: true, text: utanUnderlag ? antalText(utanUnderlag, 'verifikation saknar', 'verifikationer saknar') + ' underlag.' : 'Alla verifikationer har underlag.' },
       { id: 'balans', klar: balansrakning(ar).balanserar, text: balansrakning(ar).balanserar ? 'Balansräkningen går ihop.' : 'Balansräkningen går inte ihop.' },
@@ -1394,10 +1404,12 @@ var VERSIONER = [
     }
     var obokforda = oppnaBankrader(ar).length;
     if (obokforda) varningar.push({ typ: 'obokfordaBankrader', meddelande: obokforda + (obokforda === 1 ? ' banktransaktion är inte bokförd.' : ' banktransaktioner är inte bokförda.') });
-    var avst = bankavstamning(ar);
-    if (avst && !avst.obokforda && avst.skillnad !== 0) {
-      varningar.push({ typ: 'bankdifferens', meddelande: 'Bokfört saldo på ' + avst.konto + ' den ' + avst.datum + ' är ' + formatBelopp(avst.bokfortSaldo) + ' kr men banken säger ' + formatBelopp(avst.bankSaldo) + ' kr.' });
-    }
+    bankkontonIAr(ar).forEach(function (konto) {
+      var avst = bankavstamning(ar, konto);
+      if (avst && !avst.obokforda && avst.skillnad !== 0) {
+        varningar.push({ typ: 'bankdifferens', meddelande: 'Bokfört saldo på ' + avst.konto + ' den ' + avst.datum + ' är ' + formatBelopp(avst.bokfortSaldo) + ' kr men banken säger ' + formatBelopp(avst.bankSaldo) + ' kr.' });
+      }
+    });
     return varningar;
   }
 
@@ -1647,6 +1659,18 @@ var VERSIONER = [
     };
   }
 
+  // Avstämningen för alla bankkonton: skillnaden och de obokförda raderna läggs ihop. null om inget utdrag har saldo.
+  function samladAvstamning(ar) {
+    var lista = bankkontonIAr(ar).map(function (k) { return bankavstamning(ar, k); }).filter(Boolean);
+    if (!lista.length) return null;
+    var sista = lista.reduce(function (a, b) { return b.datum > a.datum ? b : a; });
+    return {
+      konto: lista.map(function (a) { return a.konto; }).join(', '), datum: sista.datum, konton: lista,
+      bankSaldo: lista.reduce(function (s, a) { return s + a.bankSaldo; }, 0), bokfortSaldo: lista.reduce(function (s, a) { return s + a.bokfortSaldo; }, 0),
+      skillnad: lista.reduce(function (s, a) { return s + Math.abs(a.skillnad); }, 0), obokforda: lista.reduce(function (s, a) { return s + a.obokforda; }, 0)
+    };
+  }
+
   // Avstämning månad för månad: bankens sista saldo i varje månad mot bokfört saldo samma dag.
   function bankavstamningPerManad(ar, konto) {
     konto = konto || '1930';
@@ -1822,7 +1846,7 @@ var VERSIONER = [
     var regelKonto = regel ? regel.konto : '';
     var giltigt = function (nr) { return nr && ar.kontoplan.some(function (k) { return k.nr === nr; }) ? nr : ''; };
     var rader = [{ konto: bankrad.konto, belopp: bankrad.belopp }];
-    var text, kalla, kommentar = '';
+    var text, kalla, kommentar = '', motrad;
     var summaUnderlag = us.reduce(function (s, u) { return s + bankbelopp(u); }, 0);
     if (us.length === 1 && opt && opt.ungefar && summaUnderlag !== bankrad.belopp) {
       // Ett underlag som troligen hör hit men vars belopp skiljer: banken avgör beloppet.
@@ -1835,6 +1859,12 @@ var VERSIONER = [
         ? [us[0].motpart, us[0].beskrivning].filter(Boolean).join(': ')
         : bankrad.text + ' (' + us.length + ' underlag)';
       kalla = 'underlag';
+    } else if (!us.length && (motrad = overforingFor(ar, bankrad))) {
+      // Samma belopp med omvänt tecken på ett annat eget bankkonto: en överföring mellan kontona.
+      rader.push({ konto: motrad.konto, belopp: -bankrad.belopp });
+      text = 'Överföring ' + (bankrad.belopp < 0 ? 'till ' : 'från ') + motrad.konto;
+      kalla = 'overforing';
+      kommentar = 'Bankutdrag';
     } else {
       us = [];
       rader.push({ konto: giltigt(regelKonto), belopp: -bankrad.belopp });
@@ -1854,6 +1884,40 @@ var VERSIONER = [
       kalla: kalla,
       komplett: rader.every(function (r) { return !!giltigt(r.konto); })
     };
+  }
+
+  // En obokförd rad på ett annat bankkonto med samma belopp och omvänt tecken, högst tre dagar ifrån.
+  function overforingFor(ar, bankrad) {
+    if (bankrad.verifikation != null) return null;
+    var lista = (ar.bankrader || []).filter(function (r) {
+      return r.verifikation == null && r.konto !== bankrad.konto && r.belopp === -bankrad.belopp && Math.abs(dagarMellan(r.datum, bankrad.datum)) <= 3;
+    }).sort(function (a, b) { return Math.abs(dagarMellan(a.datum, bankrad.datum)) - Math.abs(dagarMellan(b.datum, bankrad.datum)); });
+    return lista[0] || null;
+  }
+
+  // Bankkontona som har kontoutdrag inlästa under året, i nummerordning.
+  function bankkontonIAr(ar) {
+    var k = {};
+    (ar.bankrader || []).forEach(function (r) { k[r.konto] = true; });
+    return Object.keys(k).sort();
+  }
+
+  // Vilket av föreningens bankkonton gäller kontoutdraget? Kontonumret står ofta på varje rad i filen.
+  // bankkonton: [{ konto: '1930', nummer: '…' }]. Det nummer som förekommer flest gånger vinner.
+  function kontoForUtdrag(bankkonton, text, filnamn) {
+    // Siffror som hålls ihop av mellanslag eller bindestreck räknas som ett nummer.
+    // Kommatecken skiljer kolumner och slås inte ihop; datum (20260131) räknas inte som kontonummer.
+    var siffror = (String((filnamn || '') + '\n' + (text || '')).replace(/(\d)[ \-](?=\d)/g, '$1').match(/\d{8,}/g) || [])
+      .filter(function (x) { return !/^(19|20)\d\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(x); });
+    var bast = null, flest = 0;
+    (bankkonton || []).forEach(function (b) {
+      var n = String(b.nummer || '').replace(/\D/g, '');
+      if (n.length < 4) return;
+      var slut = n.slice(-4);
+      var antal = siffror.filter(function (x) { return x.slice(-4) === slut; }).length;
+      if (antal > flest) { flest = antal; bast = b.konto; }
+    });
+    return bast;
   }
 
   function arkivnamn(nr, filnamn) { return 'V' + String(nr).padStart(3, '0') + '_' + filnamn; }
@@ -2047,21 +2111,22 @@ var VERSIONER = [
 
   // Kopplar obokförda bankrader till verifikationer som redan bokförts mot bankkontot
   // (t.ex. en faktura som bokfördes innan kontoutdraget lästes in), så att inget bokförs två gånger.
+  // En överföring mellan egna konton rör två bankkonton: kopplingen gäller därför per verifikation och konto.
   function kopplaBokforda(ar) {
     var lankade = {}, rattade = {};
-    (ar.bankrader || []).forEach(function (r) { if (r.verifikation != null) lankade[r.verifikation] = true; });
+    (ar.bankrader || []).forEach(function (r) { if (r.verifikation != null) lankade[r.verifikation + ':' + r.konto] = true; });
     ar.verifikationer.forEach(function (v) { if (v.rattar != null) { rattade[v.rattar] = true; rattade[v.nr] = true; } });
     var kopplade = [];
     var bankrader = (ar.bankrader || []).map(function (r) {
       if (r.verifikation != null) return r;
       var kandidater = ar.verifikationer.filter(function (v) {
-        if (lankade[v.nr] || rattade[v.nr]) return false;
+        if (lankade[v.nr + ':' + r.konto] || rattade[v.nr]) return false;
         var paBank = v.rader.reduce(function (s, x) { return x.konto === r.konto ? s + x.belopp : s; }, 0);
         return paBank === r.belopp && r.datum >= laggTillDagar(v.datum, -10) && r.datum <= laggTillDagar(v.datum, 60);
       }).sort(function (a, b) { return Math.abs(dagarMellan(a.datum, r.datum)) - Math.abs(dagarMellan(b.datum, r.datum)) || a.nr - b.nr; });
       if (!kandidater.length) return r;
       var v = kandidater[0];
-      lankade[v.nr] = true;
+      lankade[v.nr + ':' + r.konto] = true;
       kopplade.push({ bankradId: r.id, nr: v.nr });
       return Object.assign({}, r, { verifikation: v.nr, kopplad: 'efterhand' });
     });
@@ -3513,10 +3578,11 @@ var VERSIONER = [
   function ekonomitext(ar, opt) {
     opt = opt || {};
     var e = intakterKostnader(ar);
-    var bank = saldon(ar)[opt.bankkonto || '1930'] || 0;
+    var konton = opt.bankkonton && opt.bankkonton.length ? opt.bankkonton : [opt.bankkonto || '1930'];
+    var s0 = saldon(ar), bank = konton.reduce(function (s, k) { return s + (s0[k] || 0); }, 0);
     var t = 'Föreningens totala intäkter var ' + formatBelopp(e.intakter) + ' kr och de totala kostnaderna ' + formatBelopp(e.kostnader) + ' kr. ' +
       'Årets resultat blev ' + (e.resultat < 0 ? 'ett underskott på ' : e.resultat > 0 ? 'ett överskott på ' : '') + formatBelopp(Math.abs(e.resultat)) + ' kr. ' +
-      'Behållningen på föreningens konto vid årets slut var ' + formatBelopp(bank) + ' kr.';
+      'Behållningen på föreningens ' + (konton.length > 1 ? 'bankkonton' : 'konto') + ' vid årets slut var ' + formatBelopp(bank) + ' kr.';
     if (opt.medlemsavgifter) t += ' I intäkterna ingår medlemsavgifter på ' + formatBelopp(opt.medlemsavgifter) + ' kr.';
     if (opt.medlemmar) t += ' ' + opt.medlemmar + (opt.medlemmar === 1 ? ' medlem' : ' medlemmar') + ' betalade avgift under året.';
     return t;
@@ -3825,6 +3891,10 @@ var VERSIONER = [
     balansrakning: balansrakning,
     nastaAr: nastaAr,
     arFranArkiv: arFranArkiv,
+    overforingFor: overforingFor,
+    bankkontonIAr: bankkontonIAr,
+    kontoForUtdrag: kontoForUtdrag,
+    samladAvstamning: samladAvstamning,
     borjaOm: borjaOm,
     valideraAr: valideraAr,
     kontroller: kontroller,
@@ -5554,11 +5624,12 @@ var VERSIONER = [
     return u.kontoKalla === 'inlart' ? 'som förra gången' : u.kontoKalla === 'manuell' ? 'ditt val' : u.kontoKalla === 'claude' ? 'Claudes förslag' : '';
   }
 
-  function importeraRader(rader) {
+  function importeraRader(rader, konto) {
     var nya = 0, dubbletter = 0;
+    konto = konto || huvudbankkonto();
     Object.keys(store.ar).forEach(function (id) {
       if (store.ar[id].grovkopia) return;
-      var res = K.importeraBankrader(store.ar[id], rader);
+      var res = K.importeraBankrader(store.ar[id], rader, { konto: konto });
       store.ar[id] = res.ar;
       nya += res.nya;
       dubbletter += res.dubbletter;
@@ -5566,7 +5637,7 @@ var VERSIONER = [
     var utanfor = rader.filter(function (r) { return !arForDatum(r.datum); });
     var kopplade = kopplaEfterhand();
     spara();
-    var text = antal(nya, 'ny banktransaktion', 'nya banktransaktioner') + (dubbletter ? ', ' + dubbletter + ' fanns redan' : '') + '.';
+    var text = (bankkonton().length > 1 ? banknamn(konto) + ': ' : '') + antal(nya, 'ny banktransaktion', 'nya banktransaktioner') + (dubbletter ? ', ' + dubbletter + ' fanns redan' : '') + '.';
     if (kopplade) text += ' ' + antal(kopplade, 'av dem var redan bokförd och kopplades', 'av dem var redan bokförda och kopplades') + ' till sin verifikation.';
     if (utanfor.length) {
       var ar = Array.from(new Set(utanfor.map(function (r) { return r.datum.slice(0, 4); }))).join(', ');
@@ -5578,7 +5649,7 @@ var VERSIONER = [
   function importeraBanktext(text, namn) {
     var res = K.parseBankfil(text);
     if (!res.rader.length) throw new Error((namn ? namn + ': ' : '') + 'hittade inga transaktioner. ' + res.varningar.slice(0, 2).join(' '));
-    logga((namn ? namn + ': ' : '') + importeraRader(res.rader));
+    logga((namn ? namn + ': ' : '') + importeraRader(res.rader, kontoForInlasning(text, namn)));
     res.varningar.slice(0, 5).forEach(function (v) { logga(v, true); });
   }
 
@@ -5596,7 +5667,7 @@ var VERSIONER = [
     await sparaFil(id, fil, n.underlag.filnamn);
     if (n.bankrader) {
       setAktivt(K.laggTillUnderlag(aktivt(), n.underlag));
-      logga(fil.name + ' (kontoutdrag): ' + importeraRader(n.bankrader));
+      logga(fil.name + ' (kontoutdrag): ' + importeraRader(n.bankrader, kontoForInlasning(JSON.stringify(n), fil.name)));
     } else {
       var u = n.underlag;
       var regel = K.hittaMotpartsregel(store.motpartsregler, u.motpart);
@@ -5643,11 +5714,12 @@ var VERSIONER = [
     var val = inkorgVal[rad.id] || {};
     var f = K.forslagForBankrad(ar, rad, store.regler, val.underlagIds ? { underlagIds: val.underlagIds, ungefar: !!val.ungefar } : undefined);
     if (val.konto != null && f.rader.length === 2) f.rader[1].konto = val.konto.trim();
+    if (f.kalla === 'overforing' && f.rader.length === 2) f.text = 'Överföring ' + (rad.belopp < 0 ? 'till ' : 'från ') + banknamn(f.rader[1].konto, ar);
     if (val.text != null) f.text = val.text;
     // Inbetalningar och bankavgifter syns i bankutdraget och behöver inget eget underlag.
     if (!f.underlagIds.length && f.rader.length === 2 && (rad.belopp > 0 || f.rader[1].konto === '6570')) f.underlagKommentar = 'Bankutdrag';
     // Terminsavgift: ett känt Swish-nummer med rätt belopp, eller det du valt i panelen.
-    var a = val.konto == null && f.kalla !== 'underlag' ? avgiftForRad(rad) : null;
+    var a = val.konto == null && f.kalla !== 'underlag' && f.kalla !== 'overforing' ? avgiftForRad(rad) : null;
     if (a && a.poster) {
       try {
         if (!K.giltigtTerminId(a.termin)) throw new Error('Terminen ska skrivas som VT-27 eller HT-26.');
@@ -5673,6 +5745,8 @@ var VERSIONER = [
     var res = K.bokforKopplat(ar, {
       datum: f.datum, text: f.text, rader: f.rader, underlagKommentar: f.underlagKommentar, registrerad: new Date().toISOString()
     }, { bankradId: rad.id, underlagIds: f.underlagIds });
+    // En överföring: raden på det andra kontot kopplas till samma verifikation.
+    if (f.kalla === 'overforing') res.ar = K.kopplaBokforda(res.ar).ar;
     if (f.avgift) {
       var r = K.registreraBetalning(reg(), {
         datum: rad.datum, belopp: rad.belopp, termin: f.avgift.termin, nyckel: f.avgift.betalare.nyckel,
@@ -6371,15 +6445,19 @@ var VERSIONER = [
         hist.slice().reverse().forEach(function (h) { rad([h.termin].concat(K.KATEGORIER.map(function (k) { return h[k[0]] ? String(h[k[0]]) : ''; })).concat([kr(h.summa)])); });
       }
     } else if (typ === 'bank') {
-      var sista = (ar.bankrader || []).reduce(function (m, r) { return r.datum.slice(0, 7) > m ? r.datum.slice(0, 7) : m; }, '');
+      var bkLista = K.bankkontonIAr(ar);
+      if (!bkLista.length) bkLista = [huvudbankkonto()];
+      bkLista.forEach(function (bk, bi) {
+      if (bkLista.length > 1) { kol = null; if (bi) { doc.addPage(); y = 18; } avsnitt(banknamn(bk, ar)); }
+      var sista = (ar.bankrader || []).filter(function (r) { return r.konto === bk; }).reduce(function (m, r) { return r.datum.slice(0, 7) > m ? r.datum.slice(0, 7) : m; }, '');
       kol = [{ r: 'Månad', x: V, w: 40 }, { r: 'Banken', x: 95, align: R }, { r: 'Bokfört', x: 125, align: R }, { r: 'Skillnad', x: 155, align: R }, { r: 'Status', x: 160, w: 35 }];
       kolumnrubriker();
-      K.bankavstamningPerManad(ar).filter(function (m) { return m.manad <= sista; }).forEach(function (m) {
+      K.bankavstamningPerManad(ar, bk).filter(function (m) { return m.manad <= sista; }).forEach(function (m) {
         var status = !m.antal ? 'inga transaktioner' : m.skillnad == null ? 'utan saldo' : (m.skillnad === 0 && !m.obokforda) ? 'stämmer'
           : m.obokforda ? m.obokforda + ' ej bokförd' + (m.obokforda === 1 ? '' : 'a') : 'skiljer';
         rad([manadsnamn(m.manad), m.bankSaldo != null ? kr(m.bankSaldo) : '', m.bokfortSaldo != null ? kr(m.bokfortSaldo) : '', m.skillnad != null ? kr(m.skillnad) : '', status]);
       });
-      var a = K.bankavvikelser(ar);
+      var a = K.bankavvikelser(ar, bk);
       kol = null;
       avsnitt('Banktransaktioner som inte är bokförda (' + a.obokforda.length + ')');
       if (a.obokforda.length) {
@@ -6388,7 +6466,7 @@ var VERSIONER = [
         a.obokforda.forEach(function (r) { rad([r.datum, r.text, kr(r.belopp)]); });
         kol = null;
       } else text('Alla är bokförda.');
-      avsnitt('Bokfört på 1930 men saknas i kontoutdraget (' + a.utanBank.length + ')');
+      avsnitt('Bokfört på ' + bk + ' men saknas i kontoutdraget (' + a.utanBank.length + ')');
       if (a.utanBank.length) {
         kol = [{ r: 'Datum', x: V }, { r: 'Ver', x: 40, align: R }, { r: 'Text', x: 45, w: 120 }, { r: 'Belopp', x: H, align: R }];
         kolumnrubriker();
@@ -6397,6 +6475,7 @@ var VERSIONER = [
       } else text('Inga.');
       avsnitt('Saldot går inte ihop i kontoutdraget (' + a.saldofel.length + ')');
       a.saldofel.length ? a.saldofel.forEach(text) : text('Inga.');
+      });
     }
 
     var sidor = doc.getNumberOfPages();
@@ -6772,7 +6851,10 @@ var VERSIONER = [
       '<p style="margin-top:0"><strong class="bara-mus">Släpp fakturor, kvitton eller kontoutdrag här</strong><strong class="bara-touch">Läs in fakturor, kvitton eller kontoutdrag</strong></p>' +
       '<p class="faint"><span class="bara-mus">PDF:er och bilder tolkas av Claude. Kontoutdrag som CSV läses direkt. Du kan också klistra in rader från Excel, eller en skärmbild, med Ctrl+V.</span>' +
       '<span class="bara-touch">Välj en PDF, ett foto av kvittot eller ett kontoutdrag (CSV). Du kan också ta en bild direkt med kameran.</span></p>' +
-      '<div class="row"><button class="btn" data-action="valj-filer">Välj filer</button></div>' +
+      '<div class="row"><button class="btn" data-action="valj-filer">Välj filer</button>' +
+      (bankkonton().length > 1 ? '<label style="display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:normal">Kontoutdraget gäller <select id="inlasKonto" style="width:auto">' +
+        '<option value="auto"' + (valtInlasKonto === 'auto' ? ' selected' : '') + '>Känn igen automatiskt</option>' +
+        bankkonton().map(function (b) { return '<option value="' + esc(b.konto) + '"' + (valtInlasKonto === b.konto ? ' selected' : '') + '>' + esc(banknamn(b.konto, ar)) + '</option>'; }).join('') + '</select></label>' : '') + '</div>' +
       (harNyckel ? '' : '<p class="fel">Claude är inte inställt ännu. Lägg in en API-nyckel under "År och arkiv" för att kunna läsa PDF:er och bilder.</p>') +
       '</div>';
     if (arbetar) html += '<p class="muted" id="arbetar" role="status">' + esc(arbetar) + '</p>';
@@ -6782,6 +6864,7 @@ var VERSIONER = [
     }
 
     var rader = K.oppnaBankrader(ar);
+    var flerBank = bankkonton().length > 1 || K.bankkontonIAr(ar).length > 1;
     var forslag = rader.map(function (r) { return { rad: r, f: forslagMedVal(ar, r) }; });
     var kompletta = forslag.filter(function (x) { return x.f.komplett; }).length;
     var oppnaU = K.oppnaUnderlag(ar);
@@ -6794,8 +6877,9 @@ var VERSIONER = [
       var us = f.underlagIds.map(function (id) { return ar.underlag.find(function (u) { return u.id === id; }); });
       var kallor = us.map(kontoKallaText).filter(Boolean);
       var kalla = f.kalla === 'avgift' ? '<span class="tag ok">' + (f.avgift.manuell ? 'ditt val' : 'känd betalare') + '</span>' : f.kalla === 'underlag' ? '<span class="tag ok">' + esc(kallor.length && kallor.every(function (k) { return k === kallor[0]; }) ? kallor[0] : 'från underlag') + '</span>' : f.kalla === 'regel' ? '<span class="tag">som förra gången</span>' : '<span class="tag varning">välj konto</span>';
+      if (f.kalla === 'overforing') kalla = '<span class="tag ok">överföring</span>';
       html += '<div class="card bankrad">' +
-        '<div class="row" style="justify-content:space-between"><div><strong>' + esc(r.datum) + '</strong> ' + esc(r.text) +
+        '<div class="row" style="justify-content:space-between"><div>' + (flerBank ? '<span class="tag">' + esc(banknamn(r.konto, ar)) + '</span> ' : '') + '<strong>' + esc(r.datum) + '</strong> ' + esc(r.text) +
         (r.referens ? ' <span class="faint">' + esc(r.referens) + '</span>' : '') + '</div>' +
         '<div class="belopp ' + (r.belopp < 0 ? 'fel' : 'ok') + '">' + kr(r.belopp) + '</div></div>' +
         '<div class="grid2">' +
@@ -6849,17 +6933,19 @@ var VERSIONER = [
       html += '</tbody></table></div>';
     }
 
-    var avst = K.bankavstamning(ar);
+    K.bankkontonIAr(ar).forEach(function (konto) {
+    var avst = K.bankavstamning(ar, konto);
     if (avst) {
-      html += '<h2>Avstämning mot banken' + hjalp('bankavstamning') + '</h2><div class="card">Banken ' + esc(avst.datum) + ': <strong>' + kr(avst.bankSaldo) + '</strong> · Bokfört: <strong>' + kr(avst.bokfortSaldo) + '</strong> · ' +
+      html += '<h2>Avstämning mot banken' + (flerBank ? ', ' + esc(banknamn(konto, ar)) : '') + hjalp('bankavstamning') + '</h2><div class="card">Banken ' + esc(avst.datum) + ': <strong>' + kr(avst.bankSaldo) + '</strong> · Bokfört: <strong>' + kr(avst.bokfortSaldo) + '</strong> · ' +
         (avst.skillnad === 0 ? '<span class="ok">stämmer</span>' : '<span class="fel">skillnad ' + kr(avst.skillnad) + '</span>' + (avst.obokforda ? ' <span class="faint">(' + antal(avst.obokforda, 'transaktion är', 'transaktioner är') + ' inte bokförda ännu)</span>' : ''));
       if (avst.ingaendeEnligtBank != null && avst.ingaendeEnligtBank !== avst.ingaendeBokfort && !ar.lastTom) {
         html += '<p class="fel">' + hjalp('ingaendebalans') + ' Ingående balans på ' + avst.konto + ' är ' + kr(avst.ingaendeBokfort) + ' kr, men enligt banken fanns ' + kr(avst.ingaendeEnligtBank) + ' kr före årets första transaktion.</p>' +
           (foregaende(ar) && !foregaende(ar).grovkopia ? '<p class="faint">Ingående balans kommer från föregående år. Kontrollera bokföringen där.</p>'
-            : '<button class="btn btn-secondary btn-small" data-action="ib-fran-bank" data-belopp="' + avst.ingaendeEnligtBank + '">Sätt ingående balans till ' + kr(avst.ingaendeEnligtBank) + ' kr (mot 2067 Balanserad vinst eller förlust)</button>');
+            : '<button class="btn btn-secondary btn-small" data-action="ib-fran-bank" data-konto="' + esc(konto) + '" data-belopp="' + avst.ingaendeEnligtBank + '">Sätt ingående balans till ' + kr(avst.ingaendeEnligtBank) + ' kr (mot 2067 Balanserad vinst eller förlust)</button>');
       }
       html += '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="till-bankavstamning">Visa avstämning per månad</button></div></div>';
     }
+    });
     return html;
   }
 
@@ -7103,10 +7189,15 @@ var VERSIONER = [
   function manadsnamn(m) { return MANADER[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4); }
 
   function rapportBank(ar) {
-    var html = '<h2 style="margin-top:0">Bankavstämning, konto 1930</h2>';
-    if (!(ar.bankrader || []).length) return html + '<p class="muted">Inga kontoutdrag är inlästa för året ännu. Läs in ett kontoutdrag under Läs in.</p>';
-    var sistaMedData = (ar.bankrader || []).reduce(function (m, r) { return r.datum.slice(0, 7) > m ? r.datum.slice(0, 7) : m; }, '');
-    var manader = K.bankavstamningPerManad(ar).filter(function (m) { return m.manad <= sistaMedData; });
+    if (!(ar.bankrader || []).length) return '<h2 style="margin-top:0">Bankavstämning</h2><p class="muted">Inga kontoutdrag är inlästa för året ännu. Läs in ett kontoutdrag under Läs in.</p>';
+    return K.bankkontonIAr(ar).map(function (konto, i) { return rapportBankKonto(ar, konto, i); }).join('');
+  }
+
+  function rapportBankKonto(ar, konto, i) {
+    var html = '<h2' + (i ? '' : ' style="margin-top:0"') + '>Bankavstämning, ' + esc(banknamn(konto, ar)) + '</h2>';
+    var bankrader = (ar.bankrader || []).filter(function (r) { return r.konto === konto; });
+    var sistaMedData = bankrader.reduce(function (m, r) { return r.datum.slice(0, 7) > m ? r.datum.slice(0, 7) : m; }, '');
+    var manader = K.bankavstamningPerManad(ar, konto).filter(function (m) { return m.manad <= sistaMedData; });
     html += '<div class="scroll"><table class="kortlista"><thead><tr><th>Månad</th><th class="num">Banken</th><th class="num">Bokfört</th><th class="num">Skillnad</th><th>Status</th></tr></thead><tbody>';
     manader.forEach(function (m) {
       var status;
@@ -7120,11 +7211,11 @@ var VERSIONER = [
         '<td class="num' + (m.skillnad ? ' fel' : '') + '"' + (m.skillnad != null ? ' data-etikett="Skillnad">' + kr(m.skillnad) : '>') + '</td><td data-etikett="Status">' + status + '</td></tr>';
     });
     html += '</tbody></table></div>';
-    var a = K.bankavvikelser(ar);
+    var a = K.bankavvikelser(ar, konto);
     html += '<h3>Banktransaktioner som inte är bokförda (' + a.obokforda.length + ')</h3>';
     html += a.obokforda.length ? '<ul>' + a.obokforda.map(function (r) { return '<li>' + esc(r.datum) + ' ' + esc(r.text) + ' <strong>' + kr(r.belopp) + '</strong></li>'; }).join('') + '</ul>' +
       (lasLage() ? '' : '<button class="btn btn-secondary btn-small ej-utskrift" data-vy="inlasning">Bokför under Läs in</button>') : '<p class="ok">Alla är bokförda.</p>';
-    html += '<h3>Bokfört på 1930 men saknas i kontoutdraget (' + a.utanBank.length + ')</h3>';
+    html += '<h3>Bokfört på ' + esc(konto) + ' men saknas i kontoutdraget (' + a.utanBank.length + ')</h3>';
     html += a.utanBank.length ? '<p class="faint" style="margin:0">Verifikationer mellan ' + esc(a.period.fran) + ' och ' + esc(a.period.till) + ' som rör bankkontot men inte motsvaras av någon rad i kontoutdraget. Kan vara felbokningar, dubbletter eller transaktioner som saknas i det inlästa utdraget.</p><ul>' +
       a.utanBank.map(function (v) { return '<li><button class="tag knapp-tag" data-action="oppna-ver" data-nr="' + v.nr + '">Ver ' + v.nr + '</button> ' + esc(v.datum) + ' ' + esc(v.text) + ' <strong>' + kr(v.belopp) + '</strong></li>'; }).join('') + '</ul>'
       : '<p class="ok">Inga.</p>';
@@ -7259,8 +7350,23 @@ var VERSIONER = [
     return html + '</div>';
   }
 
+  // Föreningens bankkonton: vilket bokföringskonto varje bankkonto har, och kontonumret för att känna igen kontoutdragen.
+  function vyBankkonton(ar) {
+    var bk = bankkonton(), lasbar = lasLage() ? ' disabled' : '';
+    var val = ar.kontoplan.filter(function (k) { return /^19/.test(k.nr); });
+    return '<h2>Bankkonton' + hjalp('bankkonton') + '</h2><div class="card"><p class="faint" style="margin-top:0">Ett bokföringskonto per bankkonto, så att varje kontoutdrag stäms av för sig. ' +
+      'Kontonumret (eller de sista fyra siffrorna) gör att appen känner igen kontoutdraget när du läser in det. Det sparas bara i föreningens bokföringsfil.</p>' +
+      bk.map(function (b, i) {
+        return '<div class="row" style="align-items:center;margin:6px 0"><select data-bk="' + i + '" data-bkf="konto" style="width:auto" aria-label="Bokföringskonto"' + lasbar + '>' +
+          val.map(function (k) { return '<option value="' + k.nr + '"' + (k.nr === b.konto ? ' selected' : '') + '>' + k.nr + ' ' + esc(k.namn) + '</option>'; }).join('') + '</select>' +
+          '<input data-bk="' + i + '" data-bkf="namn" value="' + esc(b.namn) + '" placeholder="Namn, t.ex. Swedbank företagskonto" style="max-width:260px" aria-label="Namn"' + lasbar + '>' +
+          '<input data-bk="' + i + '" data-bkf="nummer" value="' + esc(b.nummer) + '" placeholder="Kontonummer eller sista fyra siffrorna" style="max-width:240px" aria-label="Kontonummer"' + lasbar + '>' +
+          (i && !lasLage() ? '<button class="btn btn-secondary btn-small" data-action="bank-bort" data-bk="' + i + '">Ta bort</button>' : '') + '</div>';
+      }).join('') + (lasLage() ? '' : '<button class="btn btn-secondary btn-small" data-action="bank-ny">Lägg till bankkonto</button>') + '</div>';
+  }
+
   function vyKontoplan(ar) {
-    var html = '<h2>Kontoplan' + hjalp('kontoplan') + '</h2><div class="card"><div class="grid2"><div><label for="nyttNr">Kontonummer</label><input id="nyttNr" inputmode="numeric" maxlength="4"></div>' +
+    var html = vyBankkonton(ar) + '<h2>Kontoplan' + hjalp('kontoplan') + '</h2><div class="card"><div class="grid2"><div><label for="nyttNr">Kontonummer</label><input id="nyttNr" inputmode="numeric" maxlength="4"></div>' +
       '<div><label for="nyttNamn">Namn</label><input id="nyttNamn"></div></div>' +
       '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="nytt-konto">Lägg till konto</button></div></div>' +
       '<div class="scroll"><table><thead><tr><th>Nr</th><th>Namn</th><th></th></tr></thead><tbody>';
@@ -7603,6 +7709,12 @@ var VERSIONER = [
   };
 
   var HJALP = {
+    bankkonton: {
+      rubrik: 'Bankkonton',
+      vad: 'Varje bankkonto får ett eget konto i bokföringen, till exempel 1930 för företagskontot och 1940 för placeringskontot.',
+      varfor: 'Då kan varje kontoutdrag stämmas av för sig, och balansräkningen visar hur mycket som finns på vart och ett.',
+      gor: 'När du flyttar pengar mellan kontona syns överföringen på båda kontoutdragen. Appen känner igen paret och bokför det en gång, till exempel 1940 mot 1930.'
+    },
     styrelsen: {
       rubrik: 'Styrelsens material',
       vad: 'Protokoll med beslut, uppgifter med ansvarig och datum, förtroendeuppdragen och ärenden till årsmötet, samlat på ett ställe.',
@@ -8104,7 +8216,7 @@ var VERSIONER = [
   function ekonomitextFor(ar) {
     var m = K.medlemsavgifterForAr(ar, reg(), reg().konton.medlemsavgift, store.ar);
     var k = K.registerHarData(reg()) ? K.stadensKontroll(reg(), ar.start.slice(0, 4), store.ar) : null;
-    return K.ekonomitext(ar, { medlemsavgifter: m ? m.belopp : 0, medlemmar: k && k.antal ? k.antal : 0 });
+    return K.ekonomitext(ar, { medlemsavgifter: m ? m.belopp : 0, medlemmar: k && k.antal ? k.antal : 0, bankkonton: bankkonton().map(function (b) { return b.konto; }) });
   }
 
   function sparaArsmote(andring) {
@@ -8260,7 +8372,7 @@ var VERSIONER = [
         if (bank) gor += rad(antal(bank, 'banktransaktion', 'banktransaktioner') + ' att bokföra.', '<button class="btn btn-small" data-vy="inlasning">Läs in</button>');
         var u = K.oppnaUnderlag(ar).length;
         if (u) gor += rad(antal(u, 'underlag väntar', 'underlag väntar') + ' på betalning.', '<button class="btn btn-secondary btn-small" data-vy="inlasning">Visa</button>');
-        var fel = K.bankavstamningPerManad(ar).filter(function (m) { return m.skillnad; });
+        var fel = [].concat.apply([], K.bankkontonIAr(ar).map(function (k) { return K.bankavstamningPerManad(ar, k).filter(function (m) { return m.skillnad; }); }));
         if (fel.length) gor += rad('Banken och bokföringen skiljer sig i ' + antal(fel.length, 'månad', 'månader') + '.', '<button class="btn btn-secondary btn-small" data-action="till-bankavstamning">Bankavstämning</button>');
         var utan = K.kontroller(ar).filter(function (k) { return k.typ === 'saknarUnderlag'; }).length;
         if (utan) gor += rad(antal(utan, 'verifikation saknar', 'verifikationer saknar') + ' underlag.', '<button class="btn btn-secondary btn-small" data-vy="verifikationer">Verifikationer</button>');
@@ -9188,6 +9300,24 @@ var VERSIONER = [
   // ---------- Medlemmar och terminsavgifter ----------
 
   function reg() { return store.medlemsregister || (store.medlemsregister = K.tomtRegister()); }
+
+  // Föreningens bankkonton: bokföringskonto, namn och kontonumret hos banken (för att känna igen kontoutdragen).
+  // Sparas i bokföringsfilen i OneDrive, aldrig i appens kod.
+  function bankkonton() { return Array.isArray(store.bankkonton) && store.bankkonton.length ? store.bankkonton : [{ konto: '1930', namn: '', nummer: '' }]; }
+  function huvudbankkonto() { return bankkonton()[0].konto; }
+  function banknamn(konto, ar) {
+    var b = bankkonton().find(function (x) { return x.konto === konto; });
+    return konto + ' ' + ((b && b.namn) || K.kontonamn(ar || aktivt(), konto) || '');
+  }
+  var valtInlasKonto = 'auto';
+  // Kontot för ett kontoutdrag: det valda, det enda, eller det som känns igen på kontonumret i filen.
+  function kontoForInlasning(text, namn) {
+    if (valtInlasKonto !== 'auto') return valtInlasKonto;
+    if (bankkonton().length === 1) return huvudbankkonto();
+    var k = K.kontoForUtdrag(bankkonton(), text || '', namn || '');
+    if (!k) throw new Error('Appen kunde inte se vilket bankkonto kontoutdraget gäller. Välj konto vid "Kontoutdraget gäller" och läs in igen.');
+    return k;
+  }
   function sparaReg(r) { store.medlemsregister = r; sparaRegister(); }
   function medlemAv(id) { return reg().medlemmar.find(function (m) { return m.id === id; }) || null; }
   // Aktiva medlemmar; avförda är anonymiserade och kan inte väljas.
@@ -9839,6 +9969,14 @@ var VERSIONER = [
 
   document.addEventListener('change', function (e) {
     if (e.target.dataset.arende) { try { andraStyr('styr', K.andraArende(styrData(), e.target.dataset.arende, { status: e.target.value })); } catch (err) { visa(err.message, true); } return; }
+    if (e.target.id === 'inlasKonto') { valtInlasKonto = e.target.value; return; }
+    if (e.target.dataset.bk != null && e.target.dataset.bkf) {
+      var lista = bankkonton().map(function (b) { return Object.assign({}, b); });
+      lista[Number(e.target.dataset.bk)][e.target.dataset.bkf] = e.target.value.trim();
+      var kontonr = lista.map(function (b) { return b.konto; });
+      if (kontonr.some(function (k, i) { return kontonr.indexOf(k) !== i; })) { visa('Två bankkonton kan inte ha samma bokföringskonto.', true); return; }
+      store.bankkonton = lista; spara(); render(); return;
+    }
     if (e.target.id === 'valjAr') { store.aktivt = e.target.value; spara(); meddelande = null; utkast = nyttUtkast(); render(); }
     if (e.target.id === 'hbKonto') { valtKonto = e.target.value; render(); }
     if (e.target.id === 'mTermin') { valdTermin = e.target.value; render(); }
@@ -10696,6 +10834,8 @@ var VERSIONER = [
       if (!window.confirm('Bokföra ' + klara.length + ' transaktioner enligt förslagen?')) return;
       var forsta = null, sista = null;
       klara.forEach(function (r) {
+        // Andra halvan av en överföring är redan bokförd med den första.
+        if (ar.bankrader.find(function (x) { return x.id === r.id; }).verifikation != null) return;
         var res = bokforBankrad(ar, r);
         ar = res.ar;
         if (forsta == null) forsta = res.verifikation.nr;
@@ -10717,9 +10857,24 @@ var VERSIONER = [
       meddelande = null;
       render();
     },
+    'bank-ny': function () {
+      var anvanda = bankkonton().map(function (b) { return b.konto; });
+      var ledigt = ['1940', '1931', '1932', '1950'].concat(aktivt().kontoplan.map(function (k) { return k.nr; }).filter(function (n) { return /^19/.test(n); }))
+        .find(function (n) { return anvanda.indexOf(n) < 0 && aktivt().kontoplan.some(function (k) { return k.nr === n; }); });
+      if (!ledigt) throw new Error('Lägg först till ett konto i 1900-serien i kontoplanen, t.ex. 1940 Övriga bankkonton.');
+      store.bankkonton = bankkonton().concat([{ konto: ledigt, namn: '', nummer: '' }]);
+      spara(); render();
+    },
+    'bank-bort': function (t) {
+      var i = Number(t.dataset.bk);
+      if (!window.confirm('Ta bort ' + banknamn(bankkonton()[i].konto) + ' från bankkontona? Bokföringen påverkas inte.')) return;
+      store.bankkonton = bankkonton().filter(function (b, j) { return j !== i; });
+      spara(); render();
+    },
     'ib-fran-bank': function (t) {
-      setAktivt(K.sattIngaendeSaldo(aktivt(), '1930', Number(t.dataset.belopp)));
-      visa('Ingående balans på 1930 är satt till ' + kr(Number(t.dataset.belopp)) + ' kr.');
+      var konto = t.dataset.konto || huvudbankkonto();
+      setAktivt(K.sattIngaendeSaldo(aktivt(), konto, Number(t.dataset.belopp)));
+      visa('Ingående balans på ' + konto + ' är satt till ' + kr(Number(t.dataset.belopp)) + ' kr.');
     },
     'bokfor-resultat': function () {
       var ar = aktivt();
@@ -10803,7 +10958,7 @@ var VERSIONER = [
       var datum = u.datum && u.datum >= ar.start && u.datum <= ar.slut ? u.datum : standardDatum(ar);
       utkast = {
         datum: datum, text: [u.motpart, u.beskrivning].filter(Boolean).join(': '), underlag: '', underlagKommentar: '',
-        rader: [radTillUtkast({ konto: u.foreslagetKonto || '', belopp: b }), radTillUtkast({ konto: '1930', belopp: -b })],
+        rader: [radTillUtkast({ konto: u.foreslagetKonto || '', belopp: b }), radTillUtkast({ konto: huvudbankkonto(), belopp: -b })],
         koppling: { underlagIds: [u.id] }
       };
       vy = 'ny';
