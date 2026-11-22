@@ -345,6 +345,15 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.35', datum: '2026-11-22',
+    nyheter: [
+      'Konteringsregler under Bokföring, Kontoplan: se, ändra och ta bort reglerna, och lägg till egna (till exempel hyresvärdens namn → 5010).',
+      'Förslag på regler från tidigare års bokföring, med hur ofta ordet hört till kontot. Läggs till med ett klick.',
+      'Allmänna regler för bankens avgifter (6570) gäller från början.',
+      'Rättelse: appen lär sig av både texten och referensen i kontoutdraget. Tidigare kunde alla betalningar via plusgiro få samma konto, eftersom texten är densamma.'
+    ]
+  },
+  {
     version: '1.34', datum: '2026-11-22',
     nyheter: [
       'Utläggsredovisning under Bokföring, Läs in: välj vem som lagt ut, kryssa för kvittona och skriv den ersättningsbara delen och vad som är privat.',
@@ -1744,8 +1753,10 @@ var VERSIONER = [
     return basta;
   }
 
-  function larRegel(regler, text, belopp, konto) {
-    var monster = normaliseraText(text);
+  // Lär in bankens text och referens -> konto. Referensen tas med eftersom texten ofta är allmän
+  // (t.ex. "Pg-bet. via internet") och mottagaren står i referensen.
+  function larRegel(regler, text, belopp, konto, referens) {
+    var monster = normaliseraText(text + ' ' + (referens || ''));
     regler = (regler || []).slice();
     if (!monster || !giltigtKontonummer(konto)) return regler;
     var riktning = riktningFor(belopp);
@@ -1753,6 +1764,41 @@ var VERSIONER = [
     if (i >= 0) regler[i] = { monster: monster, riktning: riktning, konto: konto };
     else regler.push({ monster: monster, riktning: riktning, konto: konto });
     return regler;
+  }
+
+  // Allmänna regler som gäller alla föreningar. Föreningens egna regler går före.
+  var STANDARDREGLER = [
+    { monster: 'pris banktjänster', riktning: 'ut', konto: '6570' },
+    { monster: 'pris kontopaket', riktning: 'ut', konto: '6570' },
+    { monster: 'årsavgift kort', riktning: 'ut', konto: '6570' }
+  ];
+
+  // Förslag på regler från tidigare år (arkivkopior och vanliga år): ord i verifikationstexten som nästan alltid
+  // hör till samma kostnads- eller bidragskonto, t.ex. hyresvärdens namn. Ord som redan har en regel föreslås inte.
+  var REGELSTOPP = ['utlägg', 'ersättning', 'betalning', 'internet', 'faktura', 'överföring', 'terminsavgift', 'medlemsavgift', 'swish', 'bankgiro', 'inbetalning', 'kvitto', 'enligt', 'avser'];
+  function forslagRegler(arLista, regler) {
+    var ord = {};
+    (arLista || []).forEach(function (ar) {
+      (ar.verifikationer || []).forEach(function (v) {
+        if (v.rattar != null) return;
+        var motrader = v.rader.filter(function (r) { return !/^19/.test(r.konto); });
+        var bank = v.rader.some(function (r) { return /^19/.test(r.konto); });
+        if (!bank || motrader.length !== 1 || !/^(39|[4-8])/.test(motrader[0].konto)) return;
+        var riktning = motrader[0].belopp > 0 ? 'ut' : 'in';
+        normaliseraText(v.text).split(' ').filter(function (w, i, l) { return w.length >= 5 && REGELSTOPP.indexOf(w) < 0 && l.indexOf(w) === i; }).forEach(function (w) {
+          var o = ord[w] = ord[w] || { totalt: 0, konton: {} };
+          o.totalt++;
+          var k = motrader[0].konto + '|' + riktning;
+          o.konton[k] = (o.konton[k] || 0) + 1;
+        });
+      });
+    });
+    var finns = (regler || []).map(function (r) { return r.monster; });
+    return Object.keys(ord).map(function (w) {
+      var o = ord[w], bast = Object.keys(o.konton).sort(function (a, b) { return o.konton[b] - o.konton[a]; })[0];
+      return { monster: w, konto: bast.split('|')[0], riktning: bast.split('|')[1], antal: o.konton[bast], totalt: o.totalt };
+    }).filter(function (f) { return f.antal >= 2 && f.antal / f.totalt >= 0.8 && finns.indexOf(f.monster) < 0; })
+      .sort(function (a, b) { return b.antal - a.antal || (a.monster < b.monster ? -1 : 1); }).slice(0, 20);
   }
 
   // ---------- Underlag (tolkade fakturor och kvitton) ----------
@@ -1958,7 +2004,7 @@ var VERSIONER = [
   function forslagForBankrad(ar, bankrad, regler, opt) {
     var ids = opt && opt.underlagIds ? opt.underlagIds : matchaUnderlag(ar, bankrad);
     var us = ids.map(function (id) { return (ar.underlag || []).find(function (u) { return u.id === id; }); }).filter(Boolean);
-    var regel = hittaRegel(regler, bankrad.text + ' ' + bankrad.referens, bankrad.belopp);
+    var regel = hittaRegel(regler, bankrad.text + ' ' + bankrad.referens, bankrad.belopp) || hittaRegel(STANDARDREGLER, bankrad.text + ' ' + bankrad.referens, bankrad.belopp);
     var regelKonto = regel ? regel.konto : '';
     var giltigt = function (nr) { return nr && ar.kontoplan.some(function (k) { return k.nr === nr; }) ? nr : ''; };
     var rader = [{ konto: bankrad.konto, belopp: bankrad.belopp }];
@@ -4009,6 +4055,8 @@ var VERSIONER = [
     balansrakning: balansrakning,
     nastaAr: nastaAr,
     arFranArkiv: arFranArkiv,
+    STANDARDREGLER: STANDARDREGLER,
+    forslagRegler: forslagRegler,
     skapaUtlagg: skapaUtlagg,
     taBortUtlagg: taBortUtlagg,
     utlaggStatus: utlaggStatus,
@@ -5857,7 +5905,7 @@ var VERSIONER = [
   }
 
   function larAv(rad, rader) {
-    if (rader.length === 2) store.regler = K.larRegel(store.regler, rad.text, rad.belopp, rader[1].konto);
+    if (rader.length === 2) store.regler = K.larRegel(store.regler, rad.text, rad.belopp, rader[1].konto, rad.referens);
   }
 
   function bokforBankrad(ar, rad) {
@@ -7488,8 +7536,41 @@ var VERSIONER = [
       }).join('') + (lasLage() ? '' : '<button class="btn btn-secondary btn-small" data-action="bank-ny">Lägg till bankkonto</button>') + '</div>';
   }
 
+  // Konteringsregler: text i kontoutdraget -> konto. Föreningens egna, förslag från tidigare år och de allmänna.
+  function vyRegler(ar) {
+    var regler = store.regler || [], lasbar = lasLage();
+    var namn = function (k) { return K.kontonamn(ar, k) || '(finns inte i kontoplanen)'; };
+    var html = '<h2>Konteringsregler' + hjalp('regler') + '</h2><div class="card"><p class="faint" style="margin-top:0">När en text i kontoutdraget (text eller referens) innehåller orden föreslår appen kontot. ' +
+      'Appen lär sig själv när du bokför, och du kan lägga till regler här. De sparas i föreningens bokföringsfil.</p>';
+    html += regler.length ? '<div class="scroll"><table class="kortlista"><thead><tr><th>Texten innehåller</th><th>In/ut</th><th>Konto</th><th></th></tr></thead><tbody>' + regler.map(function (r, i) {
+      return '<tr><td><strong>' + esc(r.monster) + '</strong></td><td data-etikett="In/ut">' + (r.riktning === 'in' ? 'in' : r.riktning === 'ut' ? 'ut' : 'båda') + '</td>' +
+        '<td data-etikett="Konto"><input list="kontolista" data-regel="' + i + '" value="' + esc(r.konto) + '" style="width:80px" aria-label="Konto"' + (lasbar ? ' disabled' : '') + '> <span class="faint">' + esc(namn(r.konto)) + '</span></td>' +
+        '<td>' + (lasbar ? '' : '<button class="btn btn-secondary btn-small" data-action="regel-bort" data-i="' + i + '">Ta bort</button>') + '</td></tr>';
+    }).join('') + '</tbody></table></div>' : '<p class="faint">Inga egna regler ännu.</p>';
+    html += '<datalist id="kontolista">' + ar.kontoplan.map(function (k) { return '<option value="' + k.nr + '">' + esc(k.namn) + '</option>'; }).join('') + '</datalist>';
+    if (!lasbar) {
+      html += '<div class="row" style="margin-top:8px"><input id="nyRegelText" placeholder="Ord i texten, t.ex. hyresvärdens namn" style="max-width:260px" aria-label="Ord i texten">' +
+        '<select id="nyRegelRiktning" style="width:auto" aria-label="In eller ut"><option value="ut">utbetalning</option><option value="in">inbetalning</option></select>' +
+        '<input id="nyRegelKonto" list="kontolista" placeholder="Konto" style="width:90px" aria-label="Konto">' +
+        '<button class="btn btn-small" data-action="regel-ny">Lägg till regel</button></div>';
+      var tidigare = Object.keys(store.ar).filter(function (id) { return id !== store.aktivt; }).map(function (id) { return store.ar[id]; });
+      var forslag = K.forslagRegler(tidigare, regler);
+      if (forslag.length) {
+        html += '<h3>Förslag från tidigare år</h3><p class="faint" style="margin-top:0">Ord som nästan alltid hört till samma konto i bokföringen ' +
+          esc(Object.keys(store.ar).filter(function (id) { return id !== store.aktivt; }).sort().join(', ')) + '. Byt konto om du vill konterar annorlunda nu.</p>' +
+          '<div class="scroll"><table class="kortlista"><tbody>' + forslag.map(function (f, i) {
+            return '<tr><td><strong>' + esc(f.monster) + '</strong> <span class="faint">' + (f.riktning === 'in' ? 'inbetalning' : 'utbetalning') + ', ' + f.antal + ' av ' + f.totalt + ' gånger</span></td>' +
+              '<td data-etikett="Konto"><input list="kontolista" id="forslagKonto' + i + '" value="' + esc(f.konto) + '" style="width:80px" aria-label="Konto"> <span class="faint">' + esc(namn(f.konto)) + '</span></td>' +
+              '<td><button class="btn btn-secondary btn-small" data-action="regel-forslag" data-i="' + i + '">Lägg till</button></td></tr>';
+          }).join('') + '</tbody></table></div>';
+      }
+    }
+    html += '<p class="faint" style="margin-bottom:0">Allmänna regler som alltid gäller: ' + esc(K.STANDARDREGLER.map(function (r) { return r.monster + ' → ' + r.konto; }).join(', ')) + '.</p></div>';
+    return html;
+  }
+
   function vyKontoplan(ar) {
-    var html = vyBankkonton(ar) + '<h2>Kontoplan' + hjalp('kontoplan') + '</h2><div class="card"><div class="grid2"><div><label for="nyttNr">Kontonummer</label><input id="nyttNr" inputmode="numeric" maxlength="4"></div>' +
+    var html = vyBankkonton(ar) + vyRegler(ar) + '<h2>Kontoplan' + hjalp('kontoplan') + '</h2><div class="card"><div class="grid2"><div><label for="nyttNr">Kontonummer</label><input id="nyttNr" inputmode="numeric" maxlength="4"></div>' +
       '<div><label for="nyttNamn">Namn</label><input id="nyttNamn"></div></div>' +
       '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="nytt-konto">Lägg till konto</button></div></div>' +
       '<div class="scroll"><table><thead><tr><th>Nr</th><th>Namn</th><th></th></tr></thead><tbody>';
@@ -7832,6 +7913,12 @@ var VERSIONER = [
   };
 
   var HJALP = {
+    regler: {
+      rubrik: 'Konteringsregler',
+      vad: 'Regler som säger vilket konto en betalning brukar bokföras på, utifrån texten eller referensen i kontoutdraget.',
+      varfor: 'Föreningen betalar ofta samma saker: hyra, bankavgifter och förbundsavgifter. Med regler föreslår appen rätt konto direkt, och samma sak bokförs på samma sätt varje gång.',
+      gor: 'Appen lär sig när du bokför. Du kan också lägga till regler själv, eller ta förslagen från tidigare års bokföring. Tar du bort en regel lär sig appen den igen nästa gång du bokför samma sak.'
+    },
     utlagg: {
       rubrik: 'Utlägg',
       vad: 'När någon i föreningen betalat något själv, till exempel mat till en workshop, och föreningen ersätter det.',
@@ -10212,6 +10299,12 @@ var VERSIONER = [
   document.addEventListener('change', function (e) {
     if (e.target.dataset.arende) { try { andraStyr('styr', K.andraArende(styrData(), e.target.dataset.arende, { status: e.target.value })); } catch (err) { visa(err.message, true); } return; }
     if (e.target.id === 'inlasKonto') { valtInlasKonto = e.target.value; return; }
+    if (e.target.dataset.regel != null) {
+      var rk = e.target.value.trim();
+      if (!aktivt().kontoplan.some(function (k) { return k.nr === rk; })) { visa('Konto ' + rk + ' finns inte i kontoplanen.', true); return; }
+      store.regler = (store.regler || []).map(function (r, i) { return i === Number(e.target.dataset.regel) ? Object.assign({}, r, { konto: rk }) : r; });
+      spara(); render(); return;
+    }
     if (e.target.dataset.bk != null && e.target.dataset.bkf) {
       var lista = bankkonton().map(function (b) { return Object.assign({}, b); });
       lista[Number(e.target.dataset.bk)][e.target.dataset.bkf] = e.target.value.trim();
@@ -11123,6 +11216,26 @@ var VERSIONER = [
     'utlagg-pdf': function (t) {
       var ar = aktivt(), x = (ar.utlagg || []).find(function (a) { return a.id === t.dataset.id; });
       skapaUtlaggPdf(ar, t.dataset.id).then(function (blob) { laddaNer(K.sakertNamn('Utläggsredovisning ' + x.person + ' ' + (x.datum || idag()) + '.pdf'), blob, 'application/pdf'); }, function (err) { visa(err.message, true); });
+    },
+    'regel-ny': function () {
+      var ord = K.normaliseraText(varde('nyRegelText')), konto = varde('nyRegelKonto');
+      if (!ord) throw new Error('Skriv ett eller flera ord som står i kontoutdraget.');
+      if (!aktivt().kontoplan.some(function (k) { return k.nr === konto; })) throw new Error('Konto ' + (konto || '(tomt)') + ' finns inte i kontoplanen.');
+      var riktning = varde('nyRegelRiktning');
+      store.regler = (store.regler || []).filter(function (r) { return !(r.monster === ord && r.riktning === riktning); }).concat([{ monster: ord, riktning: riktning, konto: konto }]);
+      spara(); render();
+    },
+    'regel-bort': function (t) {
+      store.regler = (store.regler || []).filter(function (r, i) { return i !== Number(t.dataset.i); });
+      spara(); render();
+    },
+    'regel-forslag': function (t) {
+      var tidigare = Object.keys(store.ar).filter(function (id) { return id !== store.aktivt; }).map(function (id) { return store.ar[id]; });
+      var f = K.forslagRegler(tidigare, store.regler || [])[Number(t.dataset.i)];
+      var konto = varde('forslagKonto' + t.dataset.i) || f.konto;
+      if (!aktivt().kontoplan.some(function (k) { return k.nr === konto; })) throw new Error('Konto ' + konto + ' finns inte i kontoplanen för ' + store.aktivt + '. Välj ett annat konto, eller lägg till det i kontoplanen nedan.');
+      store.regler = (store.regler || []).concat([{ monster: f.monster, riktning: f.riktning, konto: konto }]);
+      spara(); render();
     },
     'bank-ny': function () {
       var anvanda = bankkonton().map(function (b) { return b.konto; });
