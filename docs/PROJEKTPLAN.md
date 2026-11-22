@@ -140,6 +140,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Utbetalningen matchas mot redovisningens kvitton i upp till ett år, hela eller i delar (flest kvitton, därefter närmast i tid), och personens namn i banktexten prioriteras. Verifikationen får texten "Utlägg …" och ett konto per kvitto.
 - Är utbetalningen avrundad (flera kvitton, högst 1 kr ifrån) matchas den ändå, och skillnaden bokförs på 3740 Öres- och kronutjämning, som läggs till i kontoplanen vid behov (från 1.37). Kontot syns vid varje kvitto i redovisningen.
 - Ett kvitto kan tas ur en redovisning som inte är utbetald ("Ta ur"); tom redovisning tas bort. Kvittot kan öppnas från redovisningen. Felmeddelanden visas också längst ner på skärmen (från 1.38).
+- "Ändra" på redovisningar som inte är helt utbetalda: lägg till och ta ur kvitton, ändra belopp, privat del och text. Utbetalda kvitton och personen (om något är utbetalt) ligger fast (från 1.39).
 - Sammanställning som PDF med kvittobelopp, privat del, ersättning och rad för attest. Översikten visar utlägg som väntar.
 
 ## Konteringsregler (från version 1.35)
