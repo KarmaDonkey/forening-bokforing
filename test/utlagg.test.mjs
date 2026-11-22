@@ -77,3 +77,40 @@ test('vid lika många kvitton väljs de som ligger närmast varandra i tid', () 
   ar = bankrad(ar, '2031-01-05', -150, 'Exempel');
   assert.deepEqual(json(K.matchaUnderlag(ar, ar.bankrader[0]).sort()), ['r', 's']);
 });
+
+test('en avrundad utbetalning för flera kvitton matchas, och skillnaden bokförs på 3740', () => {
+  let ar = K.skapaAr({ start: '2031-01-01', ingaendeBalans: { 1930: kr(1000), 2067: kr(-1000) } });
+  assert.equal(ar.kontoplan.some((k) => k.nr === '3740'), false, 'testet förutsätter att kontot saknas');
+  [['t1', '2030-12-01', 120.4, '5810'], ['t2', '2030-12-02', 75, '6110'], ['t3', '2030-12-03', 64.2, '5400']].forEach(([id, datum, b, konto]) => {
+    ar = K.laggTillUnderlag(ar, { id, datum, motpart: 'Butik ' + id, belopp: kr(b), riktning: 'utgift', foreslagetKonto: konto, filnamn: id });
+  });
+  ar = K.skapaUtlagg(ar, { person: 'Exempel', poster: ['t1', 't2', 't3'].map((underlagId) => ({ underlagId })) }).ar;
+  ar = bankrad(ar, '2031-01-08', -260, 'Exempel');
+  const f = K.forslagForBankrad(ar, ar.bankrader[0], []);
+  assert.deepEqual(json(f.underlagIds.sort()), ['t1', 't2', 't3']);
+  assert.equal(f.avrundning, kr(0.4));
+  assert.equal(f.komplett, true);
+  assert.deepEqual(json(f.rader.map((r) => [r.konto, r.belopp]).sort()), [['1930', kr(-260)], ['3740', kr(0.4)], ['5400', kr(64.2)], ['5810', kr(120.4)], ['6110', kr(75)]]);
+  assert.match(f.text, /avrundat 0.40 kr/);
+  assert.equal(K.kontonamn(ar, '3740'), 'Öres- och kronutjämning', 'namnet visas innan kontot finns');
+  const res = K.bokforKopplat(ar, { datum: f.datum, text: f.text, rader: f.rader }, { bankradId: f.bankradId, underlagIds: f.underlagIds });
+  assert.equal(res.ar.kontoplan.find((k) => k.nr === '3740').namn, 'Öres- och kronutjämning');
+  assert.equal(K.utlaggStatus(res.ar, res.ar.utlagg[0].id).klar, true);
+});
+
+test('avrundning gäller bara utlägg med flera kvitton och högst 1 kr, och exakt summa går före', () => {
+  let ar = K.skapaAr({ start: '2031-01-01', ingaendeBalans: { 1930: kr(1000), 2067: kr(-1000) } });
+  [['t1', '2030-12-01', 120.4], ['t2', '2030-12-02', 75], ['t3', '2030-12-03', 64.2], ['t4', '2030-12-04', 58.6]].forEach(([id, datum, b]) => {
+    ar = K.laggTillUnderlag(ar, { id, datum, motpart: 'Butik', belopp: kr(b), riktning: 'utgift', foreslagetKonto: '5400', filnamn: id });
+  });
+  ar = K.laggTillUnderlag(ar, { id: 'lös', datum: '2030-12-05', motpart: 'Butik', belopp: kr(33.3), riktning: 'utgift', foreslagetKonto: '5400', filnamn: 'lös' });
+  ar = K.skapaUtlagg(ar, { person: 'Exempel', poster: ['t1', 't2', 't3', 't4'].map((underlagId) => ({ underlagId })) }).ar;
+  const matcha = (belopp) => { const a = bankrad(ar, '2031-01-08', belopp, 'Ersattning'); return json(K.matchaUnderlag(a, a.bankrader[0]).sort()); };
+  assert.deepEqual(matcha(-195.4), ['t1', 't2'], 'exakt summa');
+  assert.deepEqual(matcha(-195), ['t1', 't2'], '40 öre avrundat');
+  assert.deepEqual(matcha(-199), [], 'mer än 1 kr matchas inte');
+  assert.deepEqual(matcha(-33), [], 'ett kvitto utanför utlägg avrundas inte');
+  assert.deepEqual(matcha(-318.2), ['t1', 't2', 't3', 't4'], 'hela redovisningen exakt');
+  const a = bankrad(ar, '2031-01-08', -318, 'Ersattning');
+  assert.equal(K.forslagForBankrad(a, a.bankrader[0], []).avrundning, kr(-0.2), 'utbetalt mindre ger kredit på 3740');
+});
