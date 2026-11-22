@@ -140,6 +140,12 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Utbetalningen matchas mot redovisningens kvitton i upp till ett år, hela eller i delar (flest kvitton, därefter närmast i tid), och personens namn i banktexten prioriteras. Verifikationen får texten "Utlägg …" och ett konto per kvitto.
 - Sammanställning som PDF med kvittobelopp, privat del, ersättning och rad för attest. Översikten visar utlägg som väntar.
 
+## Konteringsregler (från version 1.35)
+
+- Regler text → konto syns och kan ändras under Kontoplan. Appen lär sig av både text och referens i kontoutdraget.
+- Förslag på regler från tidigare års bokföring (ord som minst två gånger och i minst 80 % av fallen hört till samma kostnads- eller bidragskonto). Föreningens egna regler sparas i bokföringsfilen, aldrig i koden.
+- Allmänna regler för bankavgifter (6570) gäller från början.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
