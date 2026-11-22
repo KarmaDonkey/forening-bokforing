@@ -349,6 +349,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.40', datum: '2026-11-22',
+    nyheter: [
+      'Medlemsregistret visar betalningar som hör till verifikationer som inte finns längre (till exempel från testbokföringen före "Börja om"), och de kan tas bort med ett klick. Medlemmar och Swish-nummer finns kvar.',
+      'Swish från ett privat mobilnummer föreslås inte längre som betalning av en faktura, om inte fakturans namn eller nummer står i betalningen.',
+      'En inbetalning som kommer mer än två dagar före fakturadatum föreslås inte som betalning av fakturan.'
+    ]
+  },
+  {
     version: '1.39', datum: '2026-11-22',
     nyheter: [
       'Knappen "Ändra" på utläggsredovisningar som inte är helt utbetalda: lägg till eller ta ur kvitton och ändra belopp, privat del och text i samma formulär som när redovisningen skapades.',
@@ -2036,7 +2044,7 @@ var VERSIONER = [
   // annars upp till fyra som tillsammans blir exakt beloppet (t.ex. en utläggsredovisning).
   function matchaUnderlag(ar, bankrad) {
     var kandidater = oppnaUnderlag(ar).filter(function (u) {
-      return inomFonster(u, bankrad) && (bankbelopp(u) < 0) === (bankrad.belopp < 0);
+      return inomFonster(u, bankrad) && (bankbelopp(u) < 0) === (bankrad.belopp < 0) && !osannoliktUnderlag(u, bankrad);
     });
     // Står utläggspersonens namn i bankens text prövas hens utläggsredovisning först.
     var text = bankrad.text + ' ' + bankrad.referens;
@@ -2301,6 +2309,18 @@ var VERSIONER = [
   // Underlag som troligen hör till en bankrad trots att belopp eller datum inte stämmer exakt,
   // t.ex. öresavrundning, sen betalning eller en faktura som ligger i ett annat räkenskapsår.
   // extra: väntande underlag från andra år, som [{ arId, underlag }].
+  // En inbetalning som inte rimligen hör till underlaget: Swish från ett privat mobilnummer utan fakturans namn
+  // eller nummer i texten, eller en betalning som kommer mer än två dagar före fakturadatum.
+  function osannoliktUnderlag(u, bankrad) {
+    if (u.riktning !== 'intakt' || bankrad.belopp <= 0) return false;
+    if (u.datum && dagarMellan(u.datum, bankrad.datum) < -2) return true;
+    var text = String(bankrad.text || '') + ' ' + String(bankrad.referens || '');
+    if (!hittaMobilnummer(text)) return false;
+    var siffror = text.replace(/\D/g, '');
+    var nummer = [u.ocr, u.fakturanummer].map(function (x) { return String(x || '').replace(/\D/g, ''); }).filter(function (x) { return x.length >= 3; });
+    return !namnIText(u.motpart, text) && !nummer.some(function (x) { return siffror.indexOf(x) >= 0; });
+  }
+
   function trolligaUnderlag(ar, bankrad, extra) {
     var kandidater = oppnaUnderlag(ar).map(function (u) { return { arId: null, u: u }; })
       .concat((extra || []).filter(function (x) { return arBetalbartUnderlag(x.underlag) && x.underlag.verifikation == null; })
@@ -2309,6 +2329,7 @@ var VERSIONER = [
     kandidater.forEach(function (k) {
       var u = k.u;
       if ((bankbelopp(u) < 0) !== (bankrad.belopp < 0)) return;
+      if (osannoliktUnderlag(u, bankrad)) return;
       var skillnad = Math.abs(bankbelopp(u) - bankrad.belopp);
       var grans = Math.max(5000, Math.round(Math.abs(bankrad.belopp) * 0.02));
       if (skillnad > grans) return;
@@ -2927,6 +2948,24 @@ var VERSIONER = [
     if (b.meddelande) post.meddelande = String(b.meddelande);
     if (b.historik) post.historik = true;
     return Object.assign({}, reg, { betalningar: reg.betalningar.concat([post]) });
+  }
+
+  // Betalningar som hör till ett år i bokföringen men vars bankrad inte längre är bokförd i samma verifikation,
+  // t.ex. efter "Börja om" eller när en verifikation har tagits bort. Betalningar utan år (historik) räknas inte.
+  function foraldradeBetalningar(reg, arMap) {
+    return (reg.betalningar || []).filter(function (b) {
+      var ar = b.arId && arMap ? arMap[b.arId] : null;
+      if (!ar) return false;
+      if (b.bankradId) {
+        var rad = (ar.bankrader || []).find(function (r) { return r.id === b.bankradId; });
+        return !rad || rad.verifikation == null || rad.verifikation !== b.ver;
+      }
+      return b.ver != null && !(ar.verifikationer || []).some(function (v) { return v.nr === b.ver; });
+    }).map(function (b) { return b.id; });
+  }
+
+  function taBortBetalningar(reg, ids) {
+    return Object.assign({}, reg, { betalningar: reg.betalningar.filter(function (b) { return ids.indexOf(b.id) < 0; }) });
   }
 
   function taBortBetalning(reg, id) {
@@ -4201,6 +4240,7 @@ var VERSIONER = [
     skapaUtlagg: skapaUtlagg,
     taBortUtlagg: taBortUtlagg,
     taUrUtlagg: taUrUtlagg,
+    osannoliktUnderlag: osannoliktUnderlag,
     andraUtlagg: andraUtlagg,
     utlaggNamn: utlaggNamn,
     utlaggStatus: utlaggStatus,
@@ -4293,6 +4333,8 @@ var VERSIONER = [
     avgiftsrader: avgiftsrader,
     registreraBetalning: registreraBetalning,
     taBortBetalning: taBortBetalning,
+    foraldradeBetalningar: foraldradeBetalningar,
+    taBortBetalningar: taBortBetalningar,
     okoppladeInbetalningar: okoppladeInbetalningar,
     terminerMedData: terminerMedData,
     terminsstatistik: terminsstatistik,
@@ -10063,6 +10105,15 @@ var VERSIONER = [
     var flik = vy.slice(2);
     if (!(flik === 'lista' && (medlemVy === 'medlem' || medlemVy === 'kvitto'))) medlemVy = flik;
     var html = '';
+    var gamla = lasLage() ? [] : K.foraldradeBetalningar(r, store.ar);
+    if (gamla.length) {
+      var arIds = r.betalningar.filter(function (b) { return gamla.indexOf(b.id) >= 0; }).map(function (b) { return b.arId; })
+        .filter(function (x, i, l) { return l.indexOf(x) === i; }).sort();
+      html += '<div class="card" role="status"><strong>' + antal(gamla.length, 'betalning', 'betalningar') + ' för ' + esc(arIds.join(', ')) + ' hör till verifikationer som inte finns längre</strong>' +
+        '<p style="margin:6px 0">Det kan vara betalningar från testbokföringen före "Börja om". Så länge de finns kan samma Swish-betalningar inte kopplas till medlemmar igen. ' +
+        'Medlemmar, Swish-nummer och betalningar från tidigare år påverkas inte.</p>' +
+        '<button class="btn btn-small" data-action="rensa-gamla-betalningar">Ta bort ' + antal(gamla.length, 'betalning', 'betalningar') + '</button></div>';
+    }
     if (medlemVy === 'koppla') return html + vyMedlemKoppla(ar, okopplade);
     if (medlemVy === 'lista') return html + vyMedlemLista();
     if (medlemVy === 'betalare') return html + vyBetalare();
@@ -11381,6 +11432,13 @@ var VERSIONER = [
     },
     'utlagg-ny': function () { utlaggUtkast = { person: '', text: '', val: {} }; render(); },
     'utlagg-avbryt': function () { utlaggUtkast = null; render(); },
+    'rensa-gamla-betalningar': function () {
+      var ids = K.foraldradeBetalningar(reg(), store.ar);
+      if (!ids.length) return;
+      if (!window.confirm('Ta bort ' + ids.length + ' betalningar som hör till verifikationer som inte finns längre? Medlemmarna och deras Swish-nummer finns kvar.')) return;
+      sparaReg(K.taBortBetalningar(reg(), ids));
+      visa(antal(ids.length, 'gammal betalning är borttagen', 'gamla betalningar är borttagna') + '. Nu kan Swish-betalningarna kopplas till medlemmar när du bokför dem.');
+    },
     'utlagg-andra': function (t) {
       var ar = aktivt(), x = (ar.utlagg || []).find(function (a) { return a.id === t.dataset.id; });
       if (!x) return;
