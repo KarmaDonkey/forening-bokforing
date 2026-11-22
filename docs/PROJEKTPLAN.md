@@ -127,6 +127,13 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - De som har appen öppen visas som cirklar överst (initialer från apelido eller e-post, eller en egen bild), med apelido, roller, skrivrätt och senaste aktivitet när man håller muspekaren över eller trycker. Närvaron skrivs i `narvaro.json` i bokföringsmappen, eller i mappen Styrelsen för styrelsen som bara läser bokföringen. Revisorn syns inte. Den egna bilden förminskas till 96 punkter och sparas i användarens egen appmapp.
 
+## Bankkonton (från version 1.33)
+
+- Flera bankkonton, ett bokföringskonto per bankkonto (t.ex. 1930 företagskonto, 1940 placeringskonto), med namn och kontonummer under Kontoplan. Kontonumret sparas bara i bokföringsfilen.
+- Kontoutdraget känns igen på kontonumret i filen (de sista fyra siffrorna, datum räknas inte), eller så väljs konto vid inläsningen.
+- Överföringar mellan egna konton (samma belopp, omvänt tecken, högst tre dagar ifrån) föreslås som en verifikation, och raden på det andra utdraget kopplas till den.
+- Bankavstämning per konto i Läs in, rapporten, Översikt och bokslutet.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
