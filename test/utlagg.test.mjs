@@ -143,3 +143,35 @@ test('när sista kvittot tas ur försvinner redovisningen', () => {
   assert.equal(ar.utlagg.length, 0);
   assert.equal(ar.underlag.find((u) => u.id === 'a').utlagg, undefined);
 });
+
+test('en redovisning kan ändras: nya kvitton, uttagna kvitton, belopp och text', () => {
+  let ar = K.skapaUtlagg(arMedKvitton(), { person: 'Exempel', text: 'Hösten', poster: [{ underlagId: 'a' }, { underlagId: 'b', belopp: kr(412.3), privat: 'Privat vara 100' }, { underlagId: 'c' }] }).ar;
+  const id = ar.utlagg[0].id;
+  ar = K.andraUtlagg(ar, id, { person: 'Exempel', text: 'Hösten 2030', poster: [
+    { underlagId: 'b', belopp: kr(312.3), privat: 'Privat vara 200' }, { underlagId: 'c' }, { underlagId: 'e' }] });
+  const x = ar.utlagg[0];
+  assert.deepEqual(json(x.poster), ['b', 'c', 'e'], 'kvar i samma ordning, nya sist');
+  assert.equal(x.text, 'Hösten 2030');
+  const u = (i) => ar.underlag.find((v) => v.id === i);
+  assert.deepEqual([u('a').belopp, u('a').utlagg], [kr(113.4), undefined], 'uttaget kvitto är fritt igen');
+  assert.deepEqual([u('b').belopp, u('b').kvittobelopp, u('b').privat], [kr(312.3), kr(512.3), 'Privat vara 200']);
+  assert.deepEqual([u('e').utlagg, u('e').utlaggPerson], [id, 'Exempel']);
+  assert.equal(K.utlaggStatus(ar, id).summa, kr(312.3 + 217.8 + 251.15));
+  assert.throws(() => K.andraUtlagg(ar, id, { person: 'Exempel', poster: [] }), /minst ett kvitto/);
+  assert.throws(() => K.andraUtlagg(ar, id, { person: 'Exempel', poster: [{ underlagId: 'b', belopp: kr(600) }] }), /större än kvittot/);
+  const annan = K.skapaUtlagg(ar, { person: 'Annan', poster: [{ underlagId: 'g' }] }).ar;
+  assert.throws(() => K.andraUtlagg(annan, id, { person: 'Exempel', poster: [{ underlagId: 'g' }] }), /redan i en utläggsredovisning/);
+});
+
+test('utbetalda kvitton ligger kvar när en delvis utbetald redovisning ändras', () => {
+  let ar = utlagg(arMedKvitton()).ar;
+  const id = ar.utlagg[0].id;
+  ar = bankrad(ar, '2031-01-10', -700, 'Exempel ers fika');
+  const f = K.forslagForBankrad(ar, ar.bankrader[0], []);
+  ar = K.bokforKopplat(ar, { datum: f.datum, text: f.text, rader: f.rader }, { bankradId: f.bankradId, underlagIds: f.underlagIds }).ar;
+  assert.throws(() => K.andraUtlagg(ar, id, { person: 'Någon annan', poster: [{ underlagId: 'a' }] }), /Personen kan inte ändras/);
+  ar = K.andraUtlagg(ar, id, { person: 'Exempel', text: 'Hösten 2030', poster: [{ underlagId: 'a' }, { underlagId: 'x' }] });
+  assert.deepEqual(json(ar.utlagg[0].poster), ['a', 'b', 'e', 'f', 'x']);
+  assert.equal(ar.underlag.find((u) => u.id === 'b').belopp, kr(412.3), 'det utbetalda kvittot är orört');
+  assert.equal(ar.underlag.find((u) => u.id === 'c').utlagg, undefined);
+});

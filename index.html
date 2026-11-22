@@ -349,6 +349,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.39', datum: '2026-11-22',
+    nyheter: [
+      'Knappen "Ändra" på utläggsredovisningar som inte är helt utbetalda: lägg till eller ta ur kvitton och ändra belopp, privat del och text i samma formulär som när redovisningen skapades.',
+      'Redan utbetalda kvitton ligger kvar och kan inte ändras.'
+    ]
+  },
+  {
     version: '1.38', datum: '2026-11-22',
     nyheter: [
       'Felmeddelanden visas också längst ner på skärmen, så att de syns även när du har scrollat ner.',
@@ -1877,6 +1884,19 @@ var VERSIONER = [
     var poster = uppgifter.poster || [];
     if (!poster.length) throw BokforingsFel('Välj minst ett kvitto.');
     var id = uppgifter.id || ('ut' + ((ar.utlagg || []).length + 1) + '-' + Date.now().toString(36));
+    var andringar = utlaggAndringar(ar, poster, id, person);
+    var utlagg = { id: id, person: person, text: String(uppgifter.text || '').trim(), datum: uppgifter.datum || null, poster: poster.map(function (p) { return p.underlagId; }) };
+    return {
+      ar: Object.assign({}, ar, {
+        underlag: ar.underlag.map(function (u) { return andringar[u.id] ? Object.assign({}, u, andringar[u.id]) : u; }),
+        utlagg: (ar.utlagg || []).concat([utlagg])
+      }),
+      utlagg: utlagg
+    };
+  }
+
+  // Kontrollerar kvittona och räknar ut vad som ändras på varje underlag.
+  function utlaggAndringar(ar, poster, id, person) {
     var andringar = {};
     poster.forEach(function (p) {
       var u = (ar.underlag || []).find(function (x) { return x.id === p.underlagId; });
@@ -1891,14 +1911,35 @@ var VERSIONER = [
       andringar[u.id] = { utlagg: id, utlaggPerson: person, kvittobelopp: kvitto, belopp: belopp, privat: String(p.privat || '').trim(),
         beskrivning: p.beskrivning != null ? String(p.beskrivning).trim() : u.beskrivning };
     });
-    var utlagg = { id: id, person: person, text: String(uppgifter.text || '').trim(), datum: uppgifter.datum || null, poster: poster.map(function (p) { return p.underlagId; }) };
-    return {
-      ar: Object.assign({}, ar, {
-        underlag: ar.underlag.map(function (u) { return andringar[u.id] ? Object.assign({}, u, andringar[u.id]) : u; }),
-        utlagg: (ar.utlagg || []).concat([utlagg])
-      }),
-      utlagg: utlagg
-    };
+    return andringar;
+  }
+
+  // Ändrar en redovisning: person, text och kvitton som inte är utbetalda. Utbetalda kvitton ligger kvar som de är.
+  function andraUtlagg(ar, id, uppgifter) {
+    var x = (ar.utlagg || []).find(function (a) { return a.id === id; });
+    if (!x) throw BokforingsFel('Utläggsredovisningen finns inte.');
+    var person = String(uppgifter.person || '').trim();
+    if (!person) throw BokforingsFel('Ange vem som har lagt ut.');
+    var betalda = x.poster.filter(function (uid) { var u = (ar.underlag || []).find(function (v) { return v.id === uid; }); return u && u.verifikation != null; });
+    if (betalda.length && person !== x.person) throw BokforingsFel('Personen kan inte ändras när något av kvittona redan är utbetalt.');
+    var poster = (uppgifter.poster || []).filter(function (p) { return betalda.indexOf(p.underlagId) < 0; });
+    if (!poster.length && !betalda.length) throw BokforingsFel('Välj minst ett kvitto. Vill du ta bort hela redovisningen, använd Ta bort.');
+    // Först får de obetalda kvittona tillbaka sina belopp, sedan läggs de valda in på nytt.
+    var aterstallt = Object.assign({}, ar, { underlag: ar.underlag.map(function (u) {
+      if (u.utlagg !== id || u.verifikation != null) return u;
+      var n = Object.assign({}, u, { belopp: u.kvittobelopp != null ? u.kvittobelopp : u.belopp });
+      ['utlagg', 'utlaggPerson', 'kvittobelopp', 'privat'].forEach(function (k) { delete n[k]; });
+      return n;
+    }) });
+    var andringar = utlaggAndringar(aterstallt, poster, id, person);
+    var valda = poster.map(function (p) { return p.underlagId; });
+    var ordning = x.poster.filter(function (uid) { return betalda.indexOf(uid) >= 0 || valda.indexOf(uid) >= 0; })
+      .concat(valda.filter(function (uid) { return x.poster.indexOf(uid) < 0; }));
+    var nyX = Object.assign({}, x, { person: person, text: String(uppgifter.text || '').trim(), poster: ordning });
+    return Object.assign({}, aterstallt, {
+      underlag: aterstallt.underlag.map(function (u) { return andringar[u.id] ? Object.assign({}, u, andringar[u.id]) : u; }),
+      utlagg: ar.utlagg.map(function (a) { return a.id === id ? nyX : a; })
+    });
   }
 
   // Tar bort redovisningen, om inget av kvittona är utbetalt. Kvittona får tillbaka sina belopp.
@@ -4160,6 +4201,7 @@ var VERSIONER = [
     skapaUtlagg: skapaUtlagg,
     taBortUtlagg: taBortUtlagg,
     taUrUtlagg: taUrUtlagg,
+    andraUtlagg: andraUtlagg,
     utlaggNamn: utlaggNamn,
     utlaggStatus: utlaggStatus,
     overforingFor: overforingFor,
@@ -9253,13 +9295,18 @@ var VERSIONER = [
     return Object.keys(namn).sort();
   }
 
+  function utlaggSummaText(ar) {
+    var us = utlaggUtkastSumma(ar);
+    return us.kvitton ? 'Ersätts <strong>' + kr(us.ersatts) + ' kr</strong>' + (us.kvitton !== us.ersatts ? ' av kvitton på ' + kr(us.kvitton) + ' kr (privat ' + kr(us.kvitton - us.ersatts) + ' kr)' : '') + '.' : '';
+  }
+
   function utlaggUtkastSumma(ar) {
     var s = 0, k = 0;
     Object.keys(utlaggUtkast.val).forEach(function (id) {
       var v = utlaggUtkast.val[id], u = ar.underlag.find(function (x) { return x.id === id; });
       if (!v.med || !u) return;
-      k += u.belopp;
-      try { s += v.belopp.trim() ? Math.abs(K.parseBelopp(v.belopp)) : u.belopp; } catch (e) { /* ofullständigt belopp */ }
+      k += u.kvittobelopp != null ? u.kvittobelopp : u.belopp;
+      try { s += v.belopp.trim() ? Math.abs(K.parseBelopp(v.belopp)) : (u.kvittobelopp != null ? u.kvittobelopp : u.belopp); } catch (e) { /* ofullständigt belopp */ }
     });
     return { ersatts: s, kvitton: k };
   }
@@ -9268,22 +9315,26 @@ var VERSIONER = [
     var lasbar = lasLage() || ar.grovkopia;
     var html = '<h2>Utlägg' + hjalp('utlagg') + '</h2>';
     if (utlaggUtkast && !lasbar) {
-      var kvitton = K.oppnaUnderlag(ar).filter(function (u) { return u.riktning !== 'intakt' && !u.utlagg; });
-      html += '<div class="card arsmote-form"><h3 style="margin-top:0">Ny utläggsredovisning</h3>' +
+      var andras = utlaggUtkast.id ? (ar.utlagg || []).find(function (a) { return a.id === utlaggUtkast.id; }) : null;
+      var kvitton = K.oppnaUnderlag(ar).filter(function (u) { return u.riktning !== 'intakt' && (!u.utlagg || (andras && u.utlagg === andras.id)); });
+      var betalda = andras ? K.utlaggStatus(ar, andras.id).poster.filter(function (u) { return u.verifikation != null; }) : [];
+      var kvittobelopp = function (u) { return u.kvittobelopp != null ? u.kvittobelopp : u.belopp; };
+      html += '<div class="card arsmote-form" id="utlaggForm"><h3 style="margin-top:0">' + (andras ? 'Ändra utläggsredovisning' : 'Ny utläggsredovisning') + '</h3>' +
         '<datalist id="utlaggPersoner">' + utlaggPersoner().map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>' +
-        '<div class="grid2"><div><label for="utPerson">Vem har lagt ut?</label><input id="utPerson" list="utlaggPersoner" data-ut-f="person" value="' + esc(utlaggUtkast.person) + '" placeholder="Apelido eller namn"></div>' +
+        '<div class="grid2"><div><label for="utPerson">Vem har lagt ut?</label><input id="utPerson" list="utlaggPersoner" data-ut-f="person" value="' + esc(utlaggUtkast.person) + '" placeholder="Apelido eller namn"' + (betalda.length ? ' disabled title="Kan inte ändras när något kvitto är utbetalt"' : '') + '></div>' +
         '<div><label for="utText">Avser</label><input id="utText" data-ut-f="text" value="' + esc(utlaggUtkast.text) + '" placeholder="T.ex. workshop i november"></div></div>' +
         '<p class="faint">Kryssa för kvittona som ingår. Ska bara en del ersättas skriver du det ersättningsbara beloppet och vad som är privat. Läs in kvittona först, så visas de här.</p>' +
+        (betalda.length ? '<p class="faint">Redan utbetalda kvitton, som inte kan ändras: ' + esc(betalda.map(function (u) { return (u.beskrivning || u.motpart) + ' ' + kr(u.belopp); }).join(', ')) + '.</p>' : '') +
         (kvitton.length ? '<div class="scroll"><table class="kortlista"><thead><tr><th></th><th>Datum</th><th>Kvitto</th><th class="num">Kvitto</th><th class="num">Ersätts</th><th>Privat</th></tr></thead><tbody>' + kvitton.map(function (u) {
           var v = utlaggUtkast.val[u.id] || {};
           return '<tr><td><input type="checkbox" style="width:auto" data-ut="med" data-id="' + esc(u.id) + '"' + (v.med ? ' checked' : '') + ' aria-label="Ta med"></td>' +
             '<td data-etikett="Datum">' + esc(u.datum || '') + '</td><td data-etikett="Kvitto">' + esc(u.motpart || u.filnamn) + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') + '</td>' +
-            '<td class="num" data-etikett="Kvitto">' + kr(u.belopp) + '</td>' +
-            '<td class="num" data-etikett="Ersätts"><input class="num" style="width:110px" data-ut="belopp" data-id="' + esc(u.id) + '" value="' + esc(v.belopp || '') + '" placeholder="' + esc(kr(u.belopp)) + '" inputmode="decimal" aria-label="Ersätts"></td>' +
+            '<td class="num" data-etikett="Kvitto">' + kr(kvittobelopp(u)) + '</td>' +
+            '<td class="num" data-etikett="Ersätts"><input class="num" style="width:110px" data-ut="belopp" data-id="' + esc(u.id) + '" value="' + esc(v.belopp || '') + '" placeholder="' + esc(kr(kvittobelopp(u))) + '" inputmode="decimal" aria-label="Ersätts"></td>' +
             '<td data-etikett="Privat"><input data-ut="privat" data-id="' + esc(u.id) + '" value="' + esc(v.privat || '') + '" placeholder="T.ex. sminkspegel" style="min-width:140px" aria-label="Privat"></td></tr>';
         }).join('') + '</tbody></table></div>' : '<p class="faint">Inga kvitton väntar. Läs in kvittona under Läs in ovan.</p>') +
-        '<p id="utSumma" style="margin:8px 0"></p>' +
-        '<div class="row"><button class="btn btn-small" data-action="utlagg-spara">Spara redovisningen</button><button class="btn btn-secondary btn-small" data-action="utlagg-avbryt">Avbryt</button></div></div>';
+        '<p id="utSumma" style="margin:8px 0">' + utlaggSummaText(ar) + '</p>' +
+        '<div class="row"><button class="btn btn-small" data-action="utlagg-spara">' + (andras ? 'Spara ändringarna' : 'Spara redovisningen') + '</button><button class="btn btn-secondary btn-small" data-action="utlagg-avbryt">Avbryt</button></div></div>';
     } else if (!lasbar) {
       html += '<div class="row" style="margin-bottom:8px"><button class="btn btn-secondary btn-small" data-action="utlagg-ny">Ny utläggsredovisning</button>' +
         '<span class="faint">När någon betalat själv och föreningen ersätter det. Utbetalningen kopplas till kvittona, även om de är gamla.</span></div>';
@@ -9305,6 +9356,7 @@ var VERSIONER = [
             (!lasbar && u.verifikation == null ? ' <button class="btn btn-secondary btn-small" data-action="utlagg-ta-ur" data-id="' + esc(x.id) + '" data-u="' + esc(u.id) + '">Ta ur</button>' : '') + '</li>';
         }).join('') + '</ul></details>' +
         '<div class="row" style="margin-top:6px"><button class="btn btn-secondary btn-small" data-action="utlagg-pdf" data-id="' + esc(x.id) + '">Sammanställning (PDF)</button>' +
+        (!lasbar && !st.klar && !utlaggUtkast ? '<button class="btn btn-secondary btn-small" data-action="utlagg-andra" data-id="' + esc(x.id) + '">Ändra</button>' : '') +
         (!lasbar && !st.betalt ? '<button class="btn btn-secondary btn-small" data-action="utlagg-bort" data-id="' + esc(x.id) + '">Ta bort</button>' : '') + '</div></div>';
     }).join('');
   }
@@ -10397,8 +10449,8 @@ var VERSIONER = [
         var uv = utlaggUtkast.val[t.dataset.id] = utlaggUtkast.val[t.dataset.id] || { med: false, belopp: '', privat: '' };
         if (t.dataset.ut === 'med') uv.med = t.checked; else { uv[t.dataset.ut] = t.value; if (t.value) uv.med = true; var box = document.querySelector('[data-ut="med"][data-id="' + t.dataset.id + '"]'); if (box) box.checked = uv.med; }
       }
-      var us = utlaggUtkastSumma(aktivt()), el = document.getElementById('utSumma');
-      if (el) el.innerHTML = us.kvitton ? 'Ersätts <strong>' + kr(us.ersatts) + ' kr</strong>' + (us.kvitton !== us.ersatts ? ' av kvitton på ' + kr(us.kvitton) + ' kr (privat ' + kr(us.kvitton - us.ersatts) + ' kr)' : '') + '.' : '';
+      var el = document.getElementById('utSumma');
+      if (el) el.innerHTML = utlaggSummaText(aktivt());
       return;
     }
     if (t.dataset.u) { utkast[t.dataset.u] = t.value; uppdateraUtkastStatus(); }
@@ -11329,6 +11381,18 @@ var VERSIONER = [
     },
     'utlagg-ny': function () { utlaggUtkast = { person: '', text: '', val: {} }; render(); },
     'utlagg-avbryt': function () { utlaggUtkast = null; render(); },
+    'utlagg-andra': function (t) {
+      var ar = aktivt(), x = (ar.utlagg || []).find(function (a) { return a.id === t.dataset.id; });
+      if (!x) return;
+      var val = {};
+      K.utlaggStatus(ar, x.id).poster.forEach(function (u) {
+        if (u.verifikation != null) return;
+        val[u.id] = { med: true, belopp: u.kvittobelopp != null && u.kvittobelopp !== u.belopp ? kr(u.belopp) : '', privat: u.privat || '' };
+      });
+      utlaggUtkast = { id: x.id, person: x.person, text: x.text || '', val: val };
+      render();
+      setTimeout(function () { var el = document.getElementById('utlaggForm'); if (el) el.scrollIntoView({ block: 'start' }); }, 0);
+    },
     'utlagg-spara': function () {
       var ar = aktivt();
       var poster = Object.keys(utlaggUtkast.val).filter(function (id) { return utlaggUtkast.val[id].med; }).map(function (id) {
@@ -11337,6 +11401,14 @@ var VERSIONER = [
         try { belopp = v.belopp.trim() ? Math.abs(K.parseBelopp(v.belopp)) : null; } catch (e) { throw new Error('Beloppet "' + v.belopp + '" går inte att läsa.'); }
         return { underlagId: id, belopp: belopp, privat: v.privat };
       });
+      if (utlaggUtkast.id) {
+        var nytt = K.andraUtlagg(ar, utlaggUtkast.id, { person: utlaggUtkast.person, text: utlaggUtkast.text, poster: poster });
+        var andradSt = K.utlaggStatus(nytt, utlaggUtkast.id);
+        setAktivt(nytt);
+        utlaggUtkast = null;
+        visa('Utläggsredovisningen för ' + andradSt.utlagg.person + ' är ändrad: ' + kr(andradSt.summa) + ' kr.');
+        return;
+      }
       var res = K.skapaUtlagg(ar, { person: utlaggUtkast.person, text: utlaggUtkast.text, datum: idag(), poster: poster });
       setAktivt(res.ar);
       utlaggUtkast = null;
