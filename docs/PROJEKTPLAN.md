@@ -154,6 +154,10 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Valet "Årsavgiften ingår i terminsavgiften" (Avgifter): första betalningen under kalenderåret delas upp i årsavgift och resten som terminsavgift; senare terminer samma år blir hela beloppet terminsavgift. Gäller alla kategorier med terminsavgift (från 1.42).
 - Förslag kan avfärdas med ett skäl (från 1.36). Avfärdade förslag sparas i bokföringsfilen med skäl, vem och när, föreslås inte igen och kan ångras. Vid "Börja om" följer de med reglerna.
 
+## Grundbok (från version 1.43)
+
+- Verifikationerna visas på bred skärm som en grundbok: en verifikation per rad med debet- och kreditkonton och belopp, i datumordning (kan vändas). På smal skärm som tidigare.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
