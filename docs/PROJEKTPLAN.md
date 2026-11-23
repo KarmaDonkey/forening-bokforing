@@ -160,6 +160,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Rapporten Grundbok har samma uppställning med summa för debet och kredit; som PDF och utskrift i liggande format (från 1.44).
 - "Skriv ut" av grundboken visar alla kolumner och skrivs ut liggande (från 1.45).
 - Årsrapport (PDF) under Rapporter: försättsida, innehållsförteckning, resultat- och balansräkning, saldobalans, bankavstämning, grundbok (liggande), huvudbok som val och sida för styrelsens underskrifter (från 1.46).
+- Sidan för underskrifter på papper är ett val, förvalt när året är låst. Årsrapporten kan skickas för elektronisk underskrift: PDF:en sparas i årsmötets mapp, kontrollsumman (SHA-256) av filen och av årets bokföring sparas i Styrelsen.json, styrelsen skriver under under Styrelsen, Möten med sitt Microsoft-konto (filen hämtas och kontrolleras), papper kan registreras, och en undertecknad version får en sista sida med underskrifterna. Ändrad bokföring efteråt ger en varning (från 1.47).
 
 ## Kommande
 
