@@ -326,6 +326,12 @@
     .dok-rader tr { break-inside: avoid; }
     .dok-hela { break-inside: avoid; }
     @page { size: A4; margin: 15mm; }
+    /* Grundboken skrivs alltid ut med alla kolumner, oavsett pappersbredd. */
+    table.grundbok .gb-sida { display: table-cell !important; }
+    table.grundbok .gb-summa { display: none !important; }
+    table.grundbok { font-size: 10pt; }
+    table.grundbok td.gb-sida { font-size: 9pt; }
+    table.grundbok tr { break-inside: avoid; }
   }
 </style>
 </head>
@@ -357,6 +363,12 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.45', datum: '2026-11-23',
+    nyheter: [
+      'Rättelse: "Skriv ut" av grundboken och verifikationslistan visar alla kolumner (debet, kredit och belopp) och skrivs ut liggande.'
+    ]
+  },
   {
     version: '1.44', datum: '2026-11-23',
     nyheter: [
@@ -10912,7 +10924,16 @@ var VERSIONER = [
       oppenVer = null;
       visa('Verifikation ' + nr + ' är rättad med verifikation ' + ut.verifikation.nr + '.');
     },
-    'skriv-ut': function () { window.print(); },
+    'skriv-ut': function () {
+      // Grundboken (rapporten eller verifikationslistan) skrivs ut liggande, som PDF:en.
+      var liggande = document.querySelector('main table.grundbok') ? document.createElement('style') : null;
+      if (liggande) {
+        liggande.textContent = '@media print { @page { size: A4 landscape; margin: 12mm; } }';
+        document.head.appendChild(liggande);
+        window.addEventListener('afterprint', function bort() { liggande.remove(); window.removeEventListener('afterprint', bort); });
+      }
+      window.print();
+    },
     'valj-filer': function () {
       var input = document.createElement('input');
       input.type = 'file';
