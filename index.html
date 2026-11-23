@@ -358,6 +358,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.44', datum: '2026-11-23',
+    nyheter: [
+      'Rapporten Grundbok visas som verifikationslistan: en verifikation per rad med debet- och kreditkonton och belopp, och summa längst ner.',
+      'Grundboken som PDF och utskrift har samma uppställning, i liggande format.'
+    ]
+  },
+  {
     version: '1.43', datum: '2026-11-23',
     nyheter: [
       'Verifikationerna visas som en grundbok på datorn: en verifikation per rad med datum, nummer, text, debet- och kreditkonton och belopp, i datumordning. Knappen "Senaste först" vänder ordningen.',
@@ -2030,6 +2037,13 @@ var VERSIONER = [
       if (finns) finns.belopp += Math.abs(r.belopp); else sida.push({ konto: r.konto, belopp: Math.abs(r.belopp) });
     });
     return { debet: debet, kredit: kredit };
+  }
+
+  // Summa debet och kredit för alla verifikationer under året (ska vara lika).
+  function grundbokSummor(ar) {
+    var t = { debet: 0, kredit: 0 };
+    (ar.verifikationer || []).forEach(function (v) { v.rader.forEach(function (r) { if (r.belopp > 0) t.debet += r.belopp; else t.kredit -= r.belopp; }); });
+    return t;
   }
 
   // Verifikationerna i grundboksordning: datum, sedan nummer. omvand = senaste först.
@@ -4300,6 +4314,7 @@ var VERSIONER = [
     taUrUtlagg: taUrUtlagg,
     grundbokSidor: grundbokSidor,
     grundbokOrdning: grundbokOrdning,
+    grundbokSummor: grundbokSummor,
     osannoliktUnderlag: osannoliktUnderlag,
     andraUtlagg: andraUtlagg,
     utlaggNamn: utlaggNamn,
@@ -6413,8 +6428,8 @@ var VERSIONER = [
 
   var SKIFFER = [55, 63, 81], GRA = [85, 85, 85], LINJE = [200, 203, 210];
 
-  function nyPdf(JsPdf) {
-    var doc = new JsPdf({ unit: 'mm', format: 'a4' });
+  function nyPdf(JsPdf, liggande) {
+    var doc = new JsPdf({ unit: 'mm', format: 'a4', orientation: liggande ? 'landscape' : 'portrait' });
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(26, 26, 26);
     return doc;
@@ -6722,9 +6737,11 @@ var VERSIONER = [
   var RAPPORTTITLAR = { rr: 'Resultaträkning', br: 'Balansräkning', sb: 'Saldobalans', gb: 'Grundbok', hb: 'Huvudbok', bank: 'Bankavstämning' };
 
   async function skapaRapportPdf(ar, typ, konto) {
-    var doc = nyPdf(await laddaJsPdf());
+    // Grundboken skrivs i liggande format så att debet- och kreditkolumnerna får plats.
+    var liggande = typ === 'gb';
+    var doc = nyPdf(await laddaJsPdf(), liggande);
     var f = store.forening;
-    var V = 15, H = 195, NED = 278;
+    var V = 15, H = liggande ? 282 : 195, NED = liggande ? 192 : 278, FOT = liggande ? 203 : 290;
     var medNamn = typ === 'medln';
     if (medNamn) typ = 'medl';
     var amData = (typ === 'dagordning' || typ === 'rostlangd') ? arsmoteData(ar) : null;
@@ -6814,12 +6831,20 @@ var VERSIONER = [
       sb.forEach(function (r) { t.ib += r.ib; t.rorelse += r.rorelse; t.ub += r.ub; rad([r.nr + ' ' + r.namn, kr(r.ib), kr(r.rorelse), kr(r.ub)]); });
       rad(['Summa (ska vara noll)', kr(t.ib), kr(t.rorelse), kr(t.ub)], 'total');
     } else if (typ === 'gb') {
-      kol = [{ r: 'Datum', x: V }, { r: 'Ver', x: 40, align: R }, { r: 'Konto och text', x: 45, w: 90 }, { r: 'Debet', x: 165, align: R }, { r: 'Kredit', x: H, align: R }];
+      kol = [{ r: 'Datum', x: V }, { r: 'Ver', x: 42, align: R }, { r: 'Text', x: 46, w: 78 }, { r: 'Debet', x: 128, w: 54 }, { r: 'Belopp', x: 205, align: R },
+        { r: 'Kredit', x: 210, w: 48 }, { r: 'Belopp', x: H, align: R }];
       kolumnrubriker();
       K.grundbok(ar).forEach(function (v) {
-        rad([v.datum, String(v.nr), v.text, '', ''], 'grupp');
-        v.rader.forEach(function (r) { rad(['', '', '   ' + r.konto + ' ' + K.kontonamn(ar, r.konto), r.belopp > 0 ? kr(r.belopp) : '', r.belopp < 0 ? kr(-r.belopp) : '']); });
+        var s = K.grundbokSidor(v), n = Math.max(s.debet.length, s.kredit.length, 1);
+        var konto = function (p) { return p ? p.konto + ' ' + K.kontonamn(ar, p.konto) : ''; };
+        for (var i = 0; i < n; i++) {
+          var d = s.debet[i], k = s.kredit[i];
+          rad([i ? '' : v.datum, i ? '' : String(v.nr), i ? '' : v.text, konto(d), d ? kr(d.belopp) : '', konto(k), k ? kr(k.belopp) : '']);
+        }
+        y += 0.8;
       });
+      var gt = K.grundbokSummor(ar);
+      rad(['', '', 'Summa', '', kr(gt.debet), '', kr(gt.kredit)], 'total');
     } else if (typ === 'hb') {
       var hb = K.huvudbok(ar, konto);
       kol = [{ r: 'Datum', x: V }, { r: 'Ver', x: 40, align: R }, { r: 'Text', x: 45, w: 72 }, { r: 'Debet', x: 145, align: R }, { r: 'Kredit', x: 170, align: R }, { r: 'Saldo', x: H, align: R }];
@@ -6910,8 +6935,8 @@ var VERSIONER = [
     for (var i = 1; i <= sidor; i++) {
       doc.setPage(i);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
-      doc.text(pt((f.namn || '') + ' · ' + titel + (typ === 'medl' || amData ? '' : ' ' + K.arNamn(ar))), V, 290);
-      doc.text('Sida ' + i + ' av ' + sidor, H, 290, { align: 'right' });
+      doc.text(pt((f.namn || '') + ' · ' + titel + (typ === 'medl' || amData ? '' : ' ' + K.arNamn(ar))), V, FOT);
+      doc.text('Sida ' + i + ' av ' + sidor, H, FOT, { align: 'right' });
       doc.setTextColor(26, 26, 26);
     }
     doc.setProperties({ title: titel + (typ === 'medl' || amData ? '' : ' ' + K.arNamn(ar)), author: f.namn || '', creator: 'Föreningsbokföring' });
@@ -7613,13 +7638,20 @@ var VERSIONER = [
   }
 
   function rapportGB(ar) {
-    var html = '<h2 style="margin-top:0">Grundbok</h2><div class="scroll"><table><thead><tr><th>Datum</th><th>Ver</th><th>Konto</th><th class="num">Debet</th><th class="num">Kredit</th></tr></thead><tbody>';
+    var sida = function (poster) {
+      return '<td class="gb-sida">' + poster.map(function (p) { return '<div>' + esc(p.konto) + ' <span class="faint">' + esc(K.kontonamn(ar, p.konto)) + '</span></div>'; }).join('') + '</td>' +
+        '<td class="num gb-sida">' + poster.map(function (p) { return '<div>' + kr(p.belopp) + '</div>'; }).join('') + '</td>';
+    };
+    var html = '<h2 style="margin-top:0">Grundbok</h2><div class="scroll"><table class="grundbok"><thead><tr><th>Datum</th><th>Ver</th><th>Text</th>' +
+      '<th class="gb-sida">Debet</th><th class="num gb-sida">Belopp</th><th class="gb-sida">Kredit</th><th class="num gb-sida">Belopp</th><th class="num gb-summa">Belopp</th></tr></thead><tbody>';
     K.grundbok(ar).forEach(function (v) {
-      html += '<tr><td class="nowrap">' + esc(v.datum) + '</td><td>' + v.nr + '</td><td colspan="3"><strong>' + esc(v.text) + '</strong></td></tr>';
-      v.rader.forEach(function (r) {
-        html += '<tr><td></td><td></td><td>' + r.konto + ' ' + esc(K.kontonamn(ar, r.konto)) + '</td><td class="num">' + (r.belopp > 0 ? kr(r.belopp) : '') + '</td><td class="num">' + (r.belopp < 0 ? kr(-r.belopp) : '') + '</td></tr>';
-      });
+      var s = K.grundbokSidor(v);
+      html += '<tr><td class="nowrap">' + esc(v.datum) + '</td><td>' + v.nr + '</td><td>' + esc(v.text) + '</td>' + sida(s.debet) + sida(s.kredit) +
+        '<td class="num gb-summa">' + kr(s.debet.reduce(function (x, p) { return x + p.belopp; }, 0)) + '</td></tr>';
     });
+    var t = K.grundbokSummor(ar);
+    html += '<tr class="total"><td colspan="3">Summa</td><td class="gb-sida"></td><td class="num gb-sida">' + kr(t.debet) + '</td><td class="gb-sida"></td><td class="num gb-sida">' + kr(t.kredit) + '</td>' +
+      '<td class="num gb-summa">' + kr(t.debet) + '</td></tr>';
     return html + '</tbody></table></div>';
   }
 

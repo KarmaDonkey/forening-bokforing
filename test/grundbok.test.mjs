@@ -21,3 +21,11 @@ test('grundboken sorteras på datum och sedan nummer, och kan vändas', () => {
   assert.deepEqual(K.grundbokOrdning(l, true).map((v) => v.nr), [4, 1, 3, 2]);
   assert.deepEqual(l.map((v) => v.nr), [1, 2, 3, 4], 'listan ändras inte');
 });
+
+test('grundbokens summa för debet och kredit', () => {
+  const ar = { verifikationer: [
+    { nr: 1, datum: '2031-01-01', rader: [{ konto: '2067', belopp: kr(100) }, { konto: '2019', belopp: kr(-100) }] },
+    { nr: 2, datum: '2031-01-08', rader: [{ konto: '1930', belopp: kr(1100) }, { konto: '3100', belopp: kr(-800) }, { konto: '3110', belopp: kr(-300) }] }] };
+  assert.deepEqual(json(K.grundbokSummor(ar)), { debet: kr(1200), kredit: kr(1200) });
+  assert.deepEqual(json(K.grundbokSummor({ verifikationer: [] })), { debet: 0, kredit: 0 });
+});
