@@ -332,3 +332,35 @@ test('ny fördelning av en betalning på flera medlemmar', () => {
   assert.throws(() => K.andraFordelning(reg, 'b1', [{ medlem: 'm1', typ: 'termin', belopp: kr(1500) }]), /stämmer inte/);
   assert.equal(K.andraFordelning(reg, 'b1', [{ medlem: 'm1', typ: 'termin', belopp: kr(2000) }], 'HT-30').betalningar[0].termin, 'HT-30');
 });
+
+test('årsavgiften kan ingå i terminsavgiften: första betalningen under året delas upp', () => {
+  let reg = registret();
+  reg = K.sattTermin(reg, 'HT-30', { barn: kr(1000), vuxen: kr(2000) });
+  reg.arsavgift = Object.assign({}, reg.arsavgift, { ingar: true });
+  reg = K.kopplaBetalare(reg, { nyckel: '+46701112233' }, ['m1']);
+  const vt = K.avgiftsforslag(reg, { datum: '2030-02-01', belopp: kr(1000), nyckel: '+46701112233' });
+  assert.equal(vt.stammer, true);
+  eq(vt.poster, [{ medlem: 'm1', typ: 'termin', belopp: kr(600) }, { medlem: 'm1', typ: 'arsavgift', belopp: kr(400) }]);
+  eq(K.avgiftsrader(reg, vt.poster, '1930', kr(1000)), [{ konto: '1930', belopp: kr(1000) }, { konto: '3020', belopp: kr(-600) }, { konto: '3010', belopp: kr(-400) }]);
+  reg = K.registreraBetalning(reg, { datum: '2030-02-01', belopp: kr(1000), termin: vt.termin, nyckel: '+46701112233', poster: vt.poster });
+  const ht = K.avgiftsforslag(reg, { datum: '2030-08-20', belopp: kr(1000), nyckel: '+46701112233' });
+  assert.equal(ht.stammer, true);
+  eq(ht.poster, [{ medlem: 'm1', typ: 'termin', belopp: kr(1000) }]);
+  // Ett nytt år: årsavgiften dras av igen.
+  reg = K.sattTermin(reg, 'VT-31', { barn: kr(1000) });
+  const vt31 = K.avgiftsforslag(reg, { datum: '2031-02-01', belopp: kr(1000), nyckel: '+46701112233' });
+  eq(vt31.poster, [{ medlem: 'm1', typ: 'termin', belopp: kr(600) }, { medlem: 'm1', typ: 'arsavgift', belopp: kr(400) }]);
+});
+
+test('årsavgiften ingår: två barn på samma betalning, och funktionär utan terminsavgift', () => {
+  let reg = registret();
+  reg.arsavgift = Object.assign({}, reg.arsavgift, { ingar: true });
+  reg = K.kopplaBetalare(reg, { nyckel: '+46701111111' }, ['m1', 'm2']);
+  const f = K.avgiftsforslag(reg, { datum: '2030-02-01', belopp: kr(2000), nyckel: '+46701111111' });
+  assert.equal(f.stammer, true);
+  eq(f.poster, [{ medlem: 'm1', typ: 'termin', belopp: kr(600) }, { medlem: 'm1', typ: 'arsavgift', belopp: kr(400) },
+    { medlem: 'm2', typ: 'termin', belopp: kr(600) }, { medlem: 'm2', typ: 'arsavgift', belopp: kr(400) }]);
+  reg = K.kopplaBetalare(reg, { nyckel: '+46703333333' }, ['m4']);
+  const t = K.avgiftsforslag(reg, { datum: '2030-02-01', belopp: kr(40), nyckel: '+46703333333' });
+  eq(t.poster, [{ medlem: 'm4', typ: 'arsavgift', belopp: kr(40) }], 'utan terminsavgift läggs årsavgiften till som vanligt');
+});

@@ -349,6 +349,12 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.42', datum: '2026-11-23',
+    nyheter: [
+      'Valet "Årsavgiften ingår i terminsavgiften" under Medlemsregister, Avgifter. Första betalningen under året delas då upp i årsavgift och resten som terminsavgift, och senare terminer blir hela beloppet terminsavgift.'
+    ]
+  },
+  {
     version: '1.41', datum: '2026-11-23',
     nyheter: [
       'Medlemsbetalningar som lästs in från ett års Excel-fil tas med i rutan under Medlemsregister när samma år nu bokförs i appen, så att de inte räknas två gånger. Betalningar för år som är arkivkopior ligger kvar.'
@@ -2854,18 +2860,21 @@ var VERSIONER = [
 
   // Poster för ett antal medlemmar en viss termin. Familjeavgiften tas en gång, på den första familjemedlemmen.
   // medArsavgift: true = alla som inte betalt i år, 'forsta' = bara den första (t.ex. en familj), false = ingen.
+  // Med "årsavgiften ingår i terminsavgiften" (reg.arsavgift.ingar) räknas årsavgiften av från terminsavgiften
+  // i stället för att läggas till, så länge medlemmen har en terminsavgift.
   function posterFor(reg, termin, medlemmar, medArsavgift, arMap) {
     var avg = terminsavgifter(reg, termin).avgifter;
+    var ingar = !!(reg.arsavgift && reg.arsavgift.ingar);
     var poster = [], familjTagen = false;
     medlemmar.forEach(function (m) {
       var t = 0;
       if (m.kategori === 'familj') { t = familjTagen ? 0 : (avg.familj || 0); familjTagen = true; }
       else if (m.kategori !== 'funktionar') t = avg[m.kategori] || 0;
+      var a = 0;
+      if (medArsavgift && (medArsavgift !== 'forsta' || m === medlemmar[0]) && !harBetaltArsavgift(reg, m.id, kalenderarForTermin(termin), arMap)) a = arsavgiftFor(reg, m);
+      if (ingar && a && t) { a = Math.min(a, t); t -= a; }
       if (m.kategori !== 'funktionar' || t) poster.push({ medlem: m.id, typ: 'termin', belopp: t });
-      if (medArsavgift && (medArsavgift !== 'forsta' || m === medlemmar[0]) && !harBetaltArsavgift(reg, m.id, kalenderarForTermin(termin), arMap)) {
-        var a = arsavgiftFor(reg, m);
-        if (a) poster.push({ medlem: m.id, typ: 'arsavgift', belopp: a });
-      }
+      if (a) poster.push({ medlem: m.id, typ: 'arsavgift', belopp: a });
     });
     return poster;
   }
@@ -9934,8 +9943,11 @@ var VERSIONER = [
     var u = { medlem: medlemId, termin: '', ars: '' };
     if (!m) return u;
     var avg = K.terminsavgifter(reg(), termin).avgifter;
-    if (m.kategori !== 'funktionar' && avg[m.kategori]) u.termin = K.formatBelopp(avg[m.kategori]);
-    if (!K.harBetaltArsavgift(reg(), m.id, '20' + termin.slice(3, 5), store.ar) && arsavgiftFor(m)) u.ars = K.formatBelopp(arsavgiftFor(m));
+    var t = m.kategori !== 'funktionar' ? (avg[m.kategori] || 0) : 0;
+    var a = !K.harBetaltArsavgift(reg(), m.id, '20' + termin.slice(3, 5), store.ar) ? arsavgiftFor(m) : 0;
+    if (reg().arsavgift.ingar && a && t) { a = Math.min(a, t); t -= a; }
+    if (t) u.termin = K.formatBelopp(t);
+    if (a) u.ars = K.formatBelopp(a);
     return u;
   }
 
@@ -10308,7 +10320,10 @@ var VERSIONER = [
       '<div class="grid2">' + kontoFalt('medlemsavgift', 'Medlemsavgifter (årsavgiften)', 'Medlemsavgifter') + kontoFalt('terminsavgift', 'Terminsavgifter', 'Terminsavgifter') + '</div>' +
       (kontonSaknas() ? '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="avgiftskonton-forslag">Använd förslagen</button></div>' : '') +
       '<p class="faint">Finns kontot inte i kontoplanen läggs det till i alla år som inte är låsta.</p></div>';
-    html += '<div class="card"><h2 style="margin-top:0">Årsavgift' + hjalp('avgifter') + '</h2><p class="faint" style="margin-top:0">Tas ut första gången under kalenderåret som en medlem betalar terminsavgift.</p><div class="grid2">' +
+    html += '<div class="card"><h2 style="margin-top:0">Årsavgift' + hjalp('avgifter') + '</h2><p class="faint" style="margin-top:0">Tas ut första gången under kalenderåret som en medlem betalar terminsavgift.</p>' +
+      '<label style="font-weight:normal;display:flex;gap:8px;align-items:flex-start;margin:0 0 10px"><input type="checkbox" data-mars="ingar" style="width:auto;margin-top:3px"' + (r.arsavgift.ingar ? ' checked' : '') + '>' +
+      '<span>Årsavgiften ingår i terminsavgiften<br><span class="faint">Första betalningen under året delas upp: årsavgiften räknas av från terminsavgiften, t.ex. 1 300 = 500 i årsavgift + 800 i terminsavgift. ' +
+      'Senare terminer samma år blir hela beloppet terminsavgift.</span></span></label><div class="grid2">' +
       '<div><label>Aktiv medlem</label><input class="num" inputmode="decimal" data-mars="vanlig" value="' + (r.arsavgift.vanlig ? kr(r.arsavgift.vanlig) : '') + '" placeholder="0,00"></div>' +
       '<div><label>Funktionär, tränare eller stödmedlem</label><input class="num" inputmode="decimal" data-mars="funktionar" value="' + (r.arsavgift.funktionar ? kr(r.arsavgift.funktionar) : '') + '" placeholder="0,00"></div></div></div>';
     var kats = K.KATEGORIER.filter(function (k) { return k[0] !== 'funktionar'; });
@@ -10658,7 +10673,9 @@ var VERSIONER = [
         store.medlemsregister = rk; spara(); render(); return;
       }
       if (t.dataset.mars) {
-        var ra = reg(); ra.arsavgift = Object.assign({}, ra.arsavgift); ra.arsavgift[t.dataset.mars] = t.value.trim() ? Math.abs(K.parseBelopp(t.value)) : 0;
+        var ra = reg(); ra.arsavgift = Object.assign({}, ra.arsavgift);
+        if (t.dataset.mars === 'ingar') { ra.arsavgift.ingar = t.checked; sparaReg(ra); render(); return; }
+        ra.arsavgift[t.dataset.mars] = t.value.trim() ? Math.abs(K.parseBelopp(t.value)) : 0;
         sparaReg(ra); return;
       }
       if (t.dataset.mtermin) {
