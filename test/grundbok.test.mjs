@@ -33,9 +33,12 @@ test('grundbokens summa för debet och kredit', () => {
 test('årsrapportens innehåll, status och konton för huvudboken', () => {
   const ar = { start: '2031-01-01', slut: '2031-12-31', lastTom: null, ingaendeBalans: { 1930: kr(100), 2067: kr(-100), 1940: 0 },
     bankrader: [], verifikationer: [{ nr: 1, datum: '2031-01-08', rader: [{ konto: '1930', belopp: kr(50) }, { konto: '3100', belopp: kr(-50) }] }] };
-  assert.deepEqual(json(K.arsrapportInnehall(ar).map((d) => d.typ)), ['rr', 'br', 'sb', 'gb', 'underskrifter']);
+  assert.deepEqual(json(K.arsrapportInnehall(ar).map((d) => d.typ)), ['rr', 'br', 'sb', 'gb'], 'sidan för papper bara när året är låst');
+  assert.deepEqual(json(K.arsrapportInnehall(Object.assign({}, ar, { lastTom: '2031-12-31' })).map((d) => d.typ)), ['rr', 'br', 'sb', 'gb', 'underskrifter']);
+  assert.deepEqual(json(K.arsrapportInnehall(ar, { underskrifter: true, elektroniska: true }).map((d) => d.typ)), ['rr', 'br', 'sb', 'gb', 'underskrifter', 'esign']);
+  assert.deepEqual(json(K.arsrapportInnehall(Object.assign({}, ar, { lastTom: '2031-12-31' }), { underskrifter: false }).map((d) => d.typ)), ['rr', 'br', 'sb', 'gb']);
   assert.deepEqual(json(K.arsrapportInnehall(Object.assign({}, ar, { bankrader: [{ id: 'x' }] }), { huvudbok: true }).map((d) => d.typ)),
-    ['rr', 'br', 'sb', 'bank', 'gb', 'hball', 'underskrifter']);
+    ['rr', 'br', 'sb', 'bank', 'gb', 'hball']);
   assert.equal(K.arsrapportStatus(ar), 'Preliminär');
   assert.equal(K.arsrapportStatus(Object.assign({}, ar, { lastTom: '2031-12-31' })), 'Bokslut');
   assert.equal(K.arsrapportStatus(Object.assign({}, ar, { grovkopia: {} })), 'Arkivkopia från Excel');

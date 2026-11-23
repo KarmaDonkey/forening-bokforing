@@ -364,6 +364,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.47', datum: '2026-11-23',
+    nyheter: [
+      'Årsrapporten kan skickas för elektronisk underskrift. Den sparas som PDF i årsmötets mapp, och styrelsen skriver under under Styrelsen, Möten med sitt Microsoft-konto. Den som inte kan logga in registreras som underskriven på papper.',
+      'Skapa undertecknad version: årsrapporten med en sista sida om vem som skrivit under och när, och filens kontrollsumma. Ändras bokföringen efter att rapporten skickats visas en varning.',
+      'Sidan för underskrifter på papper är ett val, förvalt när året är låst.'
+    ]
+  },
+  {
     version: '1.46', datum: '2026-11-23',
     nyheter: [
       'Årsrapport (PDF) under Rapporter: försättsida med logotyp, innehållsförteckning, resultaträkning, balansräkning, saldobalans, bankavstämning, grundbok och en sida för styrelsens underskrifter, i en enda PDF.',
@@ -2064,7 +2072,10 @@ var VERSIONER = [
     if ((ar.bankrader || []).length) ut.push({ typ: 'bank', titel: 'Bankavstämning' });
     ut.push({ typ: 'gb', titel: 'Grundbok' });
     if (opt && opt.huvudbok) ut.push({ typ: 'hball', titel: 'Huvudbok' });
-    ut.push({ typ: 'underskrifter', titel: 'Underskrifter' });
+    // Sidan för underskrifter på papper: som val, förvalt när året är låst (bokslutet).
+    var papper = opt && opt.underskrifter != null ? opt.underskrifter : ar.lastTom === ar.slut;
+    if (papper) ut.push({ typ: 'underskrifter', titel: 'Underskrifter' });
+    if (opt && opt.elektroniska) ut.push({ typ: 'esign', titel: 'Elektroniska underskrifter' });
     return ut;
   }
 
@@ -3553,12 +3564,12 @@ var VERSIONER = [
   var STYRFORMAT = 'foreningsbokforing-styrelse';
   var UPPDRAGFORMAT = 'foreningsbokforing-uppdrag';
 
-  function tomStyrelse() { return { format: STYRFORMAT, moten: [], uppgifter: [], dokument: [], arenden: [] }; }
+  function tomStyrelse() { return { format: STYRFORMAT, moten: [], uppgifter: [], dokument: [], arenden: [], rapporter: [] }; }
   function tomaUppdrag() { return { format: UPPDRAGFORMAT, uppdrag: [] }; }
   function normaliseraStyrelse(d) {
     var t = tomStyrelse();
     d = d && typeof d === 'object' ? d : {};
-    ['moten', 'uppgifter', 'dokument', 'arenden'].forEach(function (k) { if (Array.isArray(d[k])) t[k] = d[k]; });
+    ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter'].forEach(function (k) { if (Array.isArray(d[k])) t[k] = d[k]; });
     return t;
   }
   function normaliseraUppdrag(d) { return { format: UPPDRAGFORMAT, uppdrag: d && Array.isArray(d.uppdrag) ? d.uppdrag : [] }; }
@@ -3719,6 +3730,75 @@ var VERSIONER = [
     var andrad = kontrollsumma !== m.underskrift.kontrollsumma;
     var felaktiga = m.underskrift.signaturer.filter(function (s2) { return s2.kontrollsumma !== m.underskrift.kontrollsumma; });
     return { ok: !andrad && !felaktiga.length, andrad: andrad, text: andrad ? 'Protokollet har ändrats efter att det låstes.' : felaktiga.length ? 'En underskrift gäller en annan version.' : 'Oförändrat sedan det låstes.' };
+  }
+
+  // ---------- Årsrapporten: elektronisk underskrift ----------
+
+  // Text som beskriver årets bokföring. Ändras något i bokföringen ändras texten, och därmed kontrollsumman.
+  function arsrapportKontrolltext(ar) {
+    var ib = Object.keys(ar.ingaendeBalans || {}).sort().filter(function (k) { return ar.ingaendeBalans[k]; }).map(function (k) { return k + ':' + ar.ingaendeBalans[k]; });
+    var ver = grundbok(ar).map(function (v) {
+      return v.nr + '|' + v.datum + '|' + v.text + '|' + v.rader.map(function (r) { return r.konto + ':' + r.belopp; }).join(',') + (v.rattar != null ? '|rättar ' + v.rattar : '');
+    });
+    return ['Räkenskapsår ' + ar.start + ' - ' + ar.slut, 'IB ' + ib.join(' ')].concat(ver).join('\n');
+  }
+
+  // Skickar en årsrapport för underskrift. r: { id, arId, titel, fil: { namn, odId, webUrl }, kontrollsumma (SHA-256 av PDF-filen),
+  // bokforingSumma (SHA-256 av kontrolltexten), undertecknare: [{ epost, namn, roll }], av, tid }.
+  // En tidigare version för samma år som ingen har skrivit under ersätts; annars markeras den som ersatt.
+  function skickaArsrapport(styr, r) {
+    if (!r || !r.arId) throw BokforingsFel('Räkenskapsåret saknas.');
+    if (!r.undertecknare || !r.undertecknare.length) throw BokforingsFel('Välj vilka som ska skriva under.');
+    if (!/^[0-9a-f]{64}$/.test(r.kontrollsumma || '') || !/^[0-9a-f]{64}$/.test(r.bokforingSumma || '')) throw BokforingsFel('Kontrollsumman saknas.');
+    var ny = { id: r.id || styrId('ars'), arId: String(r.arId), titel: r.titel || 'Årsrapport ' + r.arId, fil: r.fil || null, kontrollsumma: r.kontrollsumma,
+      bokforingSumma: r.bokforingSumma, av: r.av || '', tid: r.tid || null, ersatt: false,
+      undertecknare: r.undertecknare.map(function (u) { return { epost: String(u.epost || '').toLowerCase(), namn: u.namn || '', roll: u.roll || '' }; }), signaturer: [] };
+    var lista = (styr.rapporter || []).filter(function (x) { return !(x.arId === ny.arId && !x.ersatt && !x.signaturer.length); })
+      .map(function (x) { return x.arId === ny.arId ? Object.assign({}, x, { ersatt: true }) : x; });
+    return Object.assign({}, styr, { rapporter: lista.concat([ny]) });
+  }
+
+  function hittaArsrapport(styr, id) {
+    var r = (styr.rapporter || []).find(function (x) { return x.id === id; });
+    if (!r) throw BokforingsFel('Årsrapporten finns inte.');
+    return r;
+  }
+
+  function andraArsrapport(styr, id, ny) {
+    return Object.assign({}, styr, { rapporter: styr.rapporter.map(function (x) { return x.id === id ? ny : x; }) });
+  }
+
+  // Elektronisk underskrift av den sparade PDF-filen. kontrollsumma: SHA-256 av filen som den som skriver under har hämtat.
+  function signeraArsrapport(styr, id, epost, namn, kontrollsumma, tid) {
+    var r = hittaArsrapport(styr, id);
+    epost = String(epost || '').toLowerCase();
+    if (r.ersatt) throw BokforingsFel('Det finns en nyare version av årsrapporten. Skriv under den i stället.');
+    if (kontrollsumma !== r.kontrollsumma) throw BokforingsFel('Filen har ändrats sedan den skickades för underskrift. Underskriften görs inte.');
+    if (!r.undertecknare.some(function (u) { return u.epost === epost; })) throw BokforingsFel('Du står inte bland dem som ska skriva under.');
+    if (r.signaturer.some(function (x) { return x.epost === epost; })) throw BokforingsFel('Du har redan skrivit under.');
+    return andraArsrapport(styr, id, Object.assign({}, r, { signaturer: r.signaturer.concat([{ epost: epost, namn: namn || epost, tid: tid || null, metod: 'e', kontrollsumma: kontrollsumma }]) }));
+  }
+
+  // Någon har skrivit under på papper, till exempel utan Microsoft-konto. Registreras av den som skickade rapporten.
+  function papperArsrapport(styr, id, epost, tid) {
+    var r = hittaArsrapport(styr, id);
+    epost = String(epost || '').toLowerCase();
+    var u = r.undertecknare.find(function (x) { return x.epost === epost; });
+    if (!u) throw BokforingsFel('Personen står inte bland dem som ska skriva under.');
+    if (r.signaturer.some(function (x) { return x.epost === epost; })) throw BokforingsFel('Personen har redan skrivit under.');
+    return andraArsrapport(styr, id, Object.assign({}, r, { signaturer: r.signaturer.concat([{ epost: epost, namn: u.namn || epost, tid: tid || null, metod: 'papper' }]) }));
+  }
+
+  function taBortArsrapportUnderskrift(styr, id) {
+    var r = hittaArsrapport(styr, id);
+    if (r.signaturer.length) throw BokforingsFel('Någon har redan skrivit under. Skicka en ny version i stället.');
+    return Object.assign({}, styr, { rapporter: styr.rapporter.filter(function (x) { return x.id !== id; }) });
+  }
+
+  // Status: vilka som har skrivit under och vilka som är kvar, och om bokföringen har ändrats sedan rapporten skickades.
+  function arsrapportUnderskrifter(r, bokforingSumma) {
+    var kvar = r.undertecknare.filter(function (u) { return !r.signaturer.some(function (x) { return x.epost === u.epost; }); });
+    return { klar: !kvar.length, kvar: kvar, signerade: r.signaturer.slice(), andrad: bokforingSumma != null && bokforingSumma !== r.bokforingSumma };
   }
 
   // Alla beslut i alla protokoll, nyast först.
@@ -4492,6 +4572,12 @@ var VERSIONER = [
     taBortMote: taBortMote,
     protokolltext: protokolltext,
     lasForUnderskrift: lasForUnderskrift,
+    arsrapportKontrolltext: arsrapportKontrolltext,
+    skickaArsrapport: skickaArsrapport,
+    signeraArsrapport: signeraArsrapport,
+    papperArsrapport: papperArsrapport,
+    taBortArsrapportUnderskrift: taBortArsrapportUnderskrift,
+    arsrapportUnderskrifter: arsrapportUnderskrifter,
     lasUppProtokoll: lasUppProtokoll,
     signera: signera,
     registreraPapper: registreraPapper,
@@ -5414,7 +5500,7 @@ var VERSIONER = [
   // Förtroendeuppdragen ligger i en egen fil i mappen, så att den kan delas med valberedningen utan resten.
 
   var STYRFILER = {
-    styr: { fil: STYRFIL, tom: K.tomStyrelse, norm: K.normaliseraStyrelse, nycklar: ['moten', 'uppgifter', 'dokument', 'arenden'] },
+    styr: { fil: STYRFIL, tom: K.tomStyrelse, norm: K.normaliseraStyrelse, nycklar: ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter'] },
     upp: { fil: UPPDRAGFIL, tom: K.tomaUppdrag, norm: K.normaliseraUppdrag, nycklar: ['uppdrag'] }
   };
 
@@ -6794,7 +6880,9 @@ var VERSIONER = [
   }
 
   // Årsrapporten: försättsida, innehållsförteckning, rapporterna och en sida för underskrifter, i en PDF.
-  async function skapaArsrapportPdf(ar, medHuvudbok) {
+  // opt: { huvudbok, underskrifter (sida för papper), elektroniska (årsrapportposten med underskrifterna) }
+  async function skapaArsrapportPdf(ar, opt) {
+    opt = opt || {};
     var doc = nyPdf(await laddaJsPdf());
     var f = store.forening, arN = K.arNamn(ar), status = K.arsrapportStatus(ar);
     var mitt = 105;
@@ -6819,11 +6907,12 @@ var VERSIONER = [
     doc.setTextColor(26, 26, 26);
     // Innehållsförteckningen ritas sist, när sidnumren är kända.
     doc.addPage('a4', 'p');
-    var delar = K.arsrapportInnehall(ar, { huvudbok: medHuvudbok });
+    var delar = K.arsrapportInnehall(ar, { huvudbok: opt.huvudbok, underskrifter: opt.underskrifter, elektroniska: !!opt.elektroniska });
     for (var i = 0; i < delar.length; i++) {
       var del = delar[i];
       del.sida = doc.getNumberOfPages() + 1;
       if (del.typ === 'underskrifter') ritaUnderskrifter(doc, ar);
+      else if (del.typ === 'esign') ritaElektroniska(doc, opt.elektroniska);
       else await skapaRapportPdf(ar, del.typ, null, { doc: doc });
     }
     doc.setPage(2);
@@ -6840,6 +6929,34 @@ var VERSIONER = [
     sidfot(doc, (f.namn || '') + ' · Årsrapport ' + arN + (status === 'Bokslut' ? '' : ' (' + status.toLowerCase() + ')'), 2);
     doc.setProperties({ title: 'Årsrapport ' + arN, author: f.namn || '', creator: 'Föreningsbokföring' });
     return doc.output('blob');
+  }
+
+  // Sida med de elektroniska underskrifterna: vem, när, hur, och kontrollsumman för filen som skrevs under.
+  function ritaElektroniska(doc, r) {
+    doc.addPage('a4', 'p');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor.apply(doc, SKIFFER);
+    doc.text('Elektroniska underskrifter', 15, 30);
+    doc.setTextColor(26, 26, 26); doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    var y = 42;
+    doc.splitTextToSize(pt('Årsrapporten skickades för underskrift ' + String(r.tid || '').slice(0, 10) + ' som filen "' + ((r.fil && r.fil.namn) || '') + '". ' +
+      'De som skrivit under elektroniskt har loggat in med sitt Microsoft-konto och godkänt just den filen, som har kontrollsumman (SHA-256) nedan.'), 180)
+      .forEach(function (rad) { doc.text(rad, 15, y); y += 5.2; });
+    y += 4;
+    doc.setFont('courier', 'normal'); doc.setFontSize(8.5); doc.text(r.kontrollsumma, 15, y); doc.setFont('helvetica', 'normal');
+    y += 10;
+    var st = K.arsrapportUnderskrifter(r);
+    doc.setFontSize(7.5); doc.setTextColor.apply(doc, GRA);
+    ['NAMN', 'ROLL', 'UNDERSKRIFT'].forEach(function (t, i) { doc.text(t, [15, 85, 130][i], y); });
+    doc.setTextColor(26, 26, 26); doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.3); doc.line(15, y + 1.5, 195, y + 1.5);
+    y += 7; doc.setFontSize(10);
+    r.undertecknare.forEach(function (u) {
+      var sg = st.signerade.find(function (x) { return x.epost === u.epost; });
+      doc.text(pt(u.namn || u.epost), 15, y);
+      doc.text(pt(u.roll || ''), 85, y);
+      doc.text(pt(!sg ? 'Har inte skrivit under' : sg.metod === 'papper' ? 'På papper ' + String(sg.tid || '').slice(0, 10) : 'Elektroniskt ' + (sg.tid ? new Date(sg.tid).toLocaleString('sv-SE', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '')), 130, y);
+      if (sg && sg.metod !== 'papper') { doc.setFontSize(8); doc.setTextColor.apply(doc, GRA); doc.text(pt(sg.epost), 15, y + 4); doc.setTextColor(26, 26, 26); doc.setFontSize(10); }
+      y += 11;
+    });
   }
 
   // Sida för styrelsens underskrifter, med ort och datum och plats för sex namn.
@@ -7095,19 +7212,70 @@ var VERSIONER = [
     return (h >>> 0).toString(36);
   }
 
-  var arsrapportOppen = false, arsrapportHuvudbok = false;
+  var arsrapportOppen = false, arsrapportHuvudbok = false, arsrapportPapper = null;
+  function arsrapportOpt(ar) { return { huvudbok: arsrapportHuvudbok, underskrifter: arsrapportPapper != null ? arsrapportPapper : ar.lastTom === ar.slut }; }
+  function aktuellArsrapport(arId) { return (styrData().rapporter || []).filter(function (r) { return r.arId === arId && !r.ersatt; }).pop() || null; }
   function vyArsrapport(ar) {
     if (!arsrapportOppen) return '<div class="row ej-utskrift" style="margin:4px 0 10px"><button class="btn btn-secondary btn-small" data-action="arsrapport-visa">Årsrapport (PDF)…</button>' +
       '<span class="faint">Alla rapporter i en PDF med försättsida, innehåll och sida för underskrifter.</span></div>';
     var namn = K.sakertNamn('Årsrapport ' + (store.forening.namn ? store.forening.namn + ' ' : '') + K.arNamn(ar).replace('/', '-') + '.pdf');
     var fg = foregaende(ar);
-    var nyckel = 'arsrapport-' + store.aktivt + '-' + (arsrapportHuvudbok ? 'hb' : '') + '-' + datastampel(ar, (fg ? datastampel(fg) : '') + (store.forening.namn || '') + (logoUrl ? logoUrl.length : 0)) + '|' + namn;
-    forbered(nyckel, function () { return skapaArsrapportPdf(ar, arsrapportHuvudbok); });
-    var delar = K.arsrapportInnehall(ar, { huvudbok: arsrapportHuvudbok }).map(function (d) { return d.titel; });
+    var opt = arsrapportOpt(ar);
+    var nyckel = 'arsrapport-' + store.aktivt + '-' + (opt.huvudbok ? 'hb' : '') + (opt.underskrifter ? 'u' : '') + '-' + datastampel(ar, (fg ? datastampel(fg) : '') + (store.forening.namn || '') + (logoUrl ? logoUrl.length : 0)) + '|' + namn;
+    forbered(nyckel, function () { return skapaArsrapportPdf(ar, opt); });
+    var delar = K.arsrapportInnehall(ar, opt).map(function (d) { return d.titel; });
     return '<div class="card ej-utskrift"><h3 style="margin-top:0">Årsrapport ' + esc(K.arNamn(ar)) + ' <span class="tag">' + esc(K.arsrapportStatus(ar)) + '</span></h3>' +
       '<p class="faint" style="margin-top:0">Försättsida och innehållsförteckning, följt av ' + esc(delar.join(', ').toLowerCase()) + '.</p>' +
-      '<label style="font-weight:normal;display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" data-action="arsrapport-huvudbok" style="width:auto"' + (arsrapportHuvudbok ? ' checked' : '') + '> Ta med huvudboken för alla konton</label>' +
-      '<div class="row">' + pdfKnappar(nyckel, 'arsrapport-skriv-ut', nyckel) + '<button class="btn btn-secondary btn-small" data-action="arsrapport-stang">Stäng</button></div></div>';
+      '<label style="font-weight:normal;display:flex;gap:8px;align-items:center;margin:0 0 4px"><input type="checkbox" data-action="arsrapport-huvudbok" style="width:auto"' + (opt.huvudbok ? ' checked' : '') + '> Ta med huvudboken för alla konton</label>' +
+      '<label style="font-weight:normal;display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" data-action="arsrapport-papper" style="width:auto"' + (opt.underskrifter ? ' checked' : '') + '> Ta med en sida för underskrifter på papper' +
+      (ar.lastTom === ar.slut ? '' : ' <span class="faint">(förvalt först när året är låst)</span>') + '</label>' +
+      '<div class="row">' + pdfKnappar(nyckel, 'arsrapport-skriv-ut', nyckel) + '<button class="btn btn-secondary btn-small" data-action="arsrapport-stang">Stäng</button></div>' +
+      vyArsrapportUnderskrift(ar) + '</div>';
+  }
+
+  // Elektronisk underskrift: skicka, följ upp, registrera papper och skapa den undertecknade versionen.
+  // De som kan väljas att skriva under. I övningsläget, utan roller, två påhittade personer.
+  function arsrapportPersoner() {
+    var personer = styrPersoner();
+    if (OVNING && !personer.length) personer = [{ epost: 'ordforande@example.com', namn: 'Ordförande Exempel', roller: ['ordforande'] }, { epost: 'kassor@example.com', namn: 'Kassör Exempel', roller: ['kassor'] }];
+    return personer;
+  }
+
+  function vyArsrapportUnderskrift(ar) {
+    var html = '<h4 style="margin:16px 0 6px">Elektronisk underskrift</h4>';
+    var skriv = styrBeh('styr') === 'write';
+    if (!odAnslutet() && !OVNING) return html + '<p class="faint" style="margin:0">Koppla appen till OneDrive för att skicka årsrapporten för underskrift.</p>';
+    var r = aktuellArsrapport(store.aktivt);
+    if (r) {
+      var st = K.arsrapportUnderskrifter(r, arsrapportSummor[r.id]);
+      if (arsrapportSummor[r.id] == null) sha256(K.arsrapportKontrolltext(ar)).then(function (x) { arsrapportSummor[r.id] = x; render(); });
+      html += '<p style="margin:0 0 6px">Skickad ' + esc(String(r.tid || '').slice(0, 10)) + ' som <strong>' + esc((r.fil && r.fil.namn) || '') + '</strong>. ' +
+        (st.klar ? '<span class="tag ok">alla har skrivit under</span>' : st.signerade.length + ' av ' + r.undertecknare.length + ' har skrivit under.') + '</p>';
+      if (st.andrad) html += '<p class="fel" style="margin:0 0 6px">Bokföringen för året har ändrats efter att rapporten skickades. Skicka en ny version för underskrift.</p>';
+      html += '<ul style="margin:0 0 8px">' + r.undertecknare.map(function (u) {
+        var sg = st.signerade.find(function (x) { return x.epost === u.epost; });
+        return '<li>' + esc(u.namn || u.epost) + (u.roll ? ' <span class="faint">' + esc(u.roll) + '</span>' : '') + ': ' +
+          (sg ? '<span class="ok">' + (sg.metod === 'papper' ? 'på papper' : 'elektroniskt') + ' ' + esc(String(sg.tid || '').slice(0, 10)) + '</span>'
+            : 'väntar' + (skriv ? ' <button class="btn btn-secondary btn-small" data-action="arsrapport-papper-reg" data-id="' + esc(r.id) + '" data-epost="' + esc(u.epost) + '">Skrev under på papper</button>' : '')) + '</li>';
+      }).join('') + '</ul><div class="row">' +
+        '<button class="btn btn-secondary btn-small" data-action="arsrapport-oppna" data-id="' + esc(r.id) + '">Öppna filen</button>' +
+        (st.signerade.length && !st.andrad ? '<button class="btn btn-small" data-action="arsrapport-undertecknad" data-id="' + esc(r.id) + '">Skapa undertecknad version</button>' : '') +
+        (skriv && !st.signerade.length ? '<button class="btn btn-secondary btn-small" data-action="arsrapport-esign-bort" data-id="' + esc(r.id) + '">Ta tillbaka</button>' : '') + '</div>';
+      if (!st.andrad) return html;
+      html += '<p class="faint" style="margin:10px 0 4px">Ny version:</p>';
+    }
+    if (!skriv) return html + '<p class="faint" style="margin:0">Du kan inte ändra styrelsens material, så du kan inte skicka rapporten för underskrift.</p>';
+    var personer = arsrapportPersoner();
+    if (!personer.length) return html + '<p class="faint" style="margin:0">Lägg först in styrelsen under Inställningar, Roller och skrivrätt.</p>';
+    html += '<p class="faint" style="margin:0 0 6px">Årsrapporten sparas som PDF i ' + esc(od.styrRot ? STYRARBETE + '/' + MOTEN + '/' : 'styrelsens mapp, ') + esc(K.motesmapp('arsmote', (Number(ar.slut.slice(0, 4)) + 1) + '-01-01')) +
+      '. De som ska skriva under ser den under Styrelsen, Möten, och skriver under med sitt Microsoft-konto. Den som inte kan logga in kan skriva under på papper.</p>' +
+      personer.map(function (p) {
+        var kan = OVNING || kanLoggaIn(p.epost);
+        return '<label style="font-weight:normal;display:flex;gap:8px;align-items:center;margin:2px 0"><input type="checkbox" data-arsund="' + esc(p.epost) + '" style="width:auto" checked>' +
+          esc(p.namn) + ' <span class="faint">' + esc((p.roller || []).map(rollnamn).join(', ')) + (kan ? '' : ' · kan inte logga in, skriver under på papper') + '</span></label>';
+      }).join('') +
+      '<div class="row" style="margin-top:6px"><button class="btn btn-small" data-action="arsrapport-skicka">Skicka för underskrift</button></div>';
+    return html;
   }
 
   function rapportPdfKnappar(ar, typ, konto) {
@@ -9127,6 +9295,83 @@ var VERSIONER = [
   function oppetMoteObj() { return styrData().moten.find(function (x) { return x.id === oppetMote; }) || null; }
   function arSekreterare() { return !odAnslutet() || (odNu.roller && K.harRoll(odNu.roller, mig(), 'sekreterare')); }
 
+  async function sha256Bytes(buf) {
+    var b = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(b)).map(function (x) { return x.toString(16).padStart(2, '0'); }).join('');
+  }
+
+  // Årsrapporten för underskrift. Kontrollsummor för bokföringen räknas i bakgrunden och sparas här per rapport.
+  var arsrapportSummor = {}, arsrapportLokalaFiler = {};
+
+  async function arsrapportSkicka() {
+    var ar = aktivt(), arN = K.arNamn(ar);
+    var valda = Array.from(document.querySelectorAll('[data-arsund]')).filter(function (x) { return x.checked; }).map(function (x) { return x.dataset.arsund; });
+    if (!valda.length) throw new Error('Välj vilka som ska skriva under.');
+    var personer = arsrapportPersoner();
+    var undertecknare = valda.map(function (e) {
+      var p = personer.find(function (x) { return x.epost === e; }) || { epost: e, namn: e, roller: [] };
+      return { epost: e, namn: p.namn, roll: (p.roller || []).map(rollnamn).join(', ') };
+    });
+    visa('Skapar årsrapporten och sparar den…');
+    var blob = await skapaArsrapportPdf(ar, { huvudbok: arsrapportHuvudbok, underskrifter: false });
+    var kontrollsumma = await sha256Bytes(await blob.arrayBuffer());
+    var bokforingSumma = await sha256(K.arsrapportKontrolltext(ar));
+    var filnamn = K.motesfilnamn(idag(), 'Årsrapport ' + arN), mapp = K.motesmapp('arsmote', (Number(ar.slut.slice(0, 4)) + 1) + '-01-01'), fil;
+    var id = 'ars' + Date.now().toString(36);
+    if (odAnslutet()) {
+      var post = await sparaIMotesmapp(mapp, filnamn, blob, false);
+      fil = { namn: post.name, odId: post.id, driveId: (post.parentReference || {}).driveId || od.styrMapp.driveId, webUrl: post.webUrl || null };
+    } else { arsrapportLokalaFiler[id] = blob; fil = { namn: filnamn, lokal: true }; }
+    await styrOperation(function (d) {
+      return K.skickaArsrapport(d, { id: id, arId: store.aktivt, titel: 'Årsrapport ' + arN, fil: fil, kontrollsumma: kontrollsumma, bokforingSumma: bokforingSumma,
+        undertecknare: undertecknare, av: od.konto || '', tid: new Date().toISOString() });
+    });
+    arsrapportSummor[id] = bokforingSumma;
+    visa('Årsrapporten är sparad som ' + fil.namn + (odAnslutet() ? ' i ' + mapp : '') + ' och skickad för underskrift till ' + undertecknare.length + ' personer. De skriver under under Styrelsen, Möten.');
+  }
+
+  async function arsrapportFil(r) {
+    if (r.fil && r.fil.odId) {
+      var res = await graf('/drives/' + r.fil.driveId + '/items/' + r.fil.odId + '/content', { ra: true });
+      return new Blob([await res.arrayBuffer()], { type: 'application/pdf' });
+    }
+    if (arsrapportLokalaFiler[r.id]) return arsrapportLokalaFiler[r.id];
+    throw new Error('Filen finns inte på den här enheten.');
+  }
+
+  async function arsrapportOppna(id) {
+    var r = (styrData().rapporter || []).find(function (x) { return x.id === id; });
+    if (r.fil && r.fil.webUrl) { window.open(r.fil.webUrl, '_blank'); return; }
+    var blob = await arsrapportFil(r);
+    if (!window.open(URL.createObjectURL(blob), '_blank')) laddaNer(r.fil.namn, blob, 'application/pdf');
+  }
+
+  // Den som skriver under hämtar filen och räknar kontrollsumman själv, så att underskriften gäller just den fil som skickades.
+  async function arsrapportSignera(id, epostOvning) {
+    if (!OVNING && !(document.getElementById('arsGodkann-' + id) || {}).checked) throw new Error('Kryssa i att du har läst årsrapporten och godkänner den.');
+    var r = (styrData().rapporter || []).find(function (x) { return x.id === id; });
+    var vem = OVNING ? epostOvning : mig();
+    var u = r.undertecknare.find(function (x) { return x.epost === vem; }) || {};
+    var summa = await sha256Bytes(await (await arsrapportFil(r)).arrayBuffer());
+    await styrOperation(function (d) { return K.signeraArsrapport(d, id, vem, u.namn || vem, summa, new Date().toISOString()); });
+    var st = K.arsrapportUnderskrifter((styrData().rapporter || []).find(function (x) { return x.id === id; }));
+    visa('Du har skrivit under årsrapporten.' + (st.klar ? ' Alla har nu skrivit under.' : ''));
+  }
+
+  // Den undertecknade versionen: årsrapporten med en sista sida om underskrifterna, sparad bredvid originalet.
+  async function arsrapportUndertecknad(id) {
+    var r = (styrData().rapporter || []).find(function (x) { return x.id === id; });
+    var ar = store.ar[r.arId];
+    if (!ar) throw new Error('Räkenskapsåret finns inte i den här bokföringen.');
+    if (await sha256(K.arsrapportKontrolltext(ar)) !== r.bokforingSumma) throw new Error('Bokföringen har ändrats sedan rapporten skickades. Skicka en ny version för underskrift.');
+    var blob = await skapaArsrapportPdf(ar, { huvudbok: arsrapportHuvudbok, underskrifter: false, elektroniska: r });
+    var namn = String((r.fil && r.fil.namn) || 'Årsrapport.pdf').replace(/\.pdf$/i, '') + ' undertecknad.pdf';
+    if (odAnslutet()) {
+      await sparaIMotesmapp(K.motesmapp('arsmote', (Number(ar.slut.slice(0, 4)) + 1) + '-01-01'), namn, blob, true);
+      visa('Den undertecknade versionen är sparad som ' + namn + ' bredvid originalet.');
+    } else laddaNer(namn, blob, 'application/pdf');
+  }
+
   async function sha256(text) {
     var b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
     return Array.from(new Uint8Array(b)).map(function (x) { return x.toString(16).padStart(2, '0'); }).join('');
@@ -9152,12 +9397,29 @@ var VERSIONER = [
     return html;
   }
 
+  // Årsrapporter som väntar på den inloggades underskrift (i övningsläget alla som väntar).
+  function arsrapporterAttSkrivaUnder() {
+    var jag = mig();
+    return (styrData().rapporter || []).filter(function (r) { return !r.ersatt; }).map(function (r) {
+      var st = K.arsrapportUnderskrifter(r);
+      var mina = r.undertecknare.filter(function (u) { return (OVNING || u.epost === jag) && !st.signerade.some(function (x) { return x.epost === u.epost; }); });
+      if (!mina.length) return '';
+      return '<div class="card"><h3 style="margin-top:0">' + esc(r.titel) + ' att skriva under</h3>' +
+        '<p style="margin-top:0">Skickad ' + esc(String(r.tid || '').slice(0, 10)) + '. ' + st.signerade.length + ' av ' + r.undertecknare.length + ' har skrivit under. Läs rapporten innan du skriver under.</p>' +
+        '<div class="row"><button class="btn btn-secondary btn-small" data-action="arsrapport-oppna" data-id="' + esc(r.id) + '">Öppna årsrapporten</button></div>' +
+        (OVNING ? '' : '<label style="font-weight:normal;display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" id="arsGodkann-' + esc(r.id) + '" style="width:auto"> Jag har läst årsrapporten och godkänner den</label>') +
+        '<div class="row">' + mina.map(function (u) {
+          return '<button class="btn btn-small" data-action="arsrapport-signera" data-id="' + esc(r.id) + '" data-epost="' + esc(u.epost) + '">Skriv under' + (OVNING ? ' som ' + esc(u.namn || u.epost) : '') + '</button>';
+        }).join('') + '</div></div>';
+    }).join('');
+  }
+
   function vyMoten(ar) {
     var s = styrData(), skriv = styrBeh('styr') === 'write';
     var m0 = oppetMoteObj();
     if (m0) return vyMote(ar, m0);
     oppetMote = null;
-    var html = '';
+    var html = arsrapporterAttSkrivaUnder();
     if (skriv) {
       var am = arsmoteData(ar);
       html += '<div class="card"><h3 style="margin-top:0">Nytt protokoll</h3><div class="row">' +
@@ -10737,7 +10999,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport],[data-grupp]');
@@ -11717,6 +11979,20 @@ var VERSIONER = [
     'arsrapport-visa': function () { arsrapportOppen = true; render(); },
     'arsrapport-stang': function () { arsrapportOppen = false; render(); },
     'arsrapport-huvudbok': function (t) { arsrapportHuvudbok = !!t.checked; render(); },
+    'arsrapport-papper': function (t) { arsrapportPapper = !!t.checked; render(); },
+    'arsrapport-skicka': function () { arsrapportSkicka().catch(function (err) { visa(err.message, true); }); },
+    'arsrapport-signera': function (t) { arsrapportSignera(t.dataset.id, t.dataset.epost).catch(function (err) { visa(err.message, true); }); },
+    'arsrapport-oppna': function (t) { arsrapportOppna(t.dataset.id).catch(function (err) { visa(err.message, true); }); },
+    'arsrapport-undertecknad': function (t) { arsrapportUndertecknad(t.dataset.id).catch(function (err) { visa(err.message, true); }); },
+    'arsrapport-papper-reg': function (t) {
+      if (!window.confirm('Registrera att personen har skrivit under årsrapporten på papper? Spara gärna den undertecknade sidan i årsmötets mapp.')) return;
+      styrOperation(function (d) { return K.papperArsrapport(d, t.dataset.id, t.dataset.epost, new Date().toISOString()); })
+        .then(function () { visa('Underskriften på papper är registrerad.'); }, function (err) { visa(err.message, true); });
+    },
+    'arsrapport-esign-bort': function (t) {
+      if (!window.confirm('Ta tillbaka årsrapporten från underskrift? Filen ligger kvar i OneDrive.')) return;
+      styrOperation(function (d) { return K.taBortArsrapportUnderskrift(d, t.dataset.id); }).then(function () { visa('Årsrapporten är tillbakatagen.'); }, function (err) { visa(err.message, true); });
+    },
     'arsrapport-skriv-ut': function (t) {
       var c = pdfCache[t.dataset.id];
       if (!c || c.status !== 'klar') { visa('Årsrapporten skapas fortfarande. Vänta ett ögonblick och försök igen.', true); return; }
