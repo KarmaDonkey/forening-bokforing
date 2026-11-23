@@ -364,6 +364,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.48', datum: '2026-11-23',
+    nyheter: [
+      'Förtroendeuppdrag kan gälla till ett årsmöte i stället för ett datum, till exempel "Årsmötet 2027", som stadgarna brukar säga. Är årsmötets datum inlagt visas det, och påminnelsen om uppdrag som går ut räknar med det.',
+      'Knappen "Ändra" på varje uppdrag, för att byta mandat från datum till årsmöte eller tvärtom.'
+    ]
+  },
+  {
     version: '1.47', datum: '2026-11-23',
     nyheter: [
       'Årsrapporten kan skickas för elektronisk underskrift. Den sparas som PDF i årsmötets mapp, och styrelsen skriver under under Styrelsen, Möten med sitt Microsoft-konto. Den som inte kan logga in registreras som underskriven på papper.',
@@ -3911,11 +3918,38 @@ var VERSIONER = [
   }
   function andraArende(styr, id, andring) { return Object.assign({}, styr, { arenden: styr.arenden.map(function (a) { return a.id === id ? Object.assign({}, a, andring) : a; }) }); }
 
-  // Förtroendeuppdrag: vem som är vald till vad och till när.
+  // Förtroendeuppdrag: vem som är vald till vad och till när. Mandatet gäller antingen till ett visst årsmöte
+  // (tillArsmote: '2027', det vanliga enligt stadgarna) eller till ett datum (till).
+  function mandatFalt(u) {
+    if (u.tillArsmote != null && String(u.tillArsmote) !== '') {
+      var ar = String(u.tillArsmote).trim();
+      if (!/^\d{4}$/.test(ar)) throw BokforingsFel('Ange årtalet för årsmötet, t.ex. 2027.');
+      return { tillArsmote: ar, till: '' };
+    }
+    return { tillArsmote: '', till: arGiltigtDatum(u.till) ? u.till : '' };
+  }
+
   function laggTillUppdrag(upp, u) {
     if (!String(u.roll || '').trim() || !String(u.namn || '').trim()) throw BokforingsFel('Ange uppdrag och namn.');
-    var x = { id: styrId('fu'), roll: String(u.roll).trim(), namn: String(u.namn).trim(), apelido: String(u.apelido || '').trim(), vald: arGiltigtDatum(u.vald) ? u.vald : '', till: arGiltigtDatum(u.till) ? u.till : '' };
+    var x = Object.assign({ id: styrId('fu'), roll: String(u.roll).trim(), namn: String(u.namn).trim(), apelido: String(u.apelido || '').trim(), vald: arGiltigtDatum(u.vald) ? u.vald : '' }, mandatFalt(u));
     return Object.assign({}, upp, { uppdrag: upp.uppdrag.concat([x]) });
+  }
+
+  function andraMandat(upp, id, m) {
+    var f = mandatFalt(m);
+    return Object.assign({}, upp, { uppdrag: upp.uppdrag.map(function (u) { return u.id === id ? Object.assign({}, u, f) : u; }) });
+  }
+
+  // När mandatet går ut: datumet, eller årsmötets datum om det är känt (arsmoten: { '2027': '2027-04-20' }),
+  // annars årets första dag, så att påminnelserna kommer i god tid.
+  function mandatSlut(u, arsmoten) {
+    if (u.tillArsmote) return (arsmoten && arsmoten[u.tillArsmote]) || u.tillArsmote + '-01-01';
+    return u.till || '';
+  }
+
+  function mandatText(u, arsmoten) {
+    if (u.tillArsmote) return 'Årsmötet ' + u.tillArsmote + (arsmoten && arsmoten[u.tillArsmote] ? ' (' + arsmoten[u.tillArsmote] + ')' : '');
+    return u.till || '';
   }
   function taBortUppdrag(upp, id) { return Object.assign({}, upp, { uppdrag: upp.uppdrag.filter(function (u) { return u.id !== id; }) }); }
   // Två personer kan ändra styrelsens material samtidigt. Ändringarna slås ihop post för post (möte, uppgift, uppdrag …).
@@ -3987,8 +4021,9 @@ var VERSIONER = [
       .sort(function (a, b) { return a.tid < b.tid ? 1 : a.tid > b.tid ? -1 : 0; });
   }
 
-  function uppdragSomGarUt(upp, datum) {
-    return upp.uppdrag.filter(function (u) { return u.till && u.till <= datum; }).sort(function (a, b) { return a.till < b.till ? -1 : 1; });
+  function uppdragSomGarUt(upp, datum, arsmoten) {
+    return upp.uppdrag.filter(function (u) { var s = mandatSlut(u, arsmoten); return s && s <= datum; })
+      .sort(function (a, b) { return mandatSlut(a, arsmoten) < mandatSlut(b, arsmoten) ? -1 : 1; });
   }
 
   // ---------- Årsmötet ----------
@@ -4592,6 +4627,9 @@ var VERSIONER = [
     laggTillUppdrag: laggTillUppdrag,
     taBortUppdrag: taBortUppdrag,
     uppdragSomGarUt: uppdragSomGarUt,
+    andraMandat: andraMandat,
+    mandatSlut: mandatSlut,
+    mandatText: mandatText,
     slaIhopPoster: slaIhopPoster,
     motesmapp: motesmapp,
     sokvagFranGraf: sokvagFranGraf,
@@ -9636,16 +9674,43 @@ var VERSIONER = [
     }).join('') + '</tbody></table></div>';
   }
 
+  // Årsmötenas datum som de står under Styrelsen, Årsmöte (per år då mötet hålls).
+  function arsmotesdatum() {
+    var ut = {};
+    Object.keys(store.ar || {}).forEach(function (id) { var d = store.ar[id].arsmote && store.ar[id].arsmote.motesdatum; if (d) ut[d.slice(0, 4)] = d; });
+    return ut;
+  }
+  var uppdragAndras = null;
+  // Val av mandat: årsmötet nästa år och åren efter, eller ett datum.
+  function mandatVal(idPrefix, u) {
+    var ar0 = Number(idag().slice(0, 4)), nu = u ? (u.tillArsmote || (u.till ? 'datum' : '')) : String(ar0 + 1);
+    var ar = []; for (var y = ar0; y <= ar0 + 3; y++) ar.push(String(y));
+    if (u && u.tillArsmote && ar.indexOf(u.tillArsmote) < 0) ar.unshift(u.tillArsmote);
+    return '<select id="' + idPrefix + 'Typ" style="width:auto" aria-label="Mandat till">' + ar.map(function (y) { return '<option value="' + y + '"' + (nu === y ? ' selected' : '') + '>årsmötet ' + y + '</option>'; }).join('') +
+      '<option value="datum"' + (nu === 'datum' || nu === '' ? ' selected' : '') + '>datum:</option></select>' +
+      '<input id="' + idPrefix + 'Datum" type="date" style="width:auto" value="' + esc(u && u.till ? u.till : '') + '" aria-label="Datum">';
+  }
+  function lasMandat(idPrefix) {
+    var typ = varde(idPrefix + 'Typ');
+    return typ === 'datum' ? { till: varde(idPrefix + 'Datum') } : { tillArsmote: typ };
+  }
+
   function uppdragTabell(skriv) {
-    var upp = uppData(), nu0 = idag(), snart = K.laggTillManader(nu0, 3);
+    var upp = uppData(), nu0 = idag(), snart = K.laggTillManader(nu0, 3), am = arsmotesdatum();
     var ordning = function (r) { var i = UPPDRAGSROLLER.indexOf(r); return i < 0 ? 99 : i; };
     var lista = upp.uppdrag.slice().sort(function (a, b) { return ordning(a.roll) - ordning(b.roll) || (a.namn < b.namn ? -1 : 1); });
     if (!lista.length) return '<p class="faint">Inga förtroendeuppdrag inlagda.</p>';
     return '<div class="scroll"><table class="kortlista"><thead><tr><th>Uppdrag</th><th>Namn</th><th>Vald</th><th>Mandat till</th><th></th></tr></thead><tbody>' + lista.map(function (u) {
-      var ut = u.till && u.till <= snart;
+      var slut = K.mandatSlut(u, am), ut = slut && slut <= snart;
+      var tagg = !ut ? '' : u.tillArsmote ? (am[u.tillArsmote] && am[u.tillArsmote] < nu0 ? 'har gått ut' : 'går ut vid årsmötet') : (u.till < nu0 ? 'har gått ut' : 'går ut snart');
+      var mandat = uppdragAndras === u.id
+        ? '<div class="row" style="gap:6px">' + mandatVal('andraMandat', u) + '<button class="btn btn-small" data-action="styr-mandat-spara" data-id="' + esc(u.id) + '">Spara</button>' +
+          '<button class="btn btn-secondary btn-small" data-action="styr-mandat-avbryt">Avbryt</button></div>'
+        : esc(K.mandatText(u, am)) + (tagg ? ' <span class="tag varning">' + tagg + '</span>' : '');
       return '<tr><td>' + esc(u.roll) + '</td><td data-etikett="Namn">' + esc(u.namn) + (u.apelido ? ' <span class="faint">(' + esc(u.apelido) + ')</span>' : '') + '</td>' +
-        '<td data-etikett="Vald">' + esc(u.vald) + '</td><td data-etikett="Mandat till">' + esc(u.till) + (ut ? ' <span class="tag varning">' + (u.till < nu0 ? 'har gått ut' : 'går ut snart') + '</span>' : '') + '</td>' +
-        '<td>' + (skriv ? '<button class="btn btn-secondary btn-small" data-action="styr-uppdrag-bort" data-id="' + esc(u.id) + '">Ta bort</button>' : '') + '</td></tr>';
+        '<td data-etikett="Vald">' + esc(u.vald) + '</td><td data-etikett="Mandat till">' + mandat + '</td>' +
+        '<td style="white-space:nowrap">' + (skriv && uppdragAndras !== u.id ? '<button class="btn btn-secondary btn-small" data-action="styr-mandat-andra" data-id="' + esc(u.id) + '">Ändra</button> ' +
+          '<button class="btn btn-secondary btn-small" data-action="styr-uppdrag-bort" data-id="' + esc(u.id) + '">Ta bort</button>' : '') + '</td></tr>';
     }).join('') + '</tbody></table></div>';
   }
 
@@ -9659,7 +9724,7 @@ var VERSIONER = [
         '<input id="nyUppdragNamn" placeholder="Namn" style="max-width:200px" aria-label="Namn">' +
         '<input id="nyUppdragApelido" placeholder="Apelido" style="max-width:130px" aria-label="Apelido">' +
         '<label style="display:inline-flex;align-items:center;gap:4px;margin:0">Vald <input id="nyUppdragVald" type="date" style="width:auto"></label>' +
-        '<label style="display:inline-flex;align-items:center;gap:4px;margin:0">till <input id="nyUppdragTill" type="date" style="width:auto"></label>' +
+        '<label style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px;margin:0;max-width:100%">till ' + mandatVal('nyMandat') + '</label>' +
         '<button class="btn btn-small" data-action="styr-uppdrag-ny">Lägg till</button></div></div>';
     }
     return html + uppdragTabell(skriv);
@@ -9707,7 +9772,7 @@ var VERSIONER = [
     if (sena.length) ut += rad(antal(sena.length, 'uppgift', 'uppgifter') + ' med sista datum inom två veckor eller passerat: ' + esc(sena.slice(0, 3).map(function (u) { return u.text; }).join(', ')) + (sena.length > 3 ? ' …' : '') + '.',
       '<button class="btn btn-secondary btn-small" data-action="styr-vy" data-v="uppgifter">Uppgifter</button>');
     if (styrBeh('upp')) {
-      var gar = K.uppdragSomGarUt(uppData(), K.laggTillManader(nu0, 3));
+      var gar = K.uppdragSomGarUt(uppData(), K.laggTillManader(nu0, 3), arsmotesdatum());
       if (gar.length) ut += rad(antal(gar.length, 'förtroendeuppdrag går', 'förtroendeuppdrag går') + ' ut inom tre månader.', '<button class="btn btn-secondary btn-small" data-action="styr-vy" data-v="uppdrag">Förtroendeuppdrag</button>');
     }
     return ut;
@@ -11554,7 +11619,15 @@ var VERSIONER = [
       visa('Checklistan inför årsmötet är inlagd som uppgifter. Fyll i vem som är ansvarig.');
     },
     'styr-uppdrag-ny': function () {
-      andraStyr('upp', K.laggTillUppdrag(uppData(), { roll: varde('nyUppdragRoll'), namn: varde('nyUppdragNamn'), apelido: varde('nyUppdragApelido'), vald: varde('nyUppdragVald'), till: varde('nyUppdragTill') }));
+      andraStyr('upp', K.laggTillUppdrag(uppData(), Object.assign({ roll: varde('nyUppdragRoll'), namn: varde('nyUppdragNamn'), apelido: varde('nyUppdragApelido'), vald: varde('nyUppdragVald') }, lasMandat('nyMandat'))));
+    },
+    'styr-mandat-andra': function (t) { uppdragAndras = t.dataset.id; render(); },
+    'styr-mandat-avbryt': function () { uppdragAndras = null; render(); },
+    'styr-mandat-spara': function (t) {
+      var m = lasMandat('andraMandat');
+      if (m.till === '') throw new Error('Välj ett datum, eller ett årsmöte.');
+      uppdragAndras = null;
+      andraStyr('upp', K.andraMandat(uppData(), t.dataset.id, m));
     },
     'styr-uppdrag-bort': function (t) { if (window.confirm('Ta bort förtroendeuppdraget?')) andraStyr('upp', K.taBortUppdrag(uppData(), t.dataset.id)); },
     'styr-arende-ny': function () { andraStyr('styr', K.laggTillArende(styrData(), { typ: varde('nyArendeTyp'), text: varde('nyArendeText') })); },

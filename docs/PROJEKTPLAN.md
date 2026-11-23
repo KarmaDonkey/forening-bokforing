@@ -162,6 +162,10 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Årsrapport (PDF) under Rapporter: försättsida, innehållsförteckning, resultat- och balansräkning, saldobalans, bankavstämning, grundbok (liggande), huvudbok som val och sida för styrelsens underskrifter (från 1.46).
 - Sidan för underskrifter på papper är ett val, förvalt när året är låst. Årsrapporten kan skickas för elektronisk underskrift: PDF:en sparas i årsmötets mapp, kontrollsumman (SHA-256) av filen och av årets bokföring sparas i Styrelsen.json, styrelsen skriver under under Styrelsen, Möten med sitt Microsoft-konto (filen hämtas och kontrolleras), papper kan registreras, och en undertecknad version får en sista sida med underskrifterna. Ändrad bokföring efteråt ger en varning (från 1.47).
 
+## Förtroendeuppdrag (från version 1.48)
+
+- Mandatet gäller till ett årsmöte ("Årsmötet 2027", förvalt) eller till ett datum, och kan ändras i efterhand. Påminnelsen om uppdrag som går ut använder årsmötets datum om det är inlagt, annars årets början.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.

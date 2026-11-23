@@ -173,3 +173,26 @@ test('rollfilen minns styrelsens mapp och uppdragsfilen', () => {
   assert.equal(l.styrMapp.id, 'S');
   assert.equal(l.uppdragFil.id, 'U');
 });
+
+test('mandat till ett årsmöte i stället för ett datum', () => {
+  let u = K.laggTillUppdrag(K.tomaUppdrag(), { roll: 'Ordförande', namn: 'Påhittad Ett', vald: '2030-04-28', tillArsmote: '2031' });
+  u = K.laggTillUppdrag(u, { roll: 'Kassör', namn: 'Påhittad Två', vald: '2030-04-28', till: '2031-04-28' });
+  u = K.laggTillUppdrag(u, { roll: 'Ledamot', namn: 'Påhittad Tre', vald: '2030-04-28', tillArsmote: '2032' });
+  assert.deepEqual(json(u.uppdrag.map((x) => [x.tillArsmote, x.till])), [['2031', ''], ['', '2031-04-28'], ['2032', '']]);
+  assert.throws(() => K.laggTillUppdrag(u, { roll: 'Ledamot', namn: 'X', tillArsmote: 'nästa' }), /årtalet/);
+  const [a, b] = u.uppdrag;
+  assert.equal(K.mandatText(a), 'Årsmötet 2031');
+  assert.equal(K.mandatText(a, { 2031: '2031-05-12' }), 'Årsmötet 2031 (2031-05-12)');
+  assert.equal(K.mandatText(b), '2031-04-28');
+  assert.equal(K.mandatSlut(a), '2031-01-01', 'utan känt datum: årets början, så att påminnelsen kommer i tid');
+  assert.equal(K.mandatSlut(a, { 2031: '2031-05-12' }), '2031-05-12');
+  // Påminnelser inom tre månader från 2030-11-01: årsmötet 2031 utan datum räknas från 2031-01-01.
+  assert.deepEqual(json(K.uppdragSomGarUt(u, '2031-02-01').map((x) => x.roll)), ['Ordförande']);
+  assert.deepEqual(json(K.uppdragSomGarUt(u, '2031-02-01', { 2031: '2031-05-12' }).map((x) => x.roll)), [], 'årsmötet är senare än tre månader fram');
+  assert.deepEqual(json(K.uppdragSomGarUt(u, '2031-05-01', { 2031: '2031-05-12' }).map((x) => x.roll)), ['Kassör']);
+  // Ändra mandat på ett befintligt uppdrag.
+  const ny = K.andraMandat(u, b.id, { tillArsmote: '2031' });
+  assert.deepEqual(json([ny.uppdrag[1].tillArsmote, ny.uppdrag[1].till]), ['2031', '']);
+  const tillbaka = K.andraMandat(ny, b.id, { till: '2031-06-30' });
+  assert.deepEqual(json([tillbaka.uppdrag[1].tillArsmote, tillbaka.uppdrag[1].till]), ['', '2031-06-30']);
+});
