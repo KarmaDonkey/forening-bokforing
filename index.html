@@ -364,6 +364,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.46', datum: '2026-11-23',
+    nyheter: [
+      'Årsrapport (PDF) under Rapporter: försättsida med logotyp, innehållsförteckning, resultaträkning, balansräkning, saldobalans, bankavstämning, grundbok och en sida för styrelsens underskrifter, i en enda PDF.',
+      'Huvudboken för alla konton kan tas med som ett val.'
+    ]
+  },
+  {
     version: '1.45', datum: '2026-11-23',
     nyheter: [
       'Rättelse: "Skriv ut" av grundboken och verifikationslistan visar alla kolumner (debet, kredit och belopp) och skrivs ut liggande.'
@@ -2049,6 +2056,28 @@ var VERSIONER = [
       if (finns) finns.belopp += Math.abs(r.belopp); else sida.push({ konto: r.konto, belopp: Math.abs(r.belopp) });
     });
     return { debet: debet, kredit: kredit };
+  }
+
+  // Årsrapporten: vilka delar som ingår, i ordning. Bankavstämningen bara när kontoutdrag finns, huvudboken som val.
+  function arsrapportInnehall(ar, opt) {
+    var ut = [{ typ: 'rr', titel: 'Resultaträkning' }, { typ: 'br', titel: 'Balansräkning' }, { typ: 'sb', titel: 'Saldobalans' }];
+    if ((ar.bankrader || []).length) ut.push({ typ: 'bank', titel: 'Bankavstämning' });
+    ut.push({ typ: 'gb', titel: 'Grundbok' });
+    if (opt && opt.huvudbok) ut.push({ typ: 'hball', titel: 'Huvudbok' });
+    ut.push({ typ: 'underskrifter', titel: 'Underskrifter' });
+    return ut;
+  }
+
+  function arsrapportStatus(ar) {
+    return ar.grovkopia ? 'Arkivkopia från Excel' : ar.lastTom === ar.slut ? 'Bokslut' : 'Preliminär';
+  }
+
+  // Konton som har ingående balans eller transaktioner under året, i nummerordning (för huvudboken).
+  function kontonMedRorelse(ar) {
+    var k = {};
+    Object.keys(ar.ingaendeBalans || {}).forEach(function (nr) { if (ar.ingaendeBalans[nr]) k[nr] = true; });
+    (ar.verifikationer || []).forEach(function (v) { v.rader.forEach(function (r) { k[r.konto] = true; }); });
+    return Object.keys(k).sort();
   }
 
   // Summa debet och kredit för alla verifikationer under året (ska vara lika).
@@ -4327,6 +4356,9 @@ var VERSIONER = [
     grundbokSidor: grundbokSidor,
     grundbokOrdning: grundbokOrdning,
     grundbokSummor: grundbokSummor,
+    arsrapportInnehall: arsrapportInnehall,
+    arsrapportStatus: arsrapportStatus,
+    kontonMedRorelse: kontonMedRorelse,
     osannoliktUnderlag: osannoliktUnderlag,
     andraUtlagg: andraUtlagg,
     utlaggNamn: utlaggNamn,
@@ -6746,14 +6778,107 @@ var VERSIONER = [
 
   // ---------- Rapporter som PDF ----------
 
-  var RAPPORTTITLAR = { rr: 'Resultaträkning', br: 'Balansräkning', sb: 'Saldobalans', gb: 'Grundbok', hb: 'Huvudbok', bank: 'Bankavstämning' };
+  var RAPPORTTITLAR = { rr: 'Resultaträkning', br: 'Balansräkning', sb: 'Saldobalans', gb: 'Grundbok', hb: 'Huvudbok', hball: 'Huvudbok', bank: 'Bankavstämning' };
 
-  async function skapaRapportPdf(ar, typ, konto) {
+  // Sidfot på varje sida: text till vänster och "Sida x av y" till höger. Klarar stående och liggande sidor.
+  function sidfot(doc, text, franSida) {
+    var sidor = doc.getNumberOfPages();
+    for (var i = franSida || 1; i <= sidor; i++) {
+      doc.setPage(i);
+      var b = doc.internal.pageSize.getWidth(), h = doc.internal.pageSize.getHeight();
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
+      doc.text(pt(text), 15, h - 7);
+      doc.text('Sida ' + i + ' av ' + sidor, b - 15, h - 7, { align: 'right' });
+      doc.setTextColor(26, 26, 26);
+    }
+  }
+
+  // Årsrapporten: försättsida, innehållsförteckning, rapporterna och en sida för underskrifter, i en PDF.
+  async function skapaArsrapportPdf(ar, medHuvudbok) {
+    var doc = nyPdf(await laddaJsPdf());
+    var f = store.forening, arN = K.arNamn(ar), status = K.arsrapportStatus(ar);
+    var mitt = 105;
+    // Försättsida
+    var logoH = ritaLogo(doc, mitt - 22, 40, 44, 44);
+    var y = logoH ? 40 + logoH + 18 : 80;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(24); doc.setTextColor.apply(doc, SKIFFER);
+    doc.splitTextToSize(pt(f.namn || 'Föreningen'), 170).forEach(function (r) { doc.text(r, mitt, y, { align: 'center' }); y += 10; });
+    doc.setTextColor(26, 26, 26);
+    if (f.orgnr) { doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.text('Org.nr ' + pt(f.orgnr), mitt, y, { align: 'center' }); y += 8; }
+    y += 22;
+    doc.setDrawColor.apply(doc, LINJE); doc.setLineWidth(0.4); doc.line(mitt - 40, y - 12, mitt + 40, y - 12);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(30); doc.text(pt('Årsrapport ' + arN), mitt, y, { align: 'center' });
+    y += 12;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(12);
+    doc.text('Räkenskapsår ' + ar.start + ' - ' + ar.slut, mitt, y, { align: 'center' });
+    y += 8;
+    doc.setFontSize(11); doc.setTextColor.apply(doc, status === 'Bokslut' ? [40, 110, 60] : GRA);
+    doc.text(pt(status), mitt, y, { align: 'center' });
+    doc.setTextColor.apply(doc, GRA); doc.setFontSize(9);
+    doc.text('Utskriven ' + idag(), mitt, 272, { align: 'center' });
+    doc.setTextColor(26, 26, 26);
+    // Innehållsförteckningen ritas sist, när sidnumren är kända.
+    doc.addPage('a4', 'p');
+    var delar = K.arsrapportInnehall(ar, { huvudbok: medHuvudbok });
+    for (var i = 0; i < delar.length; i++) {
+      var del = delar[i];
+      del.sida = doc.getNumberOfPages() + 1;
+      if (del.typ === 'underskrifter') ritaUnderskrifter(doc, ar);
+      else await skapaRapportPdf(ar, del.typ, null, { doc: doc });
+    }
+    doc.setPage(2);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor.apply(doc, SKIFFER);
+    doc.text(pt('Innehåll'), 15, 30);
+    doc.setTextColor(26, 26, 26); doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+    var ty = 45;
+    delar.forEach(function (d) {
+      doc.text(pt(d.titel), 15, ty);
+      doc.text(String(d.sida), 195, ty, { align: 'right' });
+      doc.setDrawColor.apply(doc, LINJE); doc.setLineWidth(0.2); doc.line(15, ty + 2.5, 195, ty + 2.5);
+      ty += 10;
+    });
+    sidfot(doc, (f.namn || '') + ' · Årsrapport ' + arN + (status === 'Bokslut' ? '' : ' (' + status.toLowerCase() + ')'), 2);
+    doc.setProperties({ title: 'Årsrapport ' + arN, author: f.namn || '', creator: 'Föreningsbokföring' });
+    return doc.output('blob');
+  }
+
+  // Sida för styrelsens underskrifter, med ort och datum och plats för sex namn.
+  function ritaUnderskrifter(doc, ar) {
+    doc.addPage('a4', 'p');
+    var f = store.forening;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor.apply(doc, SKIFFER);
+    doc.text('Underskrifter', 15, 30);
+    doc.setTextColor(26, 26, 26); doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5);
+    var y = 42;
+    doc.splitTextToSize(pt('Styrelsen för ' + (f.namn || 'föreningen') + ' intygar att årsrapporten för räkenskapsåret ' + ar.start + ' - ' + ar.slut + ' ger en rättvisande bild av föreningens ekonomi.'), 180)
+      .forEach(function (r) { doc.text(r, 15, y); y += 5.5; });
+    y += 14;
+    doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.3);
+    doc.line(15, y, 100, y); doc.line(110, y, 195, y);
+    doc.setFontSize(8.5); doc.setTextColor.apply(doc, GRA);
+    doc.text('Ort', 15, y + 4.5); doc.text('Datum', 110, y + 4.5);
+    y += 26;
+    for (var i = 0; i < 6; i++) {
+      var x = i % 2 ? 110 : 15;
+      doc.setDrawColor(26, 26, 26); doc.line(x, y, x + 85, y);
+      doc.text('Underskrift', x, y + 4.5);
+      doc.line(x, y + 16, x + 85, y + 16);
+      doc.text(pt('Namnförtydligande och roll'), x, y + 20.5);
+      if (i % 2) y += 40;
+    }
+    doc.setTextColor(26, 26, 26);
+  }
+
+  // inbaddad: { doc } ritar rapporten på nya sidor i ett befintligt dokument (årsrapporten) och lämnar sidfoten åt anroparen.
+  async function skapaRapportPdf(ar, typ, konto, inbaddad) {
     // Grundboken skrivs i liggande format så att debet- och kreditkolumnerna får plats.
     var liggande = typ === 'gb';
-    var doc = nyPdf(await laddaJsPdf(), liggande);
+    var doc;
+    if (inbaddad) { doc = inbaddad.doc; doc.addPage('a4', liggande ? 'l' : 'p'); }
+    else doc = nyPdf(await laddaJsPdf(), liggande);
+    var nyttBlad = function () { doc.addPage('a4', liggande ? 'l' : 'p'); };
     var f = store.forening;
-    var V = 15, H = liggande ? 282 : 195, NED = liggande ? 192 : 278, FOT = liggande ? 203 : 290;
+    var V = 15, H = liggande ? 282 : 195, NED = liggande ? 192 : 278;
     var medNamn = typ === 'medln';
     if (medNamn) typ = 'medl';
     var amData = (typ === 'dagordning' || typ === 'rostlangd') ? arsmoteData(ar) : null;
@@ -6782,7 +6907,7 @@ var VERSIONER = [
       doc.setDrawColor(26, 26, 26); doc.setLineWidth(0.3); doc.line(V, y + 1.5, H, y + 1.5);
       y += 6;
     };
-    var nySida = function () { doc.addPage(); y = 18; kolumnrubriker(); };
+    var nySida = function () { nyttBlad(); y = 18; kolumnrubriker(); };
     var rad = function (celler, stil) {
       doc.setFont('helvetica', stil ? 'bold' : 'normal'); doc.setFontSize(9);
       var delar = celler.map(function (c, i) { return kol[i] && kol[i].w ? doc.splitTextToSize(pt(c), kol[i].w) : [pt(c)]; });
@@ -6797,7 +6922,7 @@ var VERSIONER = [
       y += hojd + (stil === 'total' ? 1.5 : 0);
     };
     var avsnitt = function (text) {
-      if (y + 14 > NED) { doc.addPage(); y = 18; }
+      if (y + 14 > NED) { nyttBlad(); y = 18; }
       y += 3;
       doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor.apply(doc, SKIFFER);
       doc.text(pt(text), V, y);
@@ -6806,7 +6931,7 @@ var VERSIONER = [
     };
     var text = function (t) {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-      doc.splitTextToSize(pt(t), H - V).forEach(function (r) { if (y + 4.5 > NED) { doc.addPage(); y = 18; } doc.text(r, V, y); y += 4.3; });
+      doc.splitTextToSize(pt(t), H - V).forEach(function (r) { if (y + 4.5 > NED) { nyttBlad(); y = 18; } doc.text(r, V, y); y += 4.3; });
     };
     var R = 'right';
 
@@ -6864,6 +6989,19 @@ var VERSIONER = [
       rad([ar.start, '', 'Ingående balans', '', '', kr(hb.ib)], 'grupp');
       hb.rader.forEach(function (r) { rad([r.datum, String(r.nr), r.text, r.belopp > 0 ? kr(r.belopp) : '', r.belopp < 0 ? kr(-r.belopp) : '', kr(r.saldo)]); });
       rad(['', '', 'Utgående balans', '', '', kr(hb.ub)], 'total');
+    } else if (typ === 'hball') {
+      K.kontonMedRorelse(ar).forEach(function (nr) {
+        var hbk = K.huvudbok(ar, nr);
+        kol = null;
+        if (y + 30 > NED) { nyttBlad(); y = 18; }
+        avsnitt(nr + ' ' + K.kontonamn(ar, nr));
+        kol = [{ r: 'Datum', x: V }, { r: 'Ver', x: 40, align: R }, { r: 'Text', x: 45, w: 72 }, { r: 'Debet', x: 145, align: R }, { r: 'Kredit', x: 170, align: R }, { r: 'Saldo', x: H, align: R }];
+        kolumnrubriker();
+        rad([ar.start, '', 'Ingående balans', '', '', kr(hbk.ib)]);
+        hbk.rader.forEach(function (r) { rad([r.datum, String(r.nr), r.text, r.belopp > 0 ? kr(r.belopp) : '', r.belopp < 0 ? kr(-r.belopp) : '', kr(r.saldo)]); });
+        rad(['', '', 'Utgående balans', '', '', kr(hbk.ub)], 'total');
+        y += 2;
+      });
     } else if (typ === 'dagordning') {
       rader(amData.dagordning).forEach(function (r) { text(r); y += 1.5; });
     } else if (typ === 'rostlangd') {
@@ -6913,7 +7051,7 @@ var VERSIONER = [
       var bkLista = K.bankkontonIAr(ar);
       if (!bkLista.length) bkLista = [huvudbankkonto()];
       bkLista.forEach(function (bk, bi) {
-      if (bkLista.length > 1) { kol = null; if (bi) { doc.addPage(); y = 18; } avsnitt(banknamn(bk, ar)); }
+      if (bkLista.length > 1) { kol = null; if (bi) { nyttBlad(); y = 18; } avsnitt(banknamn(bk, ar)); }
       var sista = (ar.bankrader || []).filter(function (r) { return r.konto === bk; }).reduce(function (m, r) { return r.datum.slice(0, 7) > m ? r.datum.slice(0, 7) : m; }, '');
       kol = [{ r: 'Månad', x: V, w: 40 }, { r: 'Banken', x: 95, align: R }, { r: 'Bokfört', x: 125, align: R }, { r: 'Skillnad', x: 155, align: R }, { r: 'Status', x: 160, w: 35 }];
       kolumnrubriker();
@@ -6943,14 +7081,8 @@ var VERSIONER = [
       });
     }
 
-    var sidor = doc.getNumberOfPages();
-    for (var i = 1; i <= sidor; i++) {
-      doc.setPage(i);
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor.apply(doc, GRA);
-      doc.text(pt((f.namn || '') + ' · ' + titel + (typ === 'medl' || amData ? '' : ' ' + K.arNamn(ar))), V, FOT);
-      doc.text('Sida ' + i + ' av ' + sidor, H, FOT, { align: 'right' });
-      doc.setTextColor(26, 26, 26);
-    }
+    if (inbaddad) return doc;
+    sidfot(doc, (f.namn || '') + ' · ' + titel + (typ === 'medl' || amData ? '' : ' ' + K.arNamn(ar)));
     doc.setProperties({ title: titel + (typ === 'medl' || amData ? '' : ' ' + K.arNamn(ar)), author: f.namn || '', creator: 'Föreningsbokföring' });
     return doc.output('blob');
   }
@@ -6961,6 +7093,21 @@ var VERSIONER = [
     var h = 5381;
     for (var i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0;
     return (h >>> 0).toString(36);
+  }
+
+  var arsrapportOppen = false, arsrapportHuvudbok = false;
+  function vyArsrapport(ar) {
+    if (!arsrapportOppen) return '<div class="row ej-utskrift" style="margin:4px 0 10px"><button class="btn btn-secondary btn-small" data-action="arsrapport-visa">Årsrapport (PDF)…</button>' +
+      '<span class="faint">Alla rapporter i en PDF med försättsida, innehåll och sida för underskrifter.</span></div>';
+    var namn = K.sakertNamn('Årsrapport ' + (store.forening.namn ? store.forening.namn + ' ' : '') + K.arNamn(ar).replace('/', '-') + '.pdf');
+    var fg = foregaende(ar);
+    var nyckel = 'arsrapport-' + store.aktivt + '-' + (arsrapportHuvudbok ? 'hb' : '') + '-' + datastampel(ar, (fg ? datastampel(fg) : '') + (store.forening.namn || '') + (logoUrl ? logoUrl.length : 0)) + '|' + namn;
+    forbered(nyckel, function () { return skapaArsrapportPdf(ar, arsrapportHuvudbok); });
+    var delar = K.arsrapportInnehall(ar, { huvudbok: arsrapportHuvudbok }).map(function (d) { return d.titel; });
+    return '<div class="card ej-utskrift"><h3 style="margin-top:0">Årsrapport ' + esc(K.arNamn(ar)) + ' <span class="tag">' + esc(K.arsrapportStatus(ar)) + '</span></h3>' +
+      '<p class="faint" style="margin-top:0">Försättsida och innehållsförteckning, följt av ' + esc(delar.join(', ').toLowerCase()) + '.</p>' +
+      '<label style="font-weight:normal;display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" data-action="arsrapport-huvudbok" style="width:auto"' + (arsrapportHuvudbok ? ' checked' : '') + '> Ta med huvudboken för alla konton</label>' +
+      '<div class="row">' + pdfKnappar(nyckel, 'arsrapport-skriv-ut', nyckel) + '<button class="btn btn-secondary btn-small" data-action="arsrapport-stang">Stäng</button></div></div>';
   }
 
   function rapportPdfKnappar(ar, typ, konto) {
@@ -7592,6 +7739,7 @@ var VERSIONER = [
     var html = '<div class="row ej-utskrift" style="margin-top:12px">' + RAPPORTER.map(function (r) {
       return '<button class="btn ' + (rapportVy === r[0] ? '' : 'btn-secondary') + ' btn-small" data-rapport="' + r[0] + '">' + r[1] + '</button>';
     }).join('') + '</div>' + rapportPdfKnappar(ar, rapportVy);
+    html += vyArsrapport(ar);
     var rubrik = (store.forening.namn ? esc(store.forening.namn) + ' · ' : '') + 'Räkenskapsår ' + esc(ar.start) + ' – ' + esc(ar.slut);
     html += '<div class="card"><p class="faint">' + rubrik + (ar.grovkopia ? ' · arkivkopia från Excel' : ar.lastTom === ar.slut ? '' : ' · preliminär') + '</p>';
     if (rapportVy === 'rr') html += rapportRR(ar);
@@ -10589,7 +10737,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport],[data-grupp]');
@@ -11566,6 +11714,15 @@ var VERSIONER = [
     },
     'utlagg-ny': function () { utlaggUtkast = { person: '', text: '', val: {} }; render(); },
     'utlagg-avbryt': function () { utlaggUtkast = null; render(); },
+    'arsrapport-visa': function () { arsrapportOppen = true; render(); },
+    'arsrapport-stang': function () { arsrapportOppen = false; render(); },
+    'arsrapport-huvudbok': function (t) { arsrapportHuvudbok = !!t.checked; render(); },
+    'arsrapport-skriv-ut': function (t) {
+      var c = pdfCache[t.dataset.id];
+      if (!c || c.status !== 'klar') { visa('Årsrapporten skapas fortfarande. Vänta ett ögonblick och försök igen.', true); return; }
+      var fonster = window.open(URL.createObjectURL(c.blob), '_blank');
+      if (!fonster) laddaNer(t.dataset.id.split('|').pop(), c.blob, 'application/pdf');
+    },
     'ver-ordning': function () { verSenastForst = !verSenastForst; render(); },
     'rensa-gamla-betalningar': function () {
       var ids = K.foraldradeBetalningar(reg(), store.ar);
