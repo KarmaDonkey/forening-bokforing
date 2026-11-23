@@ -65,3 +65,20 @@ test('Swish från ett privat mobilnummer föreslås inte som betalning av en fak
   assert.equal(K.osannoliktUnderlag(ar.underlag.find((u) => u.id === 'f2'), tidig), true, 'tolv dagar före fakturadatum');
   assert.ok(rad(0));
 });
+
+test('Excel-betalningar tas med när året bokförs i appen, men inte när året är en arkivkopia', () => {
+  let reg = K.tomtRegister();
+  reg = K.laggTillMedlem(reg, { namn: 'Exempel Person', kategori: 'vuxen' }).reg;
+  const m = reg.medlemmar[0].id;
+  const b = (datum, termin, kalla) => { reg = K.registreraBetalning(reg, { datum, belopp: kr(700), termin, kalla, historik: true, poster: [{ medlem: m, typ: 'termin', belopp: kr(700) }] }); };
+  b('2031-02-06', 'VT-31', 'excel:2031:12');
+  b('2030-09-26', 'HT-30', 'excel:2030:40');
+  b('2029-05-26', 'VT-29', 'excel:2029:7'); // året finns inte i bokföringen
+  b('2028-05-26', 'VT-28', 'swish:abc'); // annan källa
+  const arMap = { 2030: { grovkopia: { fil: '2030.xlsx' }, verifikationer: [], bankrader: [] }, 2031: { verifikationer: [], bankrader: [] } };
+  const ids = K.foraldradeBetalningar(reg, arMap);
+  assert.deepEqual(json(ids.map((id) => reg.betalningar.find((x) => x.id === id).kalla)), ['excel:2031:12']);
+  assert.equal(K.excelArForBetalning({ kalla: 'excel:2031:12' }), '2031');
+  assert.equal(K.excelArForBetalning({ kalla: 'swish:abc' }), null);
+  assert.equal(K.taBortBetalningar(reg, ids).betalningar.length, 3);
+});
