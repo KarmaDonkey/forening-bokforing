@@ -151,6 +151,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Inbetalningar via Swish från ett privat mobilnummer föreslås inte som betalning av en faktura om fakturans namn eller nummer saknas i betalningen, och inbetalningar mer än två dagar före fakturadatum föreslås inte (från 1.40).
 - Medlemsregistret visar och kan ta bort betalningar vars bankrad inte längre är bokförd i samma verifikation, t.ex. efter "Börja om" (från 1.40).
 - Medlemsbetalningar inlästa från ett års Excel-fil tas med i samma rensning när året bokförs i appen (inte är en arkivkopia), så att de inte räknas två gånger (från 1.41).
+- Valet "Årsavgiften ingår i terminsavgiften" (Avgifter): första betalningen under kalenderåret delas upp i årsavgift och resten som terminsavgift; senare terminer samma år blir hela beloppet terminsavgift. Gäller alla kategorier med terminsavgift (från 1.42).
 - Förslag kan avfärdas med ett skäl (från 1.36). Avfärdade förslag sparas i bokföringsfilen med skäl, vem och när, föreslås inte igen och kan ångras. Vid "Börja om" följer de med reglerna.
 
 ## Kommande
