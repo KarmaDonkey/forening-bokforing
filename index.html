@@ -247,6 +247,15 @@
     nav button { padding: 12px 2px 10px; }
     .knapp-tag { padding: 4px 8px; font-size: 12px; }
   }
+  /* Verifikationerna som grundbok: en verifikation per rad på bred skärm, kortare lista på smal. */
+  table.grundbok td { vertical-align: top; }
+  table.grundbok td.gb-sida { font-size: 13.5px; }
+  table.grundbok td.gb-sida div + div { margin-top: 2px; }
+  table.grundbok .gb-summa { display: none; }
+  @media (max-width: 900px) {
+    table.grundbok .gb-sida { display: none; }
+    table.grundbok .gb-summa { display: table-cell; }
+  }
   /* Telefon */
   @media (max-width: 700px) {
     header { padding: 12px 16px 6px; gap: 4px; }
@@ -348,6 +357,13 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.43', datum: '2026-11-23',
+    nyheter: [
+      'Verifikationerna visas som en grundbok på datorn: en verifikation per rad med datum, nummer, text, debet- och kreditkonton och belopp, i datumordning. Knappen "Senaste först" vänder ordningen.',
+      'På mobilen och smala skärmar visas listan som tidigare.'
+    ]
+  },
   {
     version: '1.42', datum: '2026-11-23',
     nyheter: [
@@ -2001,6 +2017,25 @@ var VERSIONER = [
   function utlaggNamn(ar, id) {
     var x = (ar.utlagg || []).find(function (a) { return a.id === id; });
     return x ? x.person + (x.text ? ' · ' + x.text : '') : '';
+  }
+
+  // En verifikation som grundboksrad: debet- och kreditsidan, varje sida med konto och belopp (positivt).
+  // Samma konto på samma sida slås ihop. Ordningen följer verifikationens rader.
+  function grundbokSidor(v) {
+    var debet = [], kredit = [];
+    (v.rader || []).forEach(function (r) {
+      if (!r.belopp) return;
+      var sida = r.belopp > 0 ? debet : kredit;
+      var finns = sida.find(function (x) { return x.konto === r.konto; });
+      if (finns) finns.belopp += Math.abs(r.belopp); else sida.push({ konto: r.konto, belopp: Math.abs(r.belopp) });
+    });
+    return { debet: debet, kredit: kredit };
+  }
+
+  // Verifikationerna i grundboksordning: datum, sedan nummer. omvand = senaste först.
+  function grundbokOrdning(verifikationer, omvand) {
+    var l = (verifikationer || []).slice().sort(function (a, b) { return a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : a.nr - b.nr; });
+    return omvand ? l.reverse() : l;
   }
 
   function utlaggStatus(ar, id) {
@@ -4263,6 +4298,8 @@ var VERSIONER = [
     skapaUtlagg: skapaUtlagg,
     taBortUtlagg: taBortUtlagg,
     taUrUtlagg: taUrUtlagg,
+    grundbokSidor: grundbokSidor,
+    grundbokOrdning: grundbokOrdning,
     osannoliktUnderlag: osannoliktUnderlag,
     andraUtlagg: andraUtlagg,
     utlaggNamn: utlaggNamn,
@@ -4516,6 +4553,7 @@ var VERSIONER = [
   var revision = null;
   var paketStatus = null;
   var oppenVer = null;
+  var verSenastForst = false;
   var valtKonto = '1930';
   var meddelande = null;
   var utkast = nyttUtkast();
@@ -7349,26 +7387,34 @@ var VERSIONER = [
     var varningar = K.kontroller(ar);
     var utanUnderlag = {};
     varningar.forEach(function (w) { if (w.typ === 'saknarUnderlag') utanUnderlag[w.nr] = true; });
-    var lista = ar.verifikationer.slice().reverse();
+    var lista = K.grundbokOrdning(ar.verifikationer, verSenastForst);
     var html = '<div class="row" style="justify-content:space-between"><h2>Verifikationer ' + esc(K.arNamn(ar)) + '</h2>' +
-      '<button class="btn" data-vy="ny">Ny verifikation</button></div>';
+      '<div class="row"><button class="btn btn-secondary btn-small" data-action="ver-ordning">' + (verSenastForst ? 'Äldsta först' : 'Senaste först') + '</button>' +
+      '<button class="btn" data-vy="ny">Ny verifikation</button></div></div>';
     if (ar.lastTom) html += '<p class="faint">Låst till och med ' + esc(ar.lastTom) + '.</p>';
     if (!lista.length) return html + '<p class="muted">Inga verifikationer ännu.</p>';
-    html += '<div class="scroll"><table><thead><tr><th>Nr</th><th>Datum</th><th>Text</th><th class="num">Belopp</th></tr></thead><tbody>';
+    var sida = function (poster, kol) {
+      return '<td class="gb-sida">' + poster.map(function (p) { return '<div>' + esc(p.konto) + ' <span class="faint">' + esc(K.kontonamn(ar, p.konto)) + '</span></div>'; }).join('') + '</td>' +
+        '<td class="num gb-sida">' + poster.map(function (p) { return '<div>' + kr(p.belopp) + '</div>'; }).join('') + '</td>';
+    };
+    html += '<div class="scroll"><table class="grundbok"><thead><tr><th>Datum</th><th>Nr</th><th>Text</th>' +
+      '<th class="gb-sida">Debet</th><th class="num gb-sida">Belopp</th><th class="gb-sida">Kredit</th><th class="num gb-sida">Belopp</th><th class="num gb-summa">Belopp</th></tr></thead><tbody>';
     lista.forEach(function (v) {
       var taggar = '';
       if (v.rattar != null) taggar += '<span class="tag">rättar ' + v.rattar + '</span>';
       var rattning = K.rattadAv(ar, v.nr);
       if (rattning) taggar += '<span class="tag">rättad av ' + rattning.nr + '</span>';
       if (utanUnderlag[v.nr]) taggar += '<span class="tag varning">underlag saknas</span>';
-      html += '<tr class="klickbar" data-ver="' + v.nr + '"><td>' + v.nr + '</td><td class="nowrap">' + esc(v.datum) + '</td><td>' + esc(v.text) + taggar + '</td><td class="num">' + kr(verSumma(v)) + '</td></tr>';
+      var sidor = K.grundbokSidor(v);
+      html += '<tr class="klickbar" data-ver="' + v.nr + '"><td class="nowrap">' + esc(v.datum) + '</td><td>' + v.nr + '</td><td>' + esc(v.text) + taggar + '</td>' +
+        sida(sidor.debet) + sida(sidor.kredit) + '<td class="num gb-summa">' + kr(verSumma(v)) + '</td></tr>';
       if (oppenVer === v.nr) html += detaljRad(ar, v, rattning);
     });
     return html + '</tbody></table></div>';
   }
 
   function detaljRad(ar, v, rattning) {
-    var html = '<tr class="detalj"><td></td><td colspan="3"><table><tbody>';
+    var html = '<tr class="detalj"><td></td><td colspan="7"><table><tbody>';
     v.rader.forEach(function (r) {
       html += '<tr><td>' + esc(r.konto) + ' ' + esc(K.kontonamn(ar, r.konto)) + '</td>' +
         '<td class="num">' + (r.belopp > 0 ? kr(r.belopp) : '') + '</td><td class="num">' + (r.belopp < 0 ? kr(-r.belopp) : '') + '</td></tr>';
@@ -11467,6 +11513,7 @@ var VERSIONER = [
     },
     'utlagg-ny': function () { utlaggUtkast = { person: '', text: '', val: {} }; render(); },
     'utlagg-avbryt': function () { utlaggUtkast = null; render(); },
+    'ver-ordning': function () { verSenastForst = !verSenastForst; render(); },
     'rensa-gamla-betalningar': function () {
       var ids = K.foraldradeBetalningar(reg(), store.ar);
       if (!ids.length) return;
