@@ -157,6 +157,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 ## Grundbok (från version 1.43)
 
 - Verifikationerna visas på bred skärm som en grundbok: en verifikation per rad med debet- och kreditkonton och belopp, i datumordning (kan vändas). På smal skärm som tidigare.
+- Rapporten Grundbok har samma uppställning med summa för debet och kredit; som PDF och utskrift i liggande format (från 1.44).
 
 ## Kommande
 
