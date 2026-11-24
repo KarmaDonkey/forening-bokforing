@@ -364,3 +364,18 @@ test('årsavgiften ingår: två barn på samma betalning, och funktionär utan t
   const t = K.avgiftsforslag(reg, { datum: '2030-02-01', belopp: kr(40), nyckel: '+46703333333' });
   eq(t.poster, [{ medlem: 'm4', typ: 'arsavgift', belopp: kr(40) }], 'utan terminsavgift läggs årsavgiften till som vanligt');
 });
+
+test('föreningens eget bankgiro i referensen är ingen betalare', () => {
+  const rad = { datum: '2030-09-01', text: 'Bankgiro inbetalning', referens: '1234567', belopp: kr(550) };
+  K.sattEgnaNummer([]);
+  assert.equal(K.tolkaBetalare(rad).nyckel, 'ref:1234567', 'utan kända egna nummer som tidigare');
+  K.sattEgnaNummer(K.egnaNummerFor({ bankgiro: '123-4567', swish: '123 000 00 01' }));
+  assert.equal(K.tolkaBetalare(rad), null);
+  assert.equal(K.tolkaBetalare({ text: 'Swish +46701112233', referens: '1234567', belopp: kr(100) }).nyckel, '+46701112233', 'Swish-numret känns fortfarande igen');
+  assert.equal(K.tolkaBetalare({ text: 'Bankgiro inbetalning', referens: '7654321', belopp: kr(100) }).nyckel, 'ref:7654321', 'annan referens är fortfarande en betalare');
+  let reg = registret();
+  reg = K.kopplaBetalare(reg, { nyckel: 'ref:1234567', visning: 'Bankgiro 1234567' }, ['m1', 'm2', 'm3']);
+  reg = K.kopplaBetalare(reg, { nyckel: 'ref:7654321', visning: 'Bankgiro 7654321' }, ['m1']);
+  assert.deepEqual(json(K.egnaBetalare(reg).map((b) => b.nyckel)), ['ref:1234567']);
+  K.sattEgnaNummer([]);
+});

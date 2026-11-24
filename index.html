@@ -364,6 +364,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.50', datum: '2026-11-25',
+    nyheter: [
+      'Rättelse: föreningens eget bankgironummer (och Swish-nummer) används inte längre som betalare. Det stod i kontoutdragets referens för alla bankgiroinsättningar och kopplades därför till många medlemmar.',
+      'Står föreningens eget nummer redan som betalare kan det tas bort med ett klick under Medlemsregister. Saknas bankgironumret i föreningens uppgifter visas en påminnelse.'
+    ]
+  },
+  {
     version: '1.49', datum: '2026-11-24',
     nyheter: [
       'Insättningar från Fritidskortet kopplas till barnen i medlemsregistret. Namnen läses från insättningsuppgiften (personnummer sparas inte), och en insättning för flera syskon delas upp per barn.',
@@ -2772,9 +2779,22 @@ var VERSIONER = [
   }
 
   // Vem som betalat, utifrån bankraden. Nyckeln används för att känna igen betalaren nästa gång.
+  // Föreningens egna nummer (bankgiro, Swish). De står i kontoutdragets referens för egna insättningar
+  // och är aldrig någon betalare. Sätts från föreningens uppgifter.
+  var egnaNummer = [];
+  function sattEgnaNummer(lista) { egnaNummer = (lista || []).map(function (x) { return String(x || '').replace(/\D/g, ''); }).filter(function (x) { return x.length >= 5; }); }
+  function egnaNummerFor(forening) { return [forening && forening.bankgiro, forening && forening.swish].filter(Boolean); }
+  function arEgetNummer(text) { var d = String(text || '').replace(/\D/g, ''); return !!d && egnaNummer.indexOf(d) >= 0; }
+
+  // Betalare i registret som egentligen är föreningens eget nummer.
+  function egnaBetalare(reg) {
+    return reg.betalare.filter(function (b) { return /^ref:/.test(b.nyckel) && arEgetNummer(b.nyckel.slice(4)); });
+  }
+
   function tolkaBetalare(bankrad) {
     if (!bankrad) return null;
     var text = String(bankrad.text || ''), ref = String(bankrad.referens || '').trim();
+    if (arEgetNummer(ref)) ref = '';
     var mobil = hittaMobilnummer(text + ' ' + ref);
     if (mobil) return { nyckel: mobil, visning: visaMobilnummer(mobil), typ: 'swish' };
     if (ref && /\d/.test(ref)) return { nyckel: 'ref:' + ref.toLowerCase().replace(/\s+/g, ' '), visning: (/bankgiro/i.test(text) ? 'Bankgiro ' : 'Referens ') + ref, typ: 'referens' };
@@ -4645,6 +4665,9 @@ var VERSIONER = [
     kopplaBetalare: kopplaBetalare,
     andraBetalare: andraBetalare,
     taBortBetalare: taBortBetalare,
+    sattEgnaNummer: sattEgnaNummer,
+    egnaNummerFor: egnaNummerFor,
+    egnaBetalare: egnaBetalare,
     giltigaBetalningar: giltigaBetalningar,
     harBetaltArsavgift: harBetaltArsavgift,
     avgiftsforslag: avgiftsforslag,
@@ -7601,6 +7624,7 @@ var VERSIONER = [
   function gruppFor(v) { var g = GRUPPER.find(function (x) { return x[2].indexOf(v) >= 0; }); return g ? g[0] : 'oversikt'; }
 
   function render() {
+    K.sattEgnaNummer(K.egnaNummerFor(store.forening));
     var ar = aktivt();
     document.getElementById('logoBricka').hidden = !logoUrl;
     if (logoUrl) document.getElementById('logo').src = logoUrl;
@@ -10848,6 +10872,16 @@ var VERSIONER = [
     var flik = vy.slice(2);
     if (!(flik === 'lista' && (medlemVy === 'medlem' || medlemVy === 'kvitto'))) medlemVy = flik;
     var html = '';
+    var egna = lasLage() ? [] : K.egnaBetalare(r);
+    if (egna.length) {
+      html += '<div class="card" role="status"><strong>Föreningens eget nummer står som betalare</strong>' +
+        '<p style="margin:6px 0">' + esc(egna.map(function (b) { return b.visning; }).join(', ')) + ' är föreningens eget nummer, inte någon som betalar. Det kopplades till ' +
+        antal(egna.reduce(function (x, b) { return x + b.medlemmar.length; }, 0), 'medlem', 'medlemmar') + ' när betalningar via bankgiro lästes in. Betalningarna och medlemmarna finns kvar.</p>' +
+        '<button class="btn btn-small" data-action="rensa-egna-betalare">Ta bort som betalare</button></div>';
+    } else if (!lasLage() && !store.forening.bankgiro && r.betalare.some(function (b) { return /^ref:/.test(b.nyckel) && b.medlemmar.length >= 3; })) {
+      html += '<div class="card" role="status">Fyll i föreningens bankgironummer under föreningens uppgifter, så att appen inte tar det för en betalare. ' +
+        '<button class="btn btn-secondary btn-small" data-action="till-forening">Föreningens uppgifter</button></div>';
+    }
     var gamla = lasLage() ? [] : K.foraldradeBetalningar(r, store.ar);
     if (gamla.length) {
       var gamlaB = r.betalningar.filter(function (b) { return gamla.indexOf(b.id) >= 0; });
@@ -12224,6 +12258,15 @@ var VERSIONER = [
       if (!fonster) laddaNer(t.dataset.id.split('|').pop(), c.blob, 'application/pdf');
     },
     'ver-ordning': function () { verSenastForst = !verSenastForst; render(); },
+    'rensa-egna-betalare': function () {
+      var egna = K.egnaBetalare(reg());
+      if (!egna.length) return;
+      if (!window.confirm('Ta bort ' + egna.map(function (b) { return b.visning; }).join(', ') + ' som betalare? Betalningarna och medlemmarna finns kvar.')) return;
+      var r = reg();
+      egna.forEach(function (b) { r = K.taBortBetalare(r, b.nyckel); });
+      sparaReg(r);
+      visa('Föreningens eget nummer är borttaget som betalare.');
+    },
     'rensa-gamla-betalningar': function () {
       var ids = K.foraldradeBetalningar(reg(), store.ar);
       if (!ids.length) return;
