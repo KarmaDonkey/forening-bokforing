@@ -364,6 +364,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.49', datum: '2026-11-24',
+    nyheter: [
+      'Insättningar från Fritidskortet kopplas till barnen i medlemsregistret. Namnen läses från insättningsuppgiften (personnummer sparas inte), och en insättning för flera syskon delas upp per barn.',
+      'Fritidskortets belopp räknas som terminsavgift. När föräldern betalar resten föreslår appen årsavgiften och resten av terminsavgiften.',
+      'Redan bokförda insättningar från Fritidskortet kan kopplas till barnen under Medlemsregister, Att koppla.'
+    ]
+  },
+  {
     version: '1.48', datum: '2026-11-23',
     nyheter: [
       'Förtroendeuppdrag kan gälla till ett årsmöte i stället för ett datum, till exempel "Årsmötet 2027", som stadgarna brukar säga. Är årsmötets datum inlagt visas det, och påminnelsen om uppdrag som går ut räknar med det.',
@@ -2472,7 +2480,7 @@ var VERSIONER = [
   var TOLKNING_SCHEMA = {
     type: 'object',
     additionalProperties: false,
-    required: ['dokumenttyp', 'motpart', 'datum', 'forfallodatum', 'belopp', 'valuta', 'belopp_sek', 'moms', 'fakturanummer', 'ocr', 'beskrivning', 'riktning', 'foreslaget_konto', 'stalld_till_foreningen', 'osakerhet', 'transaktioner'],
+    required: ['dokumenttyp', 'motpart', 'datum', 'forfallodatum', 'belopp', 'valuta', 'belopp_sek', 'moms', 'fakturanummer', 'ocr', 'beskrivning', 'riktning', 'foreslaget_konto', 'stalld_till_foreningen', 'osakerhet', 'transaktioner', 'insattningar'],
     properties: {
       dokumenttyp: { type: 'string', enum: ['faktura', 'kvitto', 'kreditnota', 'kontoutdrag', 'insattningsuppgift', 'annat'] },
       motpart: { type: 'string', description: 'Säljare, avsändare eller bidragsgivare.' },
@@ -2501,6 +2509,20 @@ var VERSIONER = [
             text: { type: 'string' },
             belopp: { type: 'string', description: 'Negativt för uttag, med punkt som decimaltecken.' },
             saldo: { type: 'string', description: 'Saldo efter transaktionen, eller tom sträng.' }
+          }
+        }
+      },
+      insattningar: {
+        type: 'array',
+        description: 'Endast för insättningsuppgifter från bankgirot: varje insättning för sig. Annars tom lista.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['avsandare', 'referens', 'belopp'],
+          properties: {
+            avsandare: { type: 'string' },
+            referens: { type: 'string', description: 'Betalningsreferensen, eller meddelandet om referensen saknas (t.ex. ett barns namn). Skriv aldrig ut personnummer.' },
+            belopp: { type: 'string', description: 'Med punkt som decimaltecken.' }
           }
         }
       }
@@ -2978,6 +3000,8 @@ var VERSIONER = [
       var t = 0;
       if (m.kategori === 'familj') { t = familjTagen ? 0 : (avg.familj || 0); familjTagen = true; }
       else if (m.kategori !== 'funktionar') t = avg[m.kategori] || 0;
+      // Har Fritidskortet betalat en del av terminsavgiften betalar föräldern resten.
+      if (t) t = Math.max(0, t - betaltMedFritidskort(reg, m.id, termin));
       var a = 0;
       if (medArsavgift && (medArsavgift !== 'forsta' || m === medlemmar[0]) && !harBetaltArsavgift(reg, m.id, kalenderarForTermin(termin), arMap)) a = arsavgiftFor(reg, m);
       if (ingar && a && t) { a = Math.min(a, t); t -= a; }
@@ -3104,12 +3128,62 @@ var VERSIONER = [
   }
 
   // Bokförda inbetalningar med en känd sorts betalare som inte är kopplade till någon medlem.
+  // ---------- Fritidskortet: barnets avgift betald med barnets fritidskort ----------
+
+  var FRITIDSKORT = { nyckel: 'fritidskort', visning: 'Fritidskortet', typ: 'fritidskort' };
+
+  // Namnet i en betalningsreferens eller ett meddelande, utan siffror (personnummer, avinummer).
+  function rensaReferens(text) {
+    return String(text || '').replace(/\d[\d\s+\-]*/g, ' ').replace(/(^|\s)[-+](?=\s|$)/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function arFritidskort(u) {
+    return !!u && (/fritidskort/i.test(u.motpart || '') || (u.poster || []).some(function (p) { return /fritidskort/i.test(p.avsandare || ''); }));
+  }
+
+  // Medlemmen vars namn stämmer med referensen: alla ord i det kortare namnet finns i det längre. Bara om det är entydigt.
+  function hittaMedlemPaNamn(reg, namn) {
+    var ord = function (t) { return String(t || '').toLowerCase().replace(/[^a-zåäöéèüæø\s-]/g, ' ').replace(/-/g, ' ').split(/\s+/).filter(Boolean); };
+    var r = ord(namn);
+    if (r.length < 2) return null;
+    var traffar = reg.medlemmar.filter(function (m) {
+      if (m.avford) return false;
+      var mo = ord(m.namn);
+      var kort = mo.length <= r.length ? mo : r, lang = mo.length <= r.length ? r : mo;
+      return kort.length >= 2 && kort.every(function (w) { return lang.indexOf(w) >= 0; });
+    });
+    return traffar.length === 1 ? traffar[0].id : null;
+  }
+
+  // Det som betalats med Fritidskortet för en medlem en viss termin (räknas av när föräldern betalar resten).
+  function betaltMedFritidskort(reg, medlemId, termin) {
+    return reg.betalningar.filter(function (b) { return b.nyckel === FRITIDSKORT.nyckel && b.termin === termin; })
+      .reduce(function (s, b) { return s + b.poster.filter(function (p) { return p.medlem === medlemId && p.typ === 'termin'; }).reduce(function (x, p) { return x + p.belopp; }, 0); }, 0);
+  }
+
+  // Förslag för en insättning från Fritidskortet: en rad per barn. Fritidskortets belopp räknas som terminsavgift;
+  // betalar kortet hela avgiften delas den upp som vanligt (med årsavgift första gången under året).
+  function fritidskortForslag(reg, u, termin, arMap) {
+    var poster = (u.poster && u.poster.length) ? u.poster : [{ namn: '', belopp: u.belopp }];
+    var rader = poster.map(function (p) {
+      var medlem = hittaMedlemPaNamn(reg, p.namn), m = medlem ? reg.medlemmar.find(function (x) { return x.id === medlem; }) : null;
+      var fp = [];
+      if (m) {
+        var hela = posterFor(reg, termin, [m], true, arMap);
+        fp = summaPoster(hela) === p.belopp ? hela : [{ medlem: m.id, typ: 'termin', belopp: p.belopp }];
+      }
+      return { namn: p.namn, belopp: p.belopp, medlem: medlem, poster: fp };
+    });
+    return { termin: termin, rader: rader, poster: [].concat.apply([], rader.map(function (r) { return r.poster; })), alla: rader.every(function (r) { return r.medlem; }) };
+  }
+
   function okoppladeInbetalningar(reg, ar, arId) {
     var kopplade = {};
     reg.betalningar.forEach(function (b) { if (b.arId === arId && b.bankradId) kopplade[b.bankradId] = true; });
     return (ar.bankrader || []).filter(function (r) {
       if (r.belopp <= 0 || r.verifikation == null || kopplade[r.id] || reg.ignorerade.indexOf(arId + '|' + r.id) >= 0) return false;
       if (rattadAv(ar, r.verifikation)) return false;
+      if ((ar.underlag || []).some(function (u) { return u.verifikation === r.verifikation && arFritidskort(u); })) return true;
       var b = tolkaBetalare(r);
       return b && b.typ === 'swish';
     });
@@ -4366,6 +4440,7 @@ var VERSIONER = [
       'Läs underlaget och fyll i fälten. Hitta inte på uppgifter: lämna tom sträng när något saknas och skriv det i "osakerhet".',
       'Föreningen är inte momsregistrerad, så kostnader bokförs med hela beloppet inklusive moms.',
       'Välj foreslaget_konto ur kontoplanen nedan efter vad underlaget gäller, inte efter vem som skickat det. Bidrag (t.ex. LOK-stöd, aktivitetsstöd, RF-bidrag) bokförs på 3980.',
+      'Fritidskortet är inget bidrag till föreningen: det är ett barns avgift som betalas med barnets fritidskort, och bokförs som terminsavgift.',
       'Kontoplan:',
       ar.kontoplan.filter(function (k) { return Number(k.nr) >= 3000 && Number(k.nr) < 8900; }).map(function (k) { return k.nr + ' ' + k.namn; }).join('\n')
     ].concat(tidigare.length ? [
@@ -4407,6 +4482,11 @@ var VERSIONER = [
       ocr: str(t.ocr).replace(/\s/g, ''),
       foreslagetKonto: ''
     };
+    // Insättningsuppgifter: varje insättning med namn (utan personnummer) och belopp, t.ex. barn som betalats via Fritidskortet.
+    if (underlag.dokumenttyp === 'insattningsuppgift' && (t.insattningar || []).length) {
+      underlag.poster = t.insattningar.map(function (x) { return { avsandare: str(x.avsandare), namn: rensaReferens(x.referens), belopp: Math.abs(tolkaBankbelopp(x.belopp) || 0) }; })
+        .filter(function (x) { return x.belopp; });
+    }
     // Godta även "5010 Lokalhyra" och liknande.
     var km = str(t.foreslaget_konto).match(/(?:^|\D)([1-8]\d{3})(?!\d)/);
     if (km) { underlag.foreslagetKonto = km[1]; underlag.kontoKalla = 'claude'; }
@@ -4468,6 +4548,11 @@ var VERSIONER = [
     skapaUtlagg: skapaUtlagg,
     taBortUtlagg: taBortUtlagg,
     taUrUtlagg: taUrUtlagg,
+    FRITIDSKORT: FRITIDSKORT,
+    rensaReferens: rensaReferens,
+    arFritidskort: arFritidskort,
+    hittaMedlemPaNamn: hittaMedlemPaNamn,
+    fritidskortForslag: fritidskortForslag,
     grundbokSidor: grundbokSidor,
     grundbokOrdning: grundbokOrdning,
     grundbokSummor: grundbokSummor,
@@ -6330,15 +6415,16 @@ var VERSIONER = [
     // Inbetalningar och bankavgifter syns i bankutdraget och behöver inget eget underlag.
     if (!f.underlagIds.length && f.rader.length === 2 && (rad.belopp > 0 || f.rader[1].konto === '6570')) f.underlagKommentar = 'Bankutdrag';
     // Terminsavgift: ett känt Swish-nummer med rätt belopp, eller det du valt i panelen.
-    var a = val.konto == null && f.kalla !== 'underlag' && f.kalla !== 'overforing' ? avgiftForRad(rad) : null;
+    // Insättningar från Fritidskortet är också avgifter, för de barn som står på insättningsuppgiften.
+    var fk = f.kalla === 'underlag' && val.konto == null ? fritidskortFor(rad) : null;
+    var a = val.konto == null && (fk || (f.kalla !== 'underlag' && f.kalla !== 'overforing')) ? avgiftForRad(rad, fk) : null;
     if (a && a.poster) {
       try {
         if (!K.giltigtTerminId(a.termin)) throw new Error('Terminen ska skrivas som VT-27 eller HT-26.');
         f.rader = K.avgiftsrader(reg(), a.poster, rad.konto, rad.belopp);
-        f.text = val.text != null ? val.text : K.avgiftstext(reg(), a.termin, a.poster);
+        f.text = val.text != null ? val.text : K.avgiftstext(reg(), a.termin, a.poster) + (fk ? ', Fritidskortet' : '');
         f.kalla = 'avgift';
-        f.underlagIds = [];
-        f.underlagKommentar = 'Bankutdrag';
+        if (!fk) { f.underlagIds = []; f.underlagKommentar = 'Bankutdrag'; }
         f.avgift = a;
       } catch (e) { f.avgiftFel = e.fel ? e.fel.join(' ') : e.message; if (a.manuell) f.rader = [f.rader[0], { konto: '', belopp: -rad.belopp }]; }
     }
@@ -10462,13 +10548,44 @@ var VERSIONER = [
   function arsavgiftFor(m) { return m.kategori === 'funktionar' ? (reg().arsavgift.funktionar || 0) : (reg().arsavgift.vanlig || 0); }
 
   // Avgiften för en bankrad: det du valt i panelen, eller förslaget för en känd betalare när beloppet stämmer.
-  function avgiftForRad(rad) {
+  // Insättningsuppgiften från Fritidskortet som en bankrad hör till (kopplad eller föreslagen), med en post per barn.
+  function fritidskortFor(rad) {
+    var ar = aktivt(), us;
+    if (rad.verifikation != null) us = (ar.underlag || []).filter(function (u) { return u.verifikation === rad.verifikation; });
+    else {
+      var val = inkorgVal[rad.id] || {};
+      var f = K.forslagForBankrad(ar, rad, store.regler, val.underlagIds ? { underlagIds: val.underlagIds, ungefar: !!val.ungefar } : undefined);
+      if (f.kalla !== 'underlag') return null;
+      us = f.underlagIds.map(function (id) { return (ar.underlag || []).find(function (u) { return u.id === id; }); }).filter(Boolean);
+    }
+    if (!us.length || !us.every(K.arFritidskort)) return null;
+    return { motpart: 'Fritidskortet', belopp: us.reduce(function (x, u) { return x + u.belopp; }, 0),
+      poster: [].concat.apply([], us.map(function (u) { return u.poster && u.poster.length ? u.poster : [{ namn: '', belopp: u.belopp }]; })) };
+  }
+  function betalareForRad(rad) { return fritidskortFor(rad) ? K.FRITIDSKORT : K.tolkaBetalare(rad); }
+  // Förslag på medlemmar för en bokförd eller obokförd inbetalning: Fritidskortet eller en känd betalare.
+  function avgiftsforslagForRad(rad) {
+    var fk = fritidskortFor(rad);
+    if (fk) {
+      var ff = K.fritidskortForslag(reg(), fk, K.terminForDatum(rad.datum), store.ar);
+      var summa = ff.poster.reduce(function (x, p) { return x + p.belopp; }, 0);
+      return { termin: ff.termin, poster: ff.poster, stammer: ff.alla && summa === rad.belopp, tvetydig: false, fritidskort: ff };
+    }
+    var b = K.tolkaBetalare(rad);
+    return K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: b ? b.nyckel : '' }, store.ar);
+  }
+
+  function avgiftForRad(rad, fk) {
     if (rad.belopp <= 0 || (inkorgVal[rad.id] || {}).ejAvgift) return null;
-    var betalare = K.tolkaBetalare(rad);
+    var betalare = fk ? K.FRITIDSKORT : K.tolkaBetalare(rad);
     var u = avgiftUtkast[rad.id];
     if (u) {
       var poster = posterFranUtkast(u);
-      return { betalare: betalare || { nyckel: '', visning: '' }, termin: u.termin, poster: poster, manuell: true, komIhag: u.komIhag && !!betalare };
+      return { betalare: betalare || { nyckel: '', visning: '' }, termin: u.termin, poster: poster, manuell: true, komIhag: u.komIhag && !!betalare && !fk };
+    }
+    if (fk) {
+      var ff = avgiftsforslagForRad(rad);
+      return ff.stammer ? { betalare: betalare, termin: ff.termin, poster: ff.poster, forslag: ff } : null;
     }
     if (!betalare) return null;
     var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: betalare.nyckel }, store.ar);
@@ -10491,6 +10608,19 @@ var VERSIONER = [
   }
 
   function oppnaAvgift(rad) {
+    var fk = fritidskortFor(rad);
+    if (fk) {
+      var ff = K.fritidskortForslag(reg(), fk, K.terminForDatum(rad.datum), store.ar);
+      // Barn som inte hittades: deras belopp används när du väljer eller lägger till barnet i panelen.
+      var okanda = ff.rader.filter(function (r) { return !r.medlem; }).map(function (r) { return { namn: r.namn, belopp: r.belopp }; });
+      avgiftUtkast[rad.id] = { termin: ff.termin, komIhag: false, nyNamn: okanda[0] && okanda[0].namn ? K.visningsnamn(okanda[0].namn) : '', nyKategori: 'barn', fkOkanda: okanda,
+        rader: ff.rader.filter(function (r) { return r.medlem; }).map(function (r) {
+          var t = 0, a = 0;
+          r.poster.forEach(function (p) { if (p.typ === 'arsavgift') a += p.belopp; else t += p.belopp; });
+          return { medlem: r.medlem, termin: t ? K.formatBelopp(t) : '', ars: a ? K.formatBelopp(a) : '' };
+        }) };
+      return;
+    }
     var betalare = K.tolkaBetalare(rad);
     var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: betalare ? betalare.nyckel : '' }, store.ar);
     avgiftUtkast[rad.id] = {
@@ -10501,6 +10631,16 @@ var VERSIONER = [
         return { medlem: id, termin: t ? K.formatBelopp(t) : '', ars: a ? K.formatBelopp(a) : '' };
       })
     };
+  }
+
+  // Raden för en medlem som läggs till i panelen. För Fritidskortet: beloppet för nästa barn som inte hittades, som terminsavgift.
+  function nyAvgiftsrad(u, medlemId, termin) {
+    if (u.fkOkanda && u.fkOkanda.length) {
+      var p = u.fkOkanda.shift();
+      u.nyNamn = u.fkOkanda[0] && u.fkOkanda[0].namn ? K.visningsnamn(u.fkOkanda[0].namn) : '';
+      return { medlem: medlemId, termin: K.formatBelopp(p.belopp), ars: '' };
+    }
+    return standardRad(medlemId, termin);
   }
 
   function standardRad(medlemId, termin) {
@@ -10522,11 +10662,15 @@ var VERSIONER = [
   function avgiftPanel(rad, laege) {
     var u = avgiftUtkast[rad.id];
     var id = esc(rad.id);
-    var betalare = K.tolkaBetalare(rad);
+    var fk = fritidskortFor(rad);
+    // Fritidskortet betalar för många barn och kopplas aldrig som fast betalare.
+    var betalare = fk ? null : K.tolkaBetalare(rad);
     var poster = posterFranUtkast(u);
     var summa = poster.reduce(function (s, p) { return s + p.belopp; }, 0);
     var html = '<div class="avgift-panel"><div class="row"><strong>Vem gäller betalningen?</strong>' +
-      '<label style="margin:0 0 0 auto">Termin <input data-avg="termin" data-id="' + id + '" value="' + esc(u.termin) + '" style="width:80px;display:inline-block" aria-label="Termin, t.ex. HT-26"></label></div>';
+      '<label style="margin:0 0 0 auto">Termin <input data-avg="termin" data-id="' + id + '" value="' + esc(u.termin) + '" style="width:80px;display:inline-block" aria-label="Termin, t.ex. HT-26"></label></div>' +
+      (fk ? '<p class="faint" style="margin:4px 0">Fritidskortet enligt insättningsuppgiften: ' + esc(fk.poster.map(function (p) { return (p.namn ? K.visningsnamn(p.namn) : 'namn saknas') + ' ' + kr(p.belopp) + ' kr'; }).join(', ')) +
+        '. Fritidskortets belopp räknas som terminsavgift; årsavgiften tas när föräldern betalar resten.</p>' : '');
     if (u.rader.length) {
       html += '<div class="scroll"><table><thead><tr><th>Medlem</th><th class="num">Terminsavgift</th><th class="num">Årsavgift</th><th></th></tr></thead><tbody>' +
         u.rader.map(function (r, i) {
@@ -10591,6 +10735,13 @@ var VERSIONER = [
         '<button class="btn btn-secondary btn-small" data-action="inte-avgift" data-id="' + esc(r.id) + '">Inte en avgift</button></span></div>';
     }
     if ((inkorgVal[r.id] || {}).ejAvgift) return '';
+    var fk = f.kalla === 'underlag' ? fritidskortFor(r) : null;
+    if (fk) {
+      return '<div class="row trolig" style="margin-top:8px"><span><strong>Fritidskortet:</strong> ' + esc(fk.poster.map(function (p) { return (p.namn ? K.visningsnamn(p.namn) : 'namn saknas') + ' ' + kr(p.belopp) + ' kr'; }).join(', ')) +
+        ' <span class="faint">(alla barn hittades inte i medlemsregistret)</span></span>' +
+        '<span><button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(r.id) + '">Välj barn…</button> ' +
+        '<button class="btn btn-secondary btn-small" data-action="inte-avgift" data-id="' + esc(r.id) + '">Inte en avgift</button></span></div>';
+    }
     var b = K.tolkaBetalare(r);
     if (!b && !/swish|bankgiro/i.test(r.text)) return '';
     var kand = b ? K.hittaBetalare(reg(), b.nyckel) : null;
@@ -10774,11 +10925,11 @@ var VERSIONER = [
   }
 
   function vyMedlemKoppla(ar, okopplade) {
-    var html = '<p class="muted">Swish-inbetalningar i ' + esc(store.aktivt) + ' som redan är bokförda men inte kopplade till någon medlem. Kopplingen ändrar inte bokföringen, den används bara för statistiken.</p>';
+    var html = '<p class="muted">Inbetalningar via Swish och Fritidskortet i ' + esc(store.aktivt) + ' som redan är bokförda men inte kopplade till någon medlem. Kopplingen ändrar inte bokföringen, den används bara för statistiken.</p>';
     if (!okopplade.length) return html + '<p class="ok">Alla är kopplade.</p>';
     okopplade.forEach(function (rad) {
-      var b = K.tolkaBetalare(rad);
-      var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: b.nyckel }, store.ar);
+      var b = betalareForRad(rad);
+      var f = avgiftsforslagForRad(rad);
       html += '<div class="card bankrad"><div class="row" style="justify-content:space-between"><div><strong>' + esc(rad.datum) + '</strong> ' + esc(b.visning) +
         ' <button class="tag knapp-tag" data-action="oppna-ver" data-nr="' + rad.verifikation + '">Ver ' + rad.verifikation + '</button></div><div class="belopp ok">' + kr(rad.belopp) + '</div></div>';
       if (avgiftUtkast[rad.id]) html += avgiftPanel(rad, 'koppla');
@@ -10923,9 +11074,9 @@ var VERSIONER = [
   // Kopplar en redan bokförd inbetalning till medlemmar, utan att ändra bokföringen.
   function kopplaBokford(radId, termin, poster, komIhag) {
     var rad = aktivt().bankrader.find(function (r) { return r.id === radId; });
-    var b = K.tolkaBetalare(rad);
+    var b = betalareForRad(rad);
     var r = K.registreraBetalning(reg(), { datum: rad.datum, belopp: rad.belopp, termin: termin, nyckel: b ? b.nyckel : '', arId: store.aktivt, ver: rad.verifikation, bankradId: rad.id, poster: poster });
-    if (komIhag && b) r = K.kopplaBetalare(r, b, poster.map(function (p) { return p.medlem; }));
+    if (komIhag && b && b.typ !== 'fritidskort') r = K.kopplaBetalare(r, b, poster.map(function (p) { return p.medlem; }));
     sparaReg(r);
     visa('Betalningen ' + rad.datum + ' är kopplad.');
   }
@@ -11175,7 +11326,7 @@ var VERSIONER = [
     if (lasLage() && (t.dataset.forening || t.dataset.lista || t.dataset.underlag || t.dataset.arsmote || t.dataset.avg || t.dataset.medl || t.dataset.betn || t.dataset.betl || t.dataset.mkonto || t.dataset.mars || t.dataset.mtermin || t.dataset.mavfor || t.dataset.kvitto || t.dataset.ford || t.dataset.betinfo || t.dataset.medlinfo || t.dataset.rost || t.dataset.stad)) { visa('Endast läsning.', true); return; }
     if (t.dataset.avg && avgiftUtkast[t.dataset.id]) {
       var au2 = avgiftUtkast[t.dataset.id];
-      if (t.dataset.avg === 'lagg-till' && t.value) au2.rader.push(standardRad(t.value, K.giltigtTerminId(au2.termin) ? au2.termin : K.terminForDatum(idag())));
+      if (t.dataset.avg === 'lagg-till' && t.value) au2.rader.push(nyAvgiftsrad(au2, t.value, K.giltigtTerminId(au2.termin) ? au2.termin : K.terminForDatum(idag())));
       if (t.dataset.avg === 'nykategori') au2.nyKategori = t.value;
       if (t.dataset.avg === 'komihag') au2.komIhag = t.checked;
       if (t.dataset.avg === 'termin' && !K.giltigtTerminId(au2.termin)) visa('Terminen ska skrivas som VT-27 eller HT-26.', true);
@@ -11852,8 +12003,9 @@ var VERSIONER = [
       var u = avgiftUtkast[t.dataset.id];
       var res = K.laggTillMedlem(reg(), { namn: u.nyNamn, kategori: u.nyKategori || 'barn', tillagd: idag() });
       sparaReg(res.reg);
-      u.rader.push(standardRad(res.medlem.id, u.termin));
-      u.nyNamn = '';
+      var hadeOkanda = !!(u.fkOkanda && u.fkOkanda.length);
+      u.rader.push(nyAvgiftsrad(u, res.medlem.id, u.termin));
+      if (!hadeOkanda) u.nyNamn = '';
       render();
     },
     'avg-koppla': function (t) {
@@ -11863,8 +12015,7 @@ var VERSIONER = [
     },
     'avg-koppla-forslag': function (t) {
       var rad = aktivt().bankrader.find(function (r) { return r.id === t.dataset.id; });
-      var b = K.tolkaBetalare(rad);
-      var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: b.nyckel }, store.ar);
+      var f = avgiftsforslagForRad(rad);
       kopplaBokford(rad.id, f.termin, f.poster, false);
     },
     'avg-ignorera': function (t) {
