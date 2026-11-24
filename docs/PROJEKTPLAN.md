@@ -152,6 +152,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Medlemsregistret visar och kan ta bort betalningar vars bankrad inte längre är bokförd i samma verifikation, t.ex. efter "Börja om" (från 1.40).
 - Medlemsbetalningar inlästa från ett års Excel-fil tas med i samma rensning när året bokförs i appen (inte är en arkivkopia), så att de inte räknas två gånger (från 1.41).
 - Valet "Årsavgiften ingår i terminsavgiften" (Avgifter): första betalningen under kalenderåret delas upp i årsavgift och resten som terminsavgift; senare terminer samma år blir hela beloppet terminsavgift. Gäller alla kategorier med terminsavgift (från 1.42).
+- Fritidskortet (barnets statliga fritidskort): insättningsuppgifternas betalningar läses per barn utan personnummer, kopplas till barnen på namnet och bokförs som avgift med insättningsuppgiften som underlag. Fritidskortets belopp är terminsavgift; förälderns resterande betalning får årsavgiften och resten av terminsavgiften. Fritidskortet kopplas aldrig som fast betalare (från 1.49).
 - Förslag kan avfärdas med ett skäl (från 1.36). Avfärdade förslag sparas i bokföringsfilen med skäl, vem och när, föreslås inte igen och kan ångras. Vid "Börja om" följer de med reglerna.
 
 ## Grundbok (från version 1.43)
