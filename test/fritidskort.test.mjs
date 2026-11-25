@@ -80,3 +80,35 @@ test('bokförda betalningar från Fritidskortet visas bland dem som ska kopplas'
   ar = K.bokforKopplat(ar, { datum: f.datum, text: f.text, rader: [{ konto: '1930', belopp: kr(550) }, { konto: '3100', belopp: kr(-550) }] }, { bankradId: f.bankradId, underlagIds: f.underlagIds }).ar;
   assert.equal(K.okoppladeInbetalningar(reg, ar, '2030').length, 1);
 });
+
+test('namn jämförs utan prickar och accenter', () => {
+  let reg = K.tomtRegister();
+  reg = K.laggTillMedlem(reg, { namn: 'Påhittad Müller', kategori: 'barn' }).reg;
+  reg = K.laggTillMedlem(reg, { namn: 'Exempel Öström', kategori: 'barn' }).reg;
+  assert.equal(K.hittaMedlemPaNamn(reg, 'PAHITTAD MULLER'), reg.medlemmar[0].id);
+  assert.equal(K.hittaMedlemPaNamn(reg, 'Exempel Ostrom'), reg.medlemmar[1].id);
+});
+
+test('förälderns namn på insättningen ger barnet som föräldern betalar för', () => {
+  let reg = K.tomtRegister();
+  reg = K.laggTillMedlem(reg, { namn: 'Barn till Förälder Exempelsson', kategori: 'barn' }).reg;
+  reg = K.laggTillMedlem(reg, { namn: 'Syskon Ett Påhittad', kategori: 'barn' }).reg;
+  reg = K.laggTillMedlem(reg, { namn: 'Syskon Två Påhittad', kategori: 'barn' }).reg;
+  const [barn, s1, s2] = reg.medlemmar.map((m) => m.id);
+  reg = K.kopplaBetalare(reg, { nyckel: '+46700000001', visning: '070-000 00 01' }, [barn]);
+  reg = K.kopplaBetalare(reg, { nyckel: '+46700000002', visning: '070-000 00 02' }, [s1, s2]);
+  reg = K.andraBetalare(reg, '+46700000002', { namn: 'Annan Förälder' });
+  // Barnets namn innehåller förälderns, som "Barn till …": det räcker.
+  assert.equal(K.hittaMedlemPaNamn(reg, 'Forälder Exempelsson'), barn);
+  assert.deepEqual(json(K.kandidaterPaNamn(reg, 'ANNAN FORALDER')), { medlemmar: [s1, s2], via: 'betalare' });
+  assert.equal(K.hittaMedlemPaNamn(reg, 'Annan Förälder'), null, 'två barn: inte entydigt');
+  const f = K.fritidskortForslag(reg, { motpart: 'Fritidskortet', belopp: kr(550), poster: [{ namn: 'Annan Förälder', belopp: kr(550) }] }, 'HT-30');
+  assert.deepEqual(json(f.rader[0].kandidater), [s1, s2]);
+});
+
+test('äldre inläsningar utan poster: namnet hämtas ur underlagets text', () => {
+  assert.deepEqual(json(K.fritidskortPoster({ beskrivning: 'Insättning Fritidskortet, avgift Förälder Exempelsson', belopp: kr(550) })), [{ namn: 'Förälder Exempelsson', belopp: kr(550) }]);
+  assert.deepEqual(json(K.fritidskortPoster({ beskrivning: 'Insättning Fritidskortet', belopp: kr(550) })), [{ namn: '', belopp: kr(550) }]);
+  const p = [{ namn: 'X Y', belopp: 1 }];
+  assert.deepEqual(json(K.fritidskortPoster({ poster: p, beskrivning: 'annat' })), json(p));
+});
