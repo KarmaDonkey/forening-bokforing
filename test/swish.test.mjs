@@ -44,3 +44,36 @@ test('meddelandet pekar ut barnet, även via apelido', () => {
   assert.equal(K.hittaMedlemPaNamn(reg, K.namnUrText('Capoeira, Barn Exempelsson')), reg.medlemmar[0].id);
   assert.deepEqual(json(K.kandidaterPaNamn(reg, 'Terminsavgift Mestrinho')), { medlemmar: [reg.medlemmar[1].id], via: 'apelido' });
 });
+
+// Påhittad fil i samma format som Swedbanks Swish-rapport (CSV): en kommentarsrad, kommatecken, belopp med punkt.
+const SWEDBANK = [
+  '* Swish-rapport Avser 2030-01-01 - 2030-12-31 Skapad 2030-12-31 12:00 CET',
+  'Radnr,Clnr,Kontonr,Bokfdag,Transdag,Valutadag,Mottagarnr,Mottagarnamn,Avsändarnr,Avsändarnamn,Meddelande,Tid,Belopp,Orderreferens',
+  '1,10000,1234567890,2030-01-08,2030-01-08,2030-01-09,1230000000,FÖRENINGEN EXEMPEL,+46700000001,EXEMPELSSON- FÖRÄLDER,Capoeira- Barn Exempelsson,19:53,1300.00,',
+  '2,10000,1234567890,2030-01-26,2030-01-24,2030-01-26,1230000000,FÖRENINGEN EXEMPEL,+46700000002,ANNAN FÖRÄLDER,Påhittad Barnsson 010203,17:16,750.00,',
+  ''
+].join('\n');
+
+test('Swedbanks Swish-rapport känns igen och läses inte som kontoutdrag', () => {
+  assert.equal(K.arSwishrapport(SWEDBANK), true);
+  assert.equal(K.liknarSwishrapport(SWEDBANK), true);
+  const r = K.parseSwishrapport(SWEDBANK);
+  assert.deepEqual(json(r.rader.map((x) => [x.datum, x.nummer, x.namn, x.meddelande, x.belopp])), [
+    ['2030-01-08', '+46700000001', 'EXEMPELSSON- FÖRÄLDER', 'Capoeira- Barn Exempelsson', kr(1300)],
+    ['2030-01-26', '+46700000002', 'ANNAN FÖRÄLDER', 'Påhittad Barnsson', kr(750)]]);
+  // Även med okända kolumnnamn ska filen inte bli ett kontoutdrag.
+  const okand = 'Datum,Avsändare telefon,Avsändarnamn,Meddelande,Summa\n2030-01-08,+46700000001,X,Y,100.00';
+  assert.equal(K.arSwishrapport(okand), false);
+  assert.equal(K.liknarSwishrapport(okand), true);
+  assert.equal(K.liknarSwishrapport('Bokföringsdag;Beskrivning;Referens;Belopp;Saldo\n2030-01-08;Swish;123;100,00;5000,00'), false);
+});
+
+test('meddelandets namn hittas, och kortare datumsiffror tas bort', () => {
+  const r = K.parseSwishrapport(SWEDBANK);
+  assert.equal(K.namnUrText(r.rader[0].meddelande), 'Barn Exempelsson');
+  assert.equal(K.parseSwishrapport(SWEDBANK.replace('010203', 'Workshop 22-24 maj')).rader[1].meddelande, 'Påhittad Barnsson Workshop 22-24 maj', 'korta tal finns kvar');
+});
+
+test('dubbelnamn med bindestreck delas inte', () => {
+  assert.equal(K.namnUrText('Exempel Dubbel-Påhittad'), 'Exempel Dubbel-Påhittad');
+});
