@@ -77,3 +77,8 @@ test('meddelandets namn hittas, och kortare datumsiffror tas bort', () => {
 test('dubbelnamn med bindestreck delas inte', () => {
   assert.equal(K.namnUrText('Exempel Dubbel-Påhittad'), 'Exempel Dubbel-Påhittad');
 });
+
+test('meddelanden som gäller annat än avgifter känns igen', () => {
+  for (const t of ['Exempel byxor stl 14', 'Workshop maj Barn Exempelsson', 'Abadá storlek M', 'T-shirt', 'Kläder till uppvisning', 'Lån 2']) assert.equal(K.interAvgiftText(t), true, t);
+  for (const t of ['Barn Exempelsson', 'Terminsavgift VT 26', 'Familj - VT -26', 'Resterande efter fritidskort', '']) assert.equal(K.interAvgiftText(t), false, t);
+});

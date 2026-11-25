@@ -364,6 +364,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.55', datum: '2026-11-25',
+    nyheter: [
+      'Rättelse: avsändare och meddelande från Swish-rapporten visas vid alla Swish-rader, också när betalaren är känd och under Medlemsregister, Att koppla.',
+      'Tyder meddelandet på något annat än en avgift (till exempel byxor, kläder, workshop eller instrument) föreslår appen ingen terminsavgift för raden.'
+    ]
+  },
+  {
     version: '1.54', datum: '2026-11-25',
     nyheter: [
       'Rättelse: Swedbanks Swish-rapport (kolumnerna Bokfdag och Avsändarnr) känns igen. En fil som ser ut som en Swish-rapport läses aldrig in som kontoutdrag, så att det inte blir dubbla Swish-rader.',
@@ -1830,6 +1837,13 @@ var VERSIONER = [
     var nya = rader.filter(function (x) { return !finns[nyckel(x)]; });
     var grans = idag ? laggTillDagar(idag, -730) : '';
     return { reg: Object.assign({}, reg, { swish: (reg.swish || []).concat(nya).filter(function (x) { return x.datum >= grans; }) }), nya: nya.length };
+  }
+
+  // Tyder meddelandet på något annat än en medlemsavgift (kläder, workshop, instrument …)?
+  var INTE_AVGIFT = /\b(byxor|byxa|abada|klader|kladerna|t-?shirt|tshirts?|troja|trojor|hoodie|workshop|workshopen|batizado|lager|helg|berimbau|pandeiro|atabaque|instrument|biljett|biljetter|resa|middag|fika|lan)\b/;
+  function interAvgiftText(text) {
+    var t = String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    return INTE_AVGIFT.test(t);
   }
 
   // Swish-raden för en bankrad: samma avsändarnummer och belopp, högst tre dagar ifrån.
@@ -4724,6 +4738,7 @@ var VERSIONER = [
     parseSwishrapport: parseSwishrapport,
     laggTillSwish: laggTillSwish,
     swishForRad: swishForRad,
+    interAvgiftText: interAvgiftText,
     fritidskortFordelning: fritidskortFordelning,
     fritidskortForslag: fritidskortForslag,
     grundbokSidor: grundbokSidor,
@@ -10816,6 +10831,9 @@ var VERSIONER = [
       return ff.stammer ? { betalare: betalare, termin: ff.termin, poster: ff.poster, forslag: ff } : null;
     }
     if (!betalare) return null;
+    // Meddelandet i Swish-rapporten säger att det gäller något annat, t.ex. byxor eller en workshop: inget avgiftsförslag.
+    var swm = swishInfo(rad);
+    if (swm && K.interAvgiftText(swm.meddelande)) return null;
     var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: betalare.nyckel }, store.ar);
     if (f.stammer && !f.tvetydig) return { betalare: betalare, termin: f.termin, poster: f.poster, forslag: f };
     // Okänd betalare: meddelandet i Swish-rapporten kan peka ut barnet. Betalaren kopplas då när du bokför.
@@ -10977,10 +10995,11 @@ var VERSIONER = [
       poster.forEach(function (p) { var m = medlemAv(p.medlem); if (m && ut.indexOf(m.namn) < 0) ut.push(m.namn); });
       return ut.join(', ');
     };
+    var swRad = f.kalla === 'avgift' ? swishInfo(r) : null;
     if (f.kalla === 'avgift') {
       var t = 0, a = 0;
       f.avgift.poster.forEach(function (p) { if (p.typ === 'arsavgift') a += p.belopp; else t += p.belopp; });
-      return '<div class="row trolig" style="margin-top:8px"><span><strong>' + esc(f.avgift.termin) + ':</strong> ' + esc(namn(f.avgift.poster)) +
+      return swishText(swRad) + '<div class="row trolig" style="margin-top:8px"><span><strong>' + esc(f.avgift.termin) + ':</strong> ' + esc(namn(f.avgift.poster)) +
         ' <span class="faint">(' + (t ? 'terminsavgift ' + kr(t) : '') + (t && a ? ' + ' : '') + (a ? 'årsavgift ' + kr(a) : '') + ')</span></span>' +
         '<span><button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(r.id) + '">Ändra…</button> ' +
         '<button class="btn btn-secondary btn-small" data-action="inte-avgift" data-id="' + esc(r.id) + '">Inte en avgift</button></span></div>';
@@ -10997,7 +11016,11 @@ var VERSIONER = [
     if (!b && !/swish|bankgiro/i.test(r.text)) return '';
     var kand = b ? K.hittaBetalare(reg(), b.nyckel) : null;
     var sw = swishInfo(r);
+    if (sw && K.interAvgiftText(sw.meddelande)) return swishText(sw) + '<div class="row" style="margin-top:4px"><span class="faint">Meddelandet tyder på något annat än en avgift. Välj konto ovan.</span>' +
+      '<button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(r.id) + '">Terminsavgift ändå…</button></div>';
     if (sw && !(kand && kand.medlemmar.length)) return swishText(sw) + '<div class="row" style="margin-top:4px"><button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(r.id) + '">Terminsavgift…</button></div>';
+    if (sw) return swishText(sw) + '<div class="row" style="margin-top:4px"><button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(r.id) + '">Terminsavgift…</button>' +
+      '<span class="faint">Betalar för ' + esc(kand.medlemmar.map(function (id) { var m = medlemAv(id); return m ? m.namn : '?'; }).join(', ')) + '. Beloppet stämmer inte med avgiften.</span></div>';
     var tips = kand && kand.medlemmar.length ? 'Betalar för ' + kand.medlemmar.map(function (id) { var m = medlemAv(id); return m ? m.namn : '?'; }).join(', ') + '. Beloppet stämmer inte, eller så är det oklart vem.' : '';
     return '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(r.id) + '">Terminsavgift…</button>' +
       (tips ? '<span class="faint">' + esc(tips) + '</span>' : '') + '</div>';
@@ -11194,7 +11217,8 @@ var VERSIONER = [
       var b = betalareForRad(rad);
       var f = avgiftsforslagForRad(rad);
       html += '<div class="card bankrad"><div class="row" style="justify-content:space-between"><div><strong>' + esc(rad.datum) + '</strong> ' + esc(b.visning) +
-        ' <button class="tag knapp-tag" data-action="oppna-ver" data-nr="' + rad.verifikation + '">Ver ' + rad.verifikation + '</button></div><div class="belopp ok">' + kr(rad.belopp) + '</div></div>';
+        ' <button class="tag knapp-tag" data-action="oppna-ver" data-nr="' + rad.verifikation + '">Ver ' + rad.verifikation + '</button></div><div class="belopp ok">' + kr(rad.belopp) + '</div></div>' +
+        swishText(swishInfo(rad));
       if (avgiftUtkast[rad.id]) html += avgiftPanel(rad, 'koppla');
       else {
         html += '<div class="row" style="margin-top:8px">';
