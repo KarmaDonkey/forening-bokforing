@@ -364,6 +364,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.52', datum: '2026-11-25',
+    nyheter: [
+      'Rättelse: står barnets namn i meddelandet på insättningsuppgiften, och inte i betalningsreferensen, hittar appen nu namnet i underlagets text.',
+      'Rättelse: när du väljer barnet själv för en betalning från Fritidskortet delas hela avgiften upp i årsavgift och terminsavgift, som när appen hittar barnet. En del av avgiften räknas som terminsavgift.'
+    ]
+  },
+  {
     version: '1.51', datum: '2026-11-25',
     nyheter: [
       'Fritidskortet: står förälderns namn på insättningen föreslår appen barnet som föräldern betalar för. Betalar föräldern för flera barn visas de som knappar att välja.',
@@ -3198,13 +3205,27 @@ var VERSIONER = [
   }
 
   // Betalningarna på en insättningsuppgift. Inlästa före version 1.49 saknar de: då letas namnet i underlagets text.
-  var FK_ORD = ['fritidskortet', 'fritidskort', 'insattning', 'insattningar', 'insattningsuppgift', 'avgift', 'avgifter', 'terminsavgift', 'betalning', 'for', 'fran', 'via', 'av'];
-  function fritidskortPoster(u) {
-    if (u.poster && u.poster.length) return u.poster;
-    var namn = String(u.beskrivning || '').split(/[,:;]/).map(function (del) {
+  // Saknar betalningen namn (t.ex. när namnet stod i meddelandet) letas det också i texten.
+  var FK_ORD = ['fritidskortet', 'fritidskort', 'insattning', 'insattningar', 'insattningsuppgift', 'avgift', 'avgifter', 'terminsavgift', 'deltagaravgift', 'deltagaravgifter',
+    'medlemsavgift', 'traningsavgift', 'betalning', 'for', 'fran', 'via', 'av', 'och'];
+  function namnUrText(text) {
+    return String(text || '').split(/[,:;]/).map(function (del) {
       return rensaReferens(del).split(/\s+/).filter(function (w) { return w && FK_ORD.indexOf(namnOrd(w)[0]) < 0; }).join(' ');
     }).filter(function (x) { return namnOrd(x).length >= 2; }).pop() || '';
-    return [{ namn: namn, belopp: u.belopp }];
+  }
+  function fritidskortPoster(u) {
+    var poster = u.poster && u.poster.length ? u.poster : [{ namn: '', belopp: u.belopp }];
+    if (poster.length === 1 && !poster[0].namn) return [Object.assign({}, poster[0], { namn: namnUrText(u.beskrivning) })];
+    return poster;
+  }
+
+  // Fördelningen av Fritidskortets belopp för en medlem: betalar kortet hela avgiften delas den upp som vanligt
+  // (årsavgift första gången under året), annars är beloppet terminsavgift och föräldern betalar resten.
+  function fritidskortFordelning(reg, medlemId, belopp, termin, arMap) {
+    var m = reg.medlemmar.find(function (x) { return x.id === medlemId; });
+    if (!m) return [];
+    var hela = posterFor(reg, termin, [m], true, arMap);
+    return summaPoster(hela) === belopp ? hela : [{ medlem: m.id, typ: 'termin', belopp: belopp }];
   }
 
   // Det som betalats med Fritidskortet för en medlem en viss termin (räknas av när föräldern betalar resten).
@@ -3220,11 +3241,7 @@ var VERSIONER = [
     var rader = poster.map(function (p) {
       var kand = kandidaterPaNamn(reg, p.namn);
       var medlem = kand.medlemmar.length === 1 ? kand.medlemmar[0] : null, m = medlem ? reg.medlemmar.find(function (x) { return x.id === medlem; }) : null;
-      var fp = [];
-      if (m) {
-        var hela = posterFor(reg, termin, [m], true, arMap);
-        fp = summaPoster(hela) === p.belopp ? hela : [{ medlem: m.id, typ: 'termin', belopp: p.belopp }];
-      }
+      var fp = m ? fritidskortFordelning(reg, m.id, p.belopp, termin, arMap) : [];
       return { namn: p.namn, belopp: p.belopp, medlem: medlem, kandidater: kand.medlemmar, via: kand.via, poster: fp };
     });
     return { termin: termin, rader: rader, poster: [].concat.apply([], rader.map(function (r) { return r.poster; })), alla: rader.every(function (r) { return r.medlem; }) };
@@ -4607,6 +4624,7 @@ var VERSIONER = [
     hittaMedlemPaNamn: hittaMedlemPaNamn,
     kandidaterPaNamn: kandidaterPaNamn,
     fritidskortPoster: fritidskortPoster,
+    fritidskortFordelning: fritidskortFordelning,
     fritidskortForslag: fritidskortForslag,
     grundbokSidor: grundbokSidor,
     grundbokOrdning: grundbokOrdning,
@@ -10697,7 +10715,11 @@ var VERSIONER = [
     if (u.fkOkanda && u.fkOkanda.length) {
       var p = u.fkOkanda.shift();
       u.nyNamn = u.fkOkanda[0] && u.fkOkanda[0].namn ? K.visningsnamn(u.fkOkanda[0].namn) : '';
-      return { medlem: medlemId, termin: K.formatBelopp(p.belopp), ars: '' };
+      // Samma regel som när appen hittar barnet själv: hela avgiften delas upp, en del är terminsavgift.
+      var t = 0, a = 0;
+      K.fritidskortFordelning(reg(), medlemId, p.belopp, K.giltigtTerminId(termin) ? termin : K.terminForDatum(idag()), store.ar)
+        .forEach(function (x) { if (x.typ === 'arsavgift') a += x.belopp; else t += x.belopp; });
+      return { medlem: medlemId, termin: t ? K.formatBelopp(t) : '', ars: a ? K.formatBelopp(a) : '' };
     }
     return standardRad(medlemId, termin);
   }
