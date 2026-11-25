@@ -226,7 +226,7 @@ test('avgifter kan läsas in från fil med föreningsuppgifter', () => {
 
 test('tomt register normaliseras', () => {
   const r = K.normaliseraRegister(undefined);
-  eq(Object.keys(r).sort(), ['arsavgift', 'avforEfterAr', 'betalare', 'betalningar', 'format', 'ignorerade', 'konton', 'kvitton', 'medlemmar', 'terminer']);
+  eq(Object.keys(r).sort(), ['arsavgift', 'avforEfterAr', 'betalare', 'betalningar', 'format', 'ignorerade', 'konton', 'kvitton', 'medlemmar', 'swish', 'terminer']);
   assert.equal(K.registerHarData(r), false);
   assert.equal(K.normaliseraRegister({ avforEfterAr: 3 }).avforEfterAr, 3);
   assert.equal(K.normaliseraRegister({ avforEfterAr: 'x' }).avforEfterAr, 2);

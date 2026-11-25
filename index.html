@@ -364,6 +364,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.53', datum: '2026-11-25',
+    nyheter: [
+      'Swish-rapporten från banken (CSV eller Excel) kan läsas in under Läs in. Avsändare och meddelande visas vid Swish-raderna, och appen föreslår barnet från meddelandet, även via apelido. Namnen sparas bara i medlemsregistret.',
+      'En betalare utan namn får avsändarens namn från Swish-rapporten när betalningen kopplas.',
+      'Kontoutdrag i Excel kan nu också läsas in direkt.'
+    ]
+  },
+  {
     version: '1.52', datum: '2026-11-25',
     nyheter: [
       'Rättelse: står barnets namn i meddelandet på insättningsuppgiften, och inte i betalningsreferensen, hittar appen nu namnet i underlagets text.',
@@ -1424,7 +1432,7 @@ var VERSIONER = [
     var r = normaliseraRegister(d.register), t = tomtRegister();
     var avg = val.avgifter ? { terminer: r.terminer, arsavgift: r.arsavgift, konton: r.konton, avforEfterAr: r.avforEfterAr } : { terminer: t.terminer, arsavgift: t.arsavgift, konton: t.konton, avforEfterAr: t.avforEfterAr };
     var reg = val.medlemmar === 'behall' ? r
-      : val.medlemmar === 'utan-betalningar' ? Object.assign({}, r, { betalningar: [], ignorerade: [], kvitton: [] }, avg)
+      : val.medlemmar === 'utan-betalningar' ? Object.assign({}, r, { betalningar: [], ignorerade: [], kvitton: [], swish: [] }, avg)
       : Object.assign(t, avg);
     if (val.medlemmar === 'behall') reg = Object.assign({}, r, avg);
     var styr = normaliseraStyrelse(d.styrelse);
@@ -1749,6 +1757,68 @@ var VERSIONER = [
     // Banker listar ofta nyast först; vänd så att listan går framåt i tiden.
     if (rader.length > 1 && rader[0].datum > rader[rader.length - 1].datum) rader.reverse();
     return { rader: rader, varningar: varningar.concat(kontrolleraSaldon(rader)) };
+  }
+
+  // ---------- Swish-rapporten: avsändare och meddelande för Swish-betalningarna ----------
+
+  var SWISHKOLUMNER = {
+    datum: ['bokforingsdatum', 'bokforingsdag', 'transaktionsdatum', 'transaktionsdag', 'datum'],
+    nummer: ['avsandarnummer', 'avsandarensnummer', 'betalarnummer', 'avsandaresnummer', 'fran'],
+    namn: ['avsandarnamn', 'avsandarensnamn', 'betalarnamn', 'avsandare'],
+    meddelande: ['meddelande', 'message'],
+    belopp: ['belopp', 'beloppsek', 'amount']
+  };
+  function swishKolumner(rad) {
+    var nycklar = rad.map(rubrikNyckel), k = {};
+    Object.keys(SWISHKOLUMNER).forEach(function (falt) {
+      for (var i = 0; i < SWISHKOLUMNER[falt].length; i++) {
+        var idx = nycklar.indexOf(SWISHKOLUMNER[falt][i]);
+        if (idx >= 0) { k[falt] = idx; return; }
+      }
+    });
+    return k.datum != null && k.nummer != null && k.meddelande != null && k.belopp != null ? k : null;
+  }
+
+  // Är texten en Swish-rapport (och inte ett kontoutdrag)? Den har avsändarnummer och meddelande.
+  function arSwishrapport(text) {
+    var celler = delaCsv(text, gissaSeparator(text));
+    for (var i = 0; i < Math.min(celler.length, 20); i++) if (swishKolumner(celler[i])) return true;
+    return false;
+  }
+
+  // Meddelandet utan långa sifferserier (personnummer, kortnummer).
+  function rensaMeddelande(t) { return String(t || '').replace(/\d[\d\s\-+]{5,}\d/g, ' ').replace(/\s+/g, ' ').trim(); }
+
+  function parseSwishrapport(text) {
+    var celler = delaCsv(text, gissaSeparator(text)), k = null, start = 0, rader = [], varningar = [];
+    for (var i = 0; i < Math.min(celler.length, 20); i++) { k = swishKolumner(celler[i]); if (k) { start = i + 1; break; } }
+    if (!k) return { rader: [], varningar: ['Hittade inte kolumnerna i Swish-rapporten.'] };
+    celler.slice(start).forEach(function (c, j) {
+      var datum = tolkaDatum(c[k.datum]), belopp = tolkaBankbelopp(c[k.belopp]);
+      if (!datum || belopp == null) { if (c.join('').trim()) varningar.push('Rad ' + (start + j + 1) + ' kunde inte tolkas och hoppades över.'); return; }
+      if (belopp <= 0) return;
+      var nr = hittaMobilnummer(String(c[k.nummer] || '')) || String(c[k.nummer] || '').replace(/\D/g, '');
+      rader.push({ datum: datum, nummer: nr, namn: k.namn != null ? String(c[k.namn] || '').trim() : '', meddelande: rensaMeddelande(c[k.meddelande]), belopp: belopp });
+    });
+    return { rader: rader, varningar: varningar };
+  }
+
+  // Lägger in Swish-raderna i medlemsregistret (där namn får finnas), utan dubbletter. Rader äldre än två år tas bort.
+  function laggTillSwish(reg, rader, idag) {
+    var nyckel = function (x) { return [x.datum, x.nummer, x.belopp, x.meddelande].join('|'); };
+    var finns = {};
+    (reg.swish || []).forEach(function (x) { finns[nyckel(x)] = true; });
+    var nya = rader.filter(function (x) { return !finns[nyckel(x)]; });
+    var grans = idag ? laggTillDagar(idag, -730) : '';
+    return { reg: Object.assign({}, reg, { swish: (reg.swish || []).concat(nya).filter(function (x) { return x.datum >= grans; }) }), nya: nya.length };
+  }
+
+  // Swish-raden för en bankrad: samma avsändarnummer och belopp, högst tre dagar ifrån.
+  function swishForRad(reg, bankrad) {
+    var nr = hittaMobilnummer(String(bankrad.text || '') + ' ' + String(bankrad.referens || ''));
+    if (!nr || bankrad.belopp <= 0) return null;
+    return (reg.swish || []).filter(function (x) { return x.nummer === nr && x.belopp === bankrad.belopp && Math.abs(dagarMellan(x.datum, bankrad.datum)) <= 3; })
+      .sort(function (a, b) { return Math.abs(dagarMellan(a.datum, bankrad.datum)) - Math.abs(dagarMellan(b.datum, bankrad.datum)); })[0] || null;
   }
 
   function kontrolleraSaldon(rader) {
@@ -2751,7 +2821,7 @@ var VERSIONER = [
   var KATEGORI_KORT = { barn: 'Barn', student: 'Student', vuxen: 'Vuxen', familj: 'Familj', funktionar: 'Funktionär' };
 
   function tomtRegister() {
-    return { format: 'foreningsbokforing-medlemsregister', medlemmar: [], betalare: [], terminer: [], arsavgift: { vanlig: 0, funktionar: 0 }, konton: { medlemsavgift: '', terminsavgift: '' }, betalningar: [], ignorerade: [], kvitton: [], avforEfterAr: 2 };
+    return { format: 'foreningsbokforing-medlemsregister', medlemmar: [], betalare: [], terminer: [], arsavgift: { vanlig: 0, funktionar: 0 }, konton: { medlemsavgift: '', terminsavgift: '' }, betalningar: [], ignorerade: [], kvitton: [], swish: [], avforEfterAr: 2 };
   }
 
   function normaliseraRegister(r) {
@@ -3195,7 +3265,11 @@ var VERSIONER = [
     if (direkt.length) return { medlemmar: direkt, via: 'medlem' };
     var viaBetalare = [];
     reg.betalare.forEach(function (b) { if (b.namn && sammaNamn(namn, b.namn)) b.medlemmar.forEach(function (id) { if (aktiva(id) && viaBetalare.indexOf(id) < 0) viaBetalare.push(id); }); });
-    return { medlemmar: viaBetalare, via: viaBetalare.length ? 'betalare' : null };
+    if (viaBetalare.length) return { medlemmar: viaBetalare, via: 'betalare' };
+    // Ett apelido (capoeiranamn) som eget ord i texten.
+    var ord = namnOrd(namn);
+    var viaApelido = reg.medlemmar.filter(function (m) { var a = namnOrd(m.apelido); return !m.avford && a.length && a.every(function (w) { return ord.indexOf(w) >= 0; }); }).map(function (m) { return m.id; });
+    return { medlemmar: viaApelido, via: viaApelido.length ? 'apelido' : null };
   }
 
   // Medlemmen som namnet gäller, bara om det är entydigt.
@@ -4624,6 +4698,11 @@ var VERSIONER = [
     hittaMedlemPaNamn: hittaMedlemPaNamn,
     kandidaterPaNamn: kandidaterPaNamn,
     fritidskortPoster: fritidskortPoster,
+    namnUrText: namnUrText,
+    arSwishrapport: arSwishrapport,
+    parseSwishrapport: parseSwishrapport,
+    laggTillSwish: laggTillSwish,
+    swishForRad: swishForRad,
     fritidskortFordelning: fritidskortFordelning,
     fritidskortForslag: fritidskortForslag,
     grundbokSidor: grundbokSidor,
@@ -6419,10 +6498,31 @@ var VERSIONER = [
   }
 
   function importeraBanktext(text, namn) {
+    // En Swish-rapport är inget kontoutdrag: raderna sparas i medlemsregistret och kopplas till Swish-raderna på kontoutdraget.
+    if (K.arSwishrapport(text)) { importeraSwish(text, namn); return; }
     var res = K.parseBankfil(text);
     if (!res.rader.length) throw new Error((namn ? namn + ': ' : '') + 'hittade inga transaktioner. ' + res.varningar.slice(0, 2).join(' '));
     logga((namn ? namn + ': ' : '') + importeraRader(res.rader, kontoForInlasning(text, namn)));
     res.varningar.slice(0, 5).forEach(function (v) { logga(v, true); });
+  }
+
+  function importeraSwish(text, namn) {
+    var res = K.parseSwishrapport(text);
+    if (!res.rader.length) throw new Error((namn ? namn + ': ' : '') + 'hittade inga Swish-betalningar i rapporten.');
+    var ny = K.laggTillSwish(reg(), res.rader, idag());
+    sparaReg(ny.reg);
+    var ar = aktivt();
+    var kopplade = (ar.bankrader || []).filter(function (r) { return K.swishForRad(ny.reg, r); }).length;
+    logga((namn ? namn + ' (Swish-rapport): ' : 'Swish-rapport: ') + antal(res.rader.length, 'betalning', 'betalningar') + ', ' + antal(ny.nya, 'ny', 'nya') +
+      '. ' + antal(kopplade, 'bankrad', 'bankrader') + ' i ' + store.aktivt + ' har nu avsändare och meddelande. Namnen sparas bara i medlemsregistret.');
+    res.varningar.slice(0, 5).forEach(function (v) { logga(v, true); });
+  }
+
+  // Excel-filer (kontoutdrag eller Swish-rapport) läses som text, första bladet.
+  async function excelTillText(fil) {
+    var X = await laddaXlsx();
+    var bok = X.read(await fil.arrayBuffer(), { type: 'array', cellDates: true });
+    return X.utils.sheet_to_csv(bok.Sheets[bok.SheetNames[0]], { FS: ';', dateNF: 'yyyy-mm-dd' });
   }
 
   function sakertFilnamn(namn) { return String(namn).replace(/[\\/:*?"<>|]+/g, '_').slice(-120) || 'underlag'; }
@@ -6461,7 +6561,7 @@ var VERSIONER = [
       render();
       try {
         if (/\.(csv|txt|tsv|skv)$/i.test(fil.name) || /^text\//.test(fil.type)) importeraBanktext(await lasText(fil), fil.name);
-        else if (/\.xlsx?m?$/i.test(fil.name)) throw new Error('Excel-filer kan inte läsas direkt. Exportera kontoutdraget som CSV, eller markera raderna i Excel och klistra in dem här.');
+        else if (/\.xlsx?$/i.test(fil.name)) importeraBanktext(await excelTillText(fil), fil.name);
         else if (fil.type === 'application/pdf' || /\.pdf$/i.test(fil.name) || /^image\//.test(fil.type)) await tolkaFil(fil);
         else throw new Error('okänd filtyp.');
       } catch (err) {
@@ -6525,7 +6625,7 @@ var VERSIONER = [
         datum: rad.datum, belopp: rad.belopp, termin: f.avgift.termin, nyckel: f.avgift.betalare.nyckel,
         arId: store.aktivt, ver: res.verifikation.nr, bankradId: rad.id, poster: f.avgift.poster
       });
-      if (f.avgift.komIhag) r = K.kopplaBetalare(r, f.avgift.betalare, f.avgift.poster.map(function (p) { return p.medlem; }));
+      if (f.avgift.komIhag) { r = K.kopplaBetalare(r, f.avgift.betalare, f.avgift.poster.map(function (p) { return p.medlem; })); r = namngeBetalare(r, f.avgift.betalare, rad); }
       store.medlemsregister = r;
       delete avgiftUtkast[rad.id];
     } else larAv(rad, f.rader);
@@ -10652,6 +10752,19 @@ var VERSIONER = [
     return K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: b ? b.nyckel : '' }, store.ar);
   }
 
+  // Avsändare och meddelande från Swish-rapporten, och vilket barn meddelandet kan gälla.
+  function swishInfo(rad) { return K.swishForRad(reg(), rad); }
+  function swishNamnForslag(sw) {
+    if (!sw || !sw.meddelande) return null;
+    var namn = K.namnUrText(sw.meddelande) || sw.meddelande;
+    var k = K.kandidaterPaNamn(reg(), namn);
+    if (!k.medlemmar.length && namn !== sw.meddelande) k = K.kandidaterPaNamn(reg(), sw.meddelande);
+    return { namn: namn, kandidater: k.medlemmar };
+  }
+  function swishText(sw) {
+    return sw ? '<p class="faint" style="margin:4px 0">Swish från ' + esc(sw.namn ? K.visningsnamn(sw.namn) : sw.nummer) + (sw.meddelande ? ' · Meddelande: ' + esc(sw.meddelande) : '') + '</p>' : '';
+  }
+
   function avgiftForRad(rad, fk) {
     if (rad.belopp <= 0 || (inkorgVal[rad.id] || {}).ejAvgift) return null;
     var betalare = fk ? K.FRITIDSKORT : K.tolkaBetalare(rad);
@@ -10667,6 +10780,14 @@ var VERSIONER = [
     if (!betalare) return null;
     var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: betalare.nyckel }, store.ar);
     if (f.stammer && !f.tvetydig) return { betalare: betalare, termin: f.termin, poster: f.poster, forslag: f };
+    // Okänd betalare: meddelandet i Swish-rapporten kan peka ut barnet. Betalaren kopplas då när du bokför.
+    if (!f.kand) {
+      var nf = swishNamnForslag(swishInfo(rad));
+      if (nf && nf.kandidater.length === 1) {
+        var g = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, medlemIds: nf.kandidater }, store.ar);
+        if (g.stammer && !g.tvetydig) return { betalare: betalare, termin: g.termin, poster: g.poster, forslag: g, komIhag: true, viaSwish: true };
+      }
+    }
     return null;
   }
 
@@ -10700,7 +10821,11 @@ var VERSIONER = [
     }
     var betalare = K.tolkaBetalare(rad);
     var f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, nyckel: betalare ? betalare.nyckel : '' }, store.ar);
+    // Okänd betalare: barnet enligt meddelandet i Swish-rapporten.
+    var nf = !f.medlemIds.length ? swishNamnForslag(swishInfo(rad)) : null;
+    if (nf && nf.kandidater.length === 1) f = K.avgiftsforslag(reg(), { datum: rad.datum, belopp: rad.belopp, medlemIds: nf.kandidater }, store.ar);
     avgiftUtkast[rad.id] = {
+      namnForslag: nf && nf.kandidater.length > 1 ? nf : null, nyNamn: nf && !nf.kandidater.length ? K.visningsnamn(nf.namn) : '',
       termin: f.termin, komIhag: true,
       rader: f.medlemIds.filter(function (id) { return f.poster.some(function (p) { return p.medlem === id; }); }).map(function (id) {
         var t = 0, a = 0;
@@ -10708,6 +10833,8 @@ var VERSIONER = [
         return { medlem: id, termin: t ? K.formatBelopp(t) : '', ars: a ? K.formatBelopp(a) : '' };
       })
     };
+    // Barnet enligt meddelandet, men beloppet stämmer inte med avgiften: välj barnet med avgiften som utgångspunkt.
+    if (nf && nf.kandidater.length === 1 && !avgiftUtkast[rad.id].rader.length) avgiftUtkast[rad.id].rader.push(standardRad(nf.kandidater[0], f.termin));
   }
 
   // Raden för en medlem som läggs till i panelen. För Fritidskortet: beloppet för nästa barn som inte hittades, som terminsavgift.
@@ -10752,8 +10879,9 @@ var VERSIONER = [
       '<label style="margin:0 0 0 auto">Termin <input data-avg="termin" data-id="' + id + '" value="' + esc(u.termin) + '" style="width:80px;display:inline-block" aria-label="Termin, t.ex. HT-26"></label></div>' +
       (fk ? '<p class="faint" style="margin:4px 0">Fritidskortet enligt insättningsuppgiften: ' + esc(fk.poster.map(function (p) { return (p.namn ? K.visningsnamn(p.namn) : 'namn saknas') + ' ' + kr(p.belopp) + ' kr'; }).join(', ')) +
         '. Fritidskortets belopp räknas som terminsavgift; årsavgiften tas när föräldern betalar resten.</p>' : '') +
-      (u.fkOkanda && u.fkOkanda[0] && u.fkOkanda[0].kandidater.length ? '<div class="row" style="margin:4px 0"><span>Förslag för ' + esc(K.visningsnamn(u.fkOkanda[0].namn)) + ':</span>' +
-        u.fkOkanda[0].kandidater.filter(function (mid) { return medlemAv(mid) && u.rader.every(function (r) { return r.medlem !== mid; }); }).map(function (mid) {
+      (fk ? '' : swishText(swishInfo(rad))) +
+      ((u.fkOkanda && u.fkOkanda[0] && u.fkOkanda[0].kandidater.length) || (u.namnForslag && u.namnForslag.kandidater.length) ? '<div class="row" style="margin:4px 0"><span>Förslag för ' + esc(K.visningsnamn((u.fkOkanda && u.fkOkanda[0] ? u.fkOkanda[0] : u.namnForslag).namn)) + ':</span>' +
+        (u.fkOkanda && u.fkOkanda[0] ? u.fkOkanda[0] : u.namnForslag).kandidater.filter(function (mid) { return medlemAv(mid) && u.rader.every(function (r) { return r.medlem !== mid; }); }).map(function (mid) {
           return '<button class="btn btn-secondary btn-small" data-action="avg-valj" data-id="' + id + '" data-m="' + esc(mid) + '">' + esc(K.visaNamn(medlemAv(mid))) + '</button>';
         }).join('') + '</div>' : '');
     if (u.rader.length) {
@@ -10830,6 +10958,8 @@ var VERSIONER = [
     var b = K.tolkaBetalare(r);
     if (!b && !/swish|bankgiro/i.test(r.text)) return '';
     var kand = b ? K.hittaBetalare(reg(), b.nyckel) : null;
+    var sw = swishInfo(r);
+    if (sw && !(kand && kand.medlemmar.length)) return swishText(sw) + '<div class="row" style="margin-top:4px"><button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(r.id) + '">Terminsavgift…</button></div>';
     var tips = kand && kand.medlemmar.length ? 'Betalar för ' + kand.medlemmar.map(function (id) { var m = medlemAv(id); return m ? m.namn : '?'; }).join(', ') + '. Beloppet stämmer inte, eller så är det oklart vem.' : '';
     return '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="avg-oppna" data-id="' + esc(r.id) + '">Terminsavgift…</button>' +
       (tips ? '<span class="faint">' + esc(tips) + '</span>' : '') + '</div>';
@@ -11167,11 +11297,18 @@ var VERSIONER = [
   }
 
   // Kopplar en redan bokförd inbetalning till medlemmar, utan att ändra bokföringen.
+  // En betalare utan namn får avsändarens namn från Swish-rapporten.
+  function namngeBetalare(r, b, rad) {
+    var sw = b && b.typ === 'swish' ? K.swishForRad(r, rad) : null;
+    var finns = sw && sw.namn ? K.hittaBetalare(r, b.nyckel) : null;
+    return finns && !finns.namn ? K.andraBetalare(r, b.nyckel, { namn: K.visningsnamn(sw.namn) }) : r;
+  }
+
   function kopplaBokford(radId, termin, poster, komIhag) {
     var rad = aktivt().bankrader.find(function (r) { return r.id === radId; });
     var b = betalareForRad(rad);
     var r = K.registreraBetalning(reg(), { datum: rad.datum, belopp: rad.belopp, termin: termin, nyckel: b ? b.nyckel : '', arId: store.aktivt, ver: rad.verifikation, bankradId: rad.id, poster: poster });
-    if (komIhag && b && b.typ !== 'fritidskort') r = K.kopplaBetalare(r, b, poster.map(function (p) { return p.medlem; }));
+    if (komIhag && b && b.typ !== 'fritidskort') { r = K.kopplaBetalare(r, b, poster.map(function (p) { return p.medlem; })); r = namngeBetalare(r, b, rad); }
     sparaReg(r);
     visa('Betalningen ' + rad.datum + ' är kopplad.');
   }
@@ -12095,7 +12232,9 @@ var VERSIONER = [
     'inte-avgift': function (t) { inkorgVal[t.dataset.id] = Object.assign({}, inkorgVal[t.dataset.id], { ejAvgift: true }); render(); },
     'avg-valj': function (t) {
       var u = avgiftUtkast[t.dataset.id];
+      var fran = u.fkOkanda && u.fkOkanda.length;
       u.rader.push(nyAvgiftsrad(u, t.dataset.m, u.termin));
+      if (!fran) u.namnForslag = null;
       render();
     },
     'avg-ta-bort': function (t) { avgiftUtkast[t.dataset.id].rader.splice(Number(t.dataset.i), 1); render(); },

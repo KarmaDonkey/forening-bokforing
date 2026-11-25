@@ -156,6 +156,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Föreningens eget bankgiro- och Swish-nummer (från föreningens uppgifter) används aldrig som betalare; står de redan som betalare kan de tas bort under Medlemsregister (från 1.50).
 - Namn på insättningar jämförs utan prickar och accenter, både mot medlemmar och mot betalarnas namn (förälderns namn ger barnet); för äldre inläsningar letas namnet i underlagets text (från 1.51).
 - Saknar betalningen namn letas det i underlagets text; väljs barnet för hand gäller samma fördelning (hela avgiften delas upp, en del är terminsavgift) (från 1.52).
+- Swish-rapporten (CSV eller Excel) läses in under Läs in och känns igen före kontoutdrag. Raderna (datum, avsändarnummer och namn, meddelande utan långa sifferserier, belopp) sparas i medlemsregistret i högst två år, aldrig i bokföringen, och kopplas till Swish-raderna via nummer, belopp och datum. Meddelandet föreslår barnet (namn, förälder eller apelido) och betalare utan namn får avsändarens namn. Kontoutdrag i Excel läses också (från 1.53).
 - Förslag kan avfärdas med ett skäl (från 1.36). Avfärdade förslag sparas i bokföringsfilen med skäl, vem och när, föreslås inte igen och kan ångras. Vid "Börja om" följer de med reglerna.
 
 ## Grundbok (från version 1.43)
