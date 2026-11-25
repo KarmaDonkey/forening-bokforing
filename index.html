@@ -364,6 +364,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.54', datum: '2026-11-25',
+    nyheter: [
+      'Rättelse: Swedbanks Swish-rapport (kolumnerna Bokfdag och Avsändarnr) känns igen. En fil som ser ut som en Swish-rapport läses aldrig in som kontoutdrag, så att det inte blir dubbla Swish-rader.',
+      'Sexsiffriga tal, till exempel ett födelsedatum, tas också bort ur Swish-meddelandena.',
+      'Kontoutdrag och Swish-rapporter i CSV eller Excel sparas i OneDrive: kontoutdragen bland årets underlag (Kontoutdrag), Swish-rapporten i medlemsregistrets mapp.'
+    ]
+  },
+  {
     version: '1.53', datum: '2026-11-25',
     nyheter: [
       'Swish-rapporten från banken (CSV eller Excel) kan läsas in under Läs in. Avsändare och meddelande visas vid Swish-raderna, och appen föreslår barnet från meddelandet, även via apelido. Namnen sparas bara i medlemsregistret.',
@@ -1762,8 +1770,8 @@ var VERSIONER = [
   // ---------- Swish-rapporten: avsändare och meddelande för Swish-betalningarna ----------
 
   var SWISHKOLUMNER = {
-    datum: ['bokforingsdatum', 'bokforingsdag', 'transaktionsdatum', 'transaktionsdag', 'datum'],
-    nummer: ['avsandarnummer', 'avsandarensnummer', 'betalarnummer', 'avsandaresnummer', 'fran'],
+    datum: ['bokforingsdatum', 'bokforingsdag', 'bokfdag', 'bokfdatum', 'transaktionsdatum', 'transaktionsdag', 'transdag', 'datum'],
+    nummer: ['avsandarnummer', 'avsandarnr', 'avsandarensnummer', 'avsandarensnr', 'betalarnummer', 'betalarnr', 'avsandaresnummer', 'fran'],
     namn: ['avsandarnamn', 'avsandarensnamn', 'betalarnamn', 'avsandare'],
     meddelande: ['meddelande', 'message'],
     belopp: ['belopp', 'beloppsek', 'amount']
@@ -1786,8 +1794,19 @@ var VERSIONER = [
     return false;
   }
 
-  // Meddelandet utan långa sifferserier (personnummer, kortnummer).
-  function rensaMeddelande(t) { return String(t || '').replace(/\d[\d\s\-+]{5,}\d/g, ' ').replace(/\s+/g, ' ').trim(); }
+  // Ser texten ut som en Swish-rapport (avsändare och meddelande), även om alla kolumner inte känns igen?
+  // Då ska den aldrig läsas in som kontoutdrag, eftersom det skulle ge dubbla Swish-rader.
+  function liknarSwishrapport(text) {
+    var celler = delaCsv(text, gissaSeparator(text));
+    for (var i = 0; i < Math.min(celler.length, 20); i++) {
+      var n = celler[i].map(rubrikNyckel);
+      if (n.indexOf('meddelande') >= 0 && n.some(function (x) { return /^avsandar/.test(x); })) return true;
+    }
+    return false;
+  }
+
+  // Meddelandet utan sifferserier på sex siffror eller fler (personnummer, födelsedatum, kortnummer).
+  function rensaMeddelande(t) { return String(t || '').replace(/\d[\d\s\-+]{4,}\d/g, ' ').replace(/\s+/g, ' ').trim(); }
 
   function parseSwishrapport(text) {
     var celler = delaCsv(text, gissaSeparator(text)), k = null, start = 0, rader = [], varningar = [];
@@ -3283,7 +3302,8 @@ var VERSIONER = [
   var FK_ORD = ['fritidskortet', 'fritidskort', 'insattning', 'insattningar', 'insattningsuppgift', 'avgift', 'avgifter', 'terminsavgift', 'deltagaravgift', 'deltagaravgifter',
     'medlemsavgift', 'traningsavgift', 'betalning', 'for', 'fran', 'via', 'av', 'och'];
   function namnUrText(text) {
-    return String(text || '').split(/[,:;]/).map(function (del) {
+    // Delar vid komma, kolon och semikolon, och vid "- " som banker ibland skriver i stället för komma.
+    return String(text || '').split(/[,:;]|\s*-\s+/).map(function (del) {
       return rensaReferens(del).split(/\s+/).filter(function (w) { return w && FK_ORD.indexOf(namnOrd(w)[0]) < 0; }).join(' ');
     }).filter(function (x) { return namnOrd(x).length >= 2; }).pop() || '';
   }
@@ -4700,6 +4720,7 @@ var VERSIONER = [
     fritidskortPoster: fritidskortPoster,
     namnUrText: namnUrText,
     arSwishrapport: arSwishrapport,
+    liknarSwishrapport: liknarSwishrapport,
     parseSwishrapport: parseSwishrapport,
     laggTillSwish: laggTillSwish,
     swishForRad: swishForRad,
@@ -6499,11 +6520,28 @@ var VERSIONER = [
 
   function importeraBanktext(text, namn) {
     // En Swish-rapport är inget kontoutdrag: raderna sparas i medlemsregistret och kopplas till Swish-raderna på kontoutdraget.
-    if (K.arSwishrapport(text)) { importeraSwish(text, namn); return; }
+    if (K.arSwishrapport(text)) { importeraSwish(text, namn); return { typ: 'swish' }; }
+    if (K.liknarSwishrapport(text)) throw new Error((namn ? namn + ': ' : '') + 'ser ut som en Swish-rapport, men kolumnerna känns inte igen. Den läses inte in som kontoutdrag, eftersom det skulle ge dubbla Swish-rader.');
     var res = K.parseBankfil(text);
     if (!res.rader.length) throw new Error((namn ? namn + ': ' : '') + 'hittade inga transaktioner. ' + res.varningar.slice(0, 2).join(' '));
     logga((namn ? namn + ': ' : '') + importeraRader(res.rader, kontoForInlasning(text, namn)));
     res.varningar.slice(0, 5).forEach(function (v) { logga(v, true); });
+    return { typ: 'kontoutdrag', arId: arForDatum(res.rader[res.rader.length - 1].datum) || store.aktivt };
+  }
+
+  // Originalfilen (CSV eller Excel) sparas i OneDrive: kontoutdrag bland årets underlag, Swish-rapporten i
+  // medlemsregistrets mapp eftersom den innehåller namn. Samma fil inläst igen ersätter den tidigare.
+  async function sparaOriginalfil(fil, info) {
+    if (!info || !odAnslutet() || lasLage() || OVNING) return;
+    try {
+      var url;
+      if (info.typ === 'swish') {
+        await sakerstallRegMapp();
+        url = '/drives/' + od.regMapp.driveId + '/items/' + od.regMapp.id + ':/' + enc('Swish-rapporter/' + K.sakertNamn(fil.name)) + ':';
+      } else url = iMappen(K.arMapp(info.arId) + '/Bokföringsunderlag/Kontoutdrag/' + K.sakertNamn(fil.name));
+      await graf(url + '/content?@microsoft.graph.conflictBehavior=replace', { method: 'PUT', body: fil });
+      logga(fil.name + ': sparad i OneDrive' + (info.typ === 'swish' ? ' (Medlemsregister/Swish-rapporter).' : ' (' + info.arId + '/Bokföringsunderlag/Kontoutdrag).'));
+    } catch (e) { logga(fil.name + ': kunde inte sparas i OneDrive (' + e.message + '). Lägg gärna filen där själv.', true); }
   }
 
   function importeraSwish(text, namn) {
@@ -6560,8 +6598,8 @@ var VERSIONER = [
       arbetar = 'Läser ' + fil.name + (filer.length > 1 ? ' (' + (i + 1) + ' av ' + filer.length + ')' : '') + '…';
       render();
       try {
-        if (/\.(csv|txt|tsv|skv)$/i.test(fil.name) || /^text\//.test(fil.type)) importeraBanktext(await lasText(fil), fil.name);
-        else if (/\.xlsx?$/i.test(fil.name)) importeraBanktext(await excelTillText(fil), fil.name);
+        if (/\.(csv|txt|tsv|skv)$/i.test(fil.name) || /^text\//.test(fil.type)) await sparaOriginalfil(fil, importeraBanktext(await lasText(fil), fil.name));
+        else if (/\.xlsx?$/i.test(fil.name)) await sparaOriginalfil(fil, importeraBanktext(await excelTillText(fil), fil.name));
         else if (fil.type === 'application/pdf' || /\.pdf$/i.test(fil.name) || /^image\//.test(fil.type)) await tolkaFil(fil);
         else throw new Error('okänd filtyp.');
       } catch (err) {
