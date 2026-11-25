@@ -112,3 +112,15 @@ test('äldre inläsningar utan poster: namnet hämtas ur underlagets text', () =
   const p = [{ namn: 'X Y', belopp: 1 }];
   assert.deepEqual(json(K.fritidskortPoster({ poster: p, beskrivning: 'annat' })), json(p));
 });
+
+test('betalning utan namn: namnet hämtas ur texten, och hela avgiften delas upp', () => {
+  const u = { motpart: 'Fritidskortet', belopp: kr(1300), beskrivning: 'Deltagaravgift via Fritidskortet för Exempel Barnsson', poster: [{ avsandare: 'Fritidskortet', namn: '', belopp: kr(1300) }] };
+  assert.deepEqual(json(K.fritidskortPoster(u)), [{ avsandare: 'Fritidskortet', namn: 'Exempel Barnsson', belopp: kr(1300) }]);
+  const reg = registret();
+  const barn = reg.medlemmar[0].id;
+  const f = K.fritidskortForslag(reg, u, 'HT-30');
+  assert.deepEqual(json(f.poster), [{ medlem: barn, typ: 'termin', belopp: kr(800) }, { medlem: barn, typ: 'arsavgift', belopp: kr(500) }]);
+  // Samma fördelning när barnet väljs för hand.
+  assert.deepEqual(json(K.fritidskortFordelning(reg, barn, kr(1300), 'HT-30')), json(f.poster));
+  assert.deepEqual(json(K.fritidskortFordelning(reg, barn, kr(550), 'HT-30')), [{ medlem: barn, typ: 'termin', belopp: kr(550) }]);
+});
