@@ -185,6 +185,10 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - Mandatet gäller till ett årsmöte ("Årsmötet 2027", förvalt) eller till ett datum, och kan ändras i efterhand. Påminnelsen om uppdrag som går ut använder årsmötets datum om det är inlagt, annars årets början.
 
+## Namnet Plätt (från version 1.63)
+
+- Alla dokument som appen skapar (fakturor, kvitton, rapporter, årsrapport, årsmöteshandlingar, protokoll, utläggsredovisningar) har en grå rad vertikalt i vänsterkanten på varje sida: "Skapad med Plätt · Gör bokföring och styrelsearbete för ideella föreningar lätt". Raden finns både i PDF:erna och vid utskrift från webbläsaren, och PDF-filerna har Plätt som skapare.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
