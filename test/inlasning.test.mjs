@@ -104,12 +104,14 @@ describe('regler', () => {
     assert.equal(K.hittaRegel(regler, 'Pris kontopaket 2030', -150).konto, '6570');
   });
   test('längsta mönstret vinner och en ny kontering skriver över', () => {
+    // "Swish" ensamt är för allmänt för en regel (från 1.56); "Swish Anna" lärs in.
     let regler = K.larRegel([], 'Swish', 500, '3990');
+    assert.equal(regler.length, 0);
     regler = K.larRegel(regler, 'Swish Anna', 500, '3100');
     assert.equal(K.hittaRegel(regler, 'SWISH ANNA 123', 500).konto, '3100');
-    assert.equal(K.hittaRegel(regler, 'Swish Cecilia', 500).konto, '3990');
+    assert.equal(K.hittaRegel(regler, 'Swish Cecilia', 500), null);
     regler = K.larRegel(regler, 'Swish Anna', 500, '3980');
-    assert.equal(regler.length, 2);
+    assert.equal(regler.length, 1);
     assert.equal(K.hittaRegel(regler, 'Swish Anna', 500).konto, '3980');
   });
   test('hela ord krävs', () => {
