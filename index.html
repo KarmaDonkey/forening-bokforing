@@ -209,7 +209,7 @@
   .forhandsvisning { overflow: hidden; background: var(--surface-2); padding: 6px; border-radius: 8px; }
   #utskrift { display: none; }
   /* Fakturor och kvitton: alltid ljusa, oavsett tema, i A4-format. */
-  .dok { background: #fff; color: #1a1a1a; width: 180mm; min-height: 250mm; margin: 0 auto; padding: 12mm; font: 10.5pt/1.45 "Roboto Flex", Arial, sans-serif; font-variant-numeric: tabular-nums; display: flex; flex-direction: column; box-sizing: content-box; }
+  .dok { position: relative; background: #fff; color: #1a1a1a; width: 180mm; min-height: 250mm; margin: 0 auto; padding: 12mm; font: 10.5pt/1.45 "Roboto Flex", Arial, sans-serif; font-variant-numeric: tabular-nums; display: flex; flex-direction: column; box-sizing: content-box; }
   .dok table { width: 100%; border-collapse: collapse; }
   .dok th, .dok td { border: 0; padding: 3px 6px; color: #1a1a1a; }
   .dok-huvud { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
@@ -314,7 +314,15 @@
     .wrap { max-width: 1400px; }
     nav button { font-size: 15.5px; }
   }
+  /* Raden i vänsterkanten som visar att dokumentet är skapat med Plätt. */
+  .platt-kant { position: absolute; left: 4mm; bottom: 14mm; writing-mode: vertical-rl; transform: rotate(180deg); font: 6.5pt Arial, sans-serif; color: #999; letter-spacing: .02em; white-space: nowrap; pointer-events: none; }
+  #platt-utskrift { display: none; }
   @media print {
+    /* Webbläsaren ritar inte i sidans marginal: raden ligger längst till vänster i innehållet, som flyttas in lika mycket. */
+    .platt-kant { position: fixed; left: 0; bottom: 0; }
+    body { padding-left: 5mm; }
+    #platt-utskrift { display: block; }
+    body.skriver-dokument #platt-utskrift { display: none; }
     .topp, nav, footer, .ej-utskrift { display: none !important; }
     body { background: #fff; color: #000; }
     .card { border: 0; padding: 0; }
@@ -325,7 +333,7 @@
     .dok-rubrik { break-after: avoid; }
     .dok-rader tr { break-inside: avoid; }
     .dok-hela { break-inside: avoid; }
-    @page { size: A4; margin: 15mm; }
+    @page { size: A4; margin: 15mm 15mm 15mm 10mm; }
     /* Grundboken skrivs alltid ut med alla kolumner, oavsett pappersbredd. */
     table.grundbok .gb-sida { display: table-cell !important; }
     table.grundbok .gb-summa { display: none !important; }
@@ -351,6 +359,7 @@
 </div>
 <footer class="ej-utskrift"><button class="lank-knapp" data-vy="om" id="versionLank"></button></footer>
 <div id="utskrift"></div>
+<div id="platt-utskrift" class="platt-kant">Skapad med Plätt · Gör bokföring och styrelsearbete för ideella föreningar lätt</div>
 
 <!--
   Kärnan: all bokföringslogik. Den har inga beroenden till sidan och testas
@@ -363,6 +372,12 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.63', datum: '2026-11-26',
+    nyheter: [
+      'Fakturor, kvitton, rapporter, årsrapporten, årsmöteshandlingar, protokoll och utläggsredovisningar har nu en diskret rad i vänsterkanten: "Skapad med Plätt · Gör bokföring och styrelsearbete för ideella föreningar lätt". Raden finns på varje sida, både i PDF:erna och när du skriver ut.'
+    ]
+  },
   {
     version: '1.62', datum: '2026-11-26',
     nyheter: [
@@ -6950,7 +6965,7 @@ var VERSIONER = [
       ? [['Fakturadatum', d.datum], ['Fakturanr', d.nummer], ['Förfallodatum', d.forfallodatum]]
       : [['Kvittonr', d.nummer], ['Utskrivningsdatum', d.datum], ['Betaldatum', d.betaldDatum], ['Betalsätt', d.betalsatt], ['Org.nummer', f.orgnr]];
     var m = d.mottagare || {}, ref = d.referens || {};
-    var html = '<div class="dok"><div class="dok-huvud"><div>' +
+    var html = '<div class="dok">' + plattKant() + '<div class="dok-huvud"><div>' +
       (d.logo ? '<img class="dok-logo" src="' + esc(d.logo) + '" alt="">' : '') +
       '<div class="dok-forening">' + esc(f.namn) + '</div></div><div>' +
       '<div class="dok-titel">' + (arF ? 'Faktura' : 'Kvitto') + '</div><table class="dok-meta">' +
@@ -7063,6 +7078,20 @@ var VERSIONER = [
   }
 
   // PDF:ens standardtypsnitt klarar svenska bokstäver men inte alla specialtecken.
+  // Raden i vänsterkanten på alla dokument som appen skapar.
+  var PLATT_RAD = 'Skapad med Plätt · Gör bokföring och styrelsearbete för ideella föreningar lätt';
+  function plattKant() { return '<div class="platt-kant">' + esc(PLATT_RAD) + '</div>'; }
+  // Ritar raden vertikalt i vänstermarginalen på varje sida, nerifrån och upp.
+  function ritaPlattKant(doc) {
+    var sidor = doc.getNumberOfPages();
+    for (var i = 1; i <= sidor; i++) {
+      doc.setPage(i);
+      var h = doc.internal.pageSize.getHeight();
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(153, 153, 153);
+      doc.text(pt(PLATT_RAD), 8, h - 14, { angle: 90 });
+    }
+    doc.setTextColor(26, 26, 26);
+  }
   function pt(t) {
     return String(t == null ? '' : t).replace(/[\u2212\u2013\u2014]/g, '-').replace(/[\u00a0\u202f]/g, ' ').replace(/\u2192/g, '->').replace(/\u2026/g, '...');
   }
@@ -7074,6 +7103,10 @@ var VERSIONER = [
     var doc = new JsPdf({ unit: 'mm', format: 'a4', orientation: liggande ? 'landscape' : 'portrait' });
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(26, 26, 26);
+    // Kantraden ritas på alla sidor när filen skapas, en gång.
+    var output = doc.output.bind(doc), ritad = false;
+    doc.output = function () { if (!ritad) { ritad = true; ritaPlattKant(doc); } return output.apply(null, arguments); };
+    doc.setProperties({ creator: 'Plätt' });
     return doc;
   }
 
@@ -7215,7 +7248,7 @@ var VERSIONER = [
       if (f.bankgiro) { doc.setFont('helvetica', 'bold'); doc.text('Bankgiro', 140, fy + 9 + 3.8 + 1); doc.setFont('helvetica', 'normal'); doc.text(pt(f.bankgiro), 140, fy + 9 + 7.6 + 1); }
       if (sidor > 1) { doc.setTextColor.apply(doc, GRA); doc.text('Sida ' + s2 + ' av ' + sidor, H, 290, { align: 'right' }); doc.setTextColor(26, 26, 26); }
     }
-    doc.setProperties({ title: (arF ? 'Faktura ' : 'Kvitto ') + d.nummer, author: f.namn || '', creator: 'Föreningsbokföring' });
+    doc.setProperties({ title: (arF ? 'Faktura ' : 'Kvitto ') + d.nummer, author: f.namn || '' });
     return doc.output('blob');
   }
 
@@ -7333,7 +7366,7 @@ var VERSIONER = [
       doc.text('Sida ' + s3 + ' av ' + sidor, H, 290, { align: 'right' });
       doc.setTextColor(26, 26, 26);
     }
-    doc.setProperties({ title: 'Ekonomisk redovisning ' + K.arNamn(ar), author: f.namn || '', creator: 'Föreningsbokföring' });
+    doc.setProperties({ title: 'Ekonomisk redovisning ' + K.arNamn(ar), author: f.namn || '' });
     return doc.output('blob');
   }
 
@@ -7439,7 +7472,7 @@ var VERSIONER = [
       ty += 10;
     });
     sidfot(doc, (f.namn || '') + ' · Årsrapport ' + arN + (status === 'Bokslut' ? '' : ' (' + status.toLowerCase() + ')'), 2);
-    doc.setProperties({ title: 'Årsrapport ' + arN, author: f.namn || '', creator: 'Föreningsbokföring' });
+    doc.setProperties({ title: 'Årsrapport ' + arN, author: f.namn || '' });
     return doc.output('blob');
   }
 
@@ -7712,7 +7745,7 @@ var VERSIONER = [
 
     if (inbaddad) return doc;
     sidfot(doc, (f.namn || '') + ' · ' + titel + (typ === 'medl' || amData ? '' : ' ' + K.arNamn(ar)));
-    doc.setProperties({ title: titel + (typ === 'medl' || amData ? '' : ' ' + K.arNamn(ar)), author: f.namn || '', creator: 'Föreningsbokföring' });
+    doc.setProperties({ title: titel + (typ === 'medl' || amData ? '' : ' ' + K.arNamn(ar)), author: f.namn || '' });
     return doc.output('blob');
   }
 
@@ -8639,7 +8672,7 @@ var VERSIONER = [
     var tabell = function (rubriker, kropp) {
       return '<table class="dok-rader"><thead><tr>' + rubriker.map(function (r, i) { return '<th' + (i ? ' class="num"' : '') + '>' + r + '</th>'; }).join('') + '</tr></thead><tbody>' + kropp + '</tbody></table>';
     };
-    var html = '<div class="dok dok-rapport">' +
+    var html = '<div class="dok dok-rapport">' + plattKant() +
       '<div class="dok-huvud"><div>' + (logoUrl ? '<img class="dok-logo" src="' + esc(logoUrl) + '" alt="">' : '') +
       '<div class="dok-forening">' + esc(f.namn || '') + '</div>' + (f.orgnr ? '<div>Org.nr ' + esc(f.orgnr) + '</div>' : '') + '</div>' +
       '<div><div class="dok-titel">Ekonomisk redovisning</div><div style="text-align:right">Räkenskapsåret ' + esc(ar.start) + ' – ' + esc(ar.slut) + '</div></div></div>';
