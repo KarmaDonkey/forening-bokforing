@@ -72,3 +72,12 @@ test('avfärdade förslag föreslås inte igen, och kan ångras', () => {
   assert.equal(avf.length, 0);
   assert.ok(K.forslagRegler([ar], [], avf).some((f) => f.monster === 'exempelperson'));
 });
+
+test('regler av bara allmänna ord lärs inte in, och gamla sådana hittas', () => {
+  assert.equal(K.larRegel([], 'Swish +46700000001', kr(500), '3010', '1230000000').length, 0, 'swish och nummer');
+  assert.equal(K.larRegel([], 'Bankgiro inbetalning', kr(500), '3980', '1234567').length, 0);
+  assert.equal(K.larRegel([], 'Överföring via internet', kr(-200), '2390', '').length, 0);
+  assert.equal(K.larRegel([], 'Pg-bet. via internet', kr(-1000), '5010', 'Exempelskolan').length, 1, 'med mottagarens namn lärs regeln in');
+  const regler = [{ monster: 'swish', riktning: 'in', konto: '3010' }, { monster: 'bankgiro inbetalning', riktning: 'in', konto: '3980' }, { monster: 'exempelskolan', riktning: 'ut', konto: '5010' }];
+  assert.deepEqual(json(K.allmannaRegler(regler).map((r) => r.monster)), ['swish', 'bankgiro inbetalning']);
+});

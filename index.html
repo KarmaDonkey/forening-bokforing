@@ -364,6 +364,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.56', datum: '2026-11-26',
+    nyheter: [
+      'Rättelse: appen lär sig inte längre konteringsregler av texter med bara allmänna ord, till exempel "Swish" eller "Bankgiro inbetalning". En sådan regel gav samma konto åt alla Swish-inbetalningar.',
+      'Regler som redan har lärts in av allmänna ord visas under Konteringsregler och kan tas bort med ett klick.'
+    ]
+  },
+  {
     version: '1.55', datum: '2026-11-25',
     nyheter: [
       'Rättelse: avsändare och meddelande från Swish-rapporten visas vid alla Swish-rader, också när betalaren är känd och under Medlemsregister, Att koppla.',
@@ -2002,10 +2009,20 @@ var VERSIONER = [
 
   // Lär in bankens text och referens -> konto. Referensen tas med eftersom texten ofta är allmän
   // (t.ex. "Pg-bet. via internet") och mottagaren står i referensen.
+  // Ord som står på många olika betalningar (t.ex. "Swish", "Bankgiro inbetalning", "Överföring via internet").
+  // En regel av bara sådana ord skulle ge samma konto till alla Swish- eller bankgirobetalningar.
+  var ALLMANNA_BANKORD = ['swish', 'bankgiro', 'bg', 'pg', 'plusgiro', 'inbetalning', 'inbetalningar', 'insattning', 'overforing', 'via', 'internet', 'bet', 'betalning',
+    'kortkop', 'kort', 'autogiro', 'direktinsattning', 'lon', 'ovf', 'egen', 'ers', 'fran', 'till'];
+  function allmanRegel(monster) {
+    var ord = namnOrd(monster);
+    return !ord.length || ord.every(function (w) { return ALLMANNA_BANKORD.indexOf(w) >= 0; });
+  }
+  function allmannaRegler(regler) { return (regler || []).filter(function (r) { return allmanRegel(r.monster); }); }
+
   function larRegel(regler, text, belopp, konto, referens) {
     var monster = normaliseraText(text + ' ' + (referens || ''));
     regler = (regler || []).slice();
-    if (!monster || !giltigtKontonummer(konto)) return regler;
+    if (!monster || !giltigtKontonummer(konto) || allmanRegel(monster)) return regler;
     var riktning = riktningFor(belopp);
     var i = regler.findIndex(function (r) { return r.monster === monster && r.riktning === riktning; });
     if (i >= 0) regler[i] = { monster: monster, riktning: riktning, konto: konto };
@@ -4777,6 +4794,7 @@ var VERSIONER = [
     bankavvikelser: bankavvikelser,
     hittaRegel: hittaRegel,
     larRegel: larRegel,
+    allmannaRegler: allmannaRegler,
     laggTillUnderlag: laggTillUnderlag,
     andraUnderlag: andraUnderlag,
     taBortUnderlag: taBortUnderlag,
@@ -8523,7 +8541,12 @@ var VERSIONER = [
   function vyRegler(ar) {
     var regler = store.regler || [], lasbar = lasLage();
     var namn = function (k) { return K.kontonamn(ar, k) || '(finns inte i kontoplanen)'; };
-    var html = '<h2>Konteringsregler' + hjalp('regler') + '</h2><div class="card"><p class="faint" style="margin-top:0">När en text i kontoutdraget (text eller referens) innehåller orden föreslår appen kontot. ' +
+    var allmanna = K.allmannaRegler(regler);
+    var html = '<h2>Konteringsregler' + hjalp('regler') + '</h2>' +
+      (allmanna.length && !lasbar ? '<div class="card" role="status"><strong>' + antal(allmanna.length, 'regel består', 'regler består') + ' bara av allmänna ord</strong>' +
+        '<p style="margin:6px 0">' + esc(allmanna.map(function (r) { return '"' + r.monster + '" → ' + r.konto; }).join(', ')) + '. Sådana ord står på många olika betalningar, så regeln ger samma konto åt alla, till exempel alla Swish-inbetalningar.</p>' +
+        '<button class="btn btn-small" data-action="regel-rensa-allmanna">Ta bort ' + (allmanna.length === 1 ? 'regeln' : 'reglerna') + '</button></div>' : '') +
+      '<div class="card"><p class="faint" style="margin-top:0">När en text i kontoutdraget (text eller referens) innehåller orden föreslår appen kontot. ' +
       'Appen lär sig själv när du bokför, och du kan lägga till regler här. De sparas i föreningens bokföringsfil.</p>';
     html += regler.length ? '<div class="scroll"><table class="kortlista"><thead><tr><th>Texten innehåller</th><th>In/ut</th><th>Konto</th><th></th></tr></thead><tbody>' + regler.map(function (r, i) {
       return '<tr><td><strong>' + esc(r.monster) + '</strong></td><td data-etikett="In/ut">' + (r.riktning === 'in' ? 'in' : r.riktning === 'ut' ? 'ut' : 'båda') + '</td>' +
@@ -12592,6 +12615,11 @@ var VERSIONER = [
     'utlagg-pdf': function (t) {
       var ar = aktivt(), x = (ar.utlagg || []).find(function (a) { return a.id === t.dataset.id; });
       skapaUtlaggPdf(ar, t.dataset.id).then(function (blob) { laddaNer(K.sakertNamn('Utläggsredovisning ' + x.person + ' ' + (x.datum || idag()) + '.pdf'), blob, 'application/pdf'); }, function (err) { visa(err.message, true); });
+    },
+    'regel-rensa-allmanna': function () {
+      var bort = K.allmannaRegler(store.regler);
+      store.regler = (store.regler || []).filter(function (r) { return bort.indexOf(r) < 0; });
+      spara(); visa(antal(bort.length, 'regel', 'regler') + ' med bara allmänna ord är borttagna.');
     },
     'regel-ny': function () {
       var ord = K.normaliseraText(varde('nyRegelText')), konto = varde('nyRegelKonto');

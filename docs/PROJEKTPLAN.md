@@ -159,6 +159,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Swish-rapporten (CSV eller Excel) läses in under Läs in och känns igen före kontoutdrag. Raderna (datum, avsändarnummer och namn, meddelande utan långa sifferserier, belopp) sparas i medlemsregistret i högst två år, aldrig i bokföringen, och kopplas till Swish-raderna via nummer, belopp och datum. Meddelandet föreslår barnet (namn, förälder eller apelido) och betalare utan namn får avsändarens namn. Kontoutdrag i Excel läses också (från 1.53).
 - Swedbanks kolumnnamn (Bokfdag, Avsändarnr) känns igen, och en fil som liknar en Swish-rapport läses aldrig som kontoutdrag. Originalfilerna (CSV/Excel) sparas i OneDrive: kontoutdrag under årets Bokföringsunderlag/Kontoutdrag, Swish-rapporter under Medlemsregister/Swish-rapporter (från 1.54).
 - Swish-rapportens avsändare och meddelande visas vid alla Swish-rader och under Att koppla. Tyder meddelandet på annat än en avgift (kläder, workshop, instrument, lån …) ges inget avgiftsförslag (från 1.55).
+- Regler lärs inte in av texter med bara allmänna bankord (swish, bankgiro, inbetalning, överföring via internet …), och sådana regler som redan finns kan tas bort med ett klick (från 1.56).
 - Förslag kan avfärdas med ett skäl (från 1.36). Avfärdade förslag sparas i bokföringsfilen med skäl, vem och när, föreslås inte igen och kan ångras. Vid "Börja om" följer de med reglerna.
 
 ## Grundbok (från version 1.43)
