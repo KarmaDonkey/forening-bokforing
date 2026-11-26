@@ -364,6 +364,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.59', datum: '2026-11-26',
+    nyheter: [
+      'Rättelse: kvitton och fakturor i utländsk valuta utan belopp i kronor syns nu under Underlag som väntar på betalning (med rutan "Ange SEK") och i Koppla underlag på bankraderna.',
+      'Kopplas ett sådant underlag till en utbetalning blir bankens belopp kronbeloppet, och kursen skrivs i texten, till exempel "354,45 EUR, kurs 11,10".'
+    ]
+  },
+  {
     version: '1.58', datum: '2026-11-26',
     nyheter: [
       'Avstämningen mot banken per månad räknar en rättad verifikation och dess rättelse som att de tar ut varandra, så att en rättelse med senare datum inte ger skillnad i månaderna däremellan.',
@@ -2315,7 +2322,16 @@ var VERSIONER = [
     return Object.assign({}, ar, { underlag: ar.underlag.filter(function (x) { return x.id !== id; }) });
   }
 
-  function arBetalbartUnderlag(u) { return u.dokumenttyp !== 'kontoutdrag' && u.belopp > 0; }
+  // Ett underlag i utländsk valuta där beloppet i kronor inte är känt än (det avgörs av bankens belopp).
+  function valutaUtanSek(u) { return !!(u && u.valuta && !u.belopp && u.originalbelopp > 0); }
+  function arBetalbartUnderlag(u) { return u.dokumenttyp !== 'kontoutdrag' && (u.belopp > 0 || valutaUtanSek(u)); }
+
+  // Kursen som framgår av kronbeloppet och originalbeloppet, t.ex. "354,45 EUR, kurs 11,10".
+  function valutaText(u, sek) {
+    if (!u || !u.valuta || !u.originalbelopp) return '';
+    var kurs = sek ? Math.abs(sek) / u.originalbelopp : 0;
+    return formatBelopp(u.originalbelopp) + ' ' + u.valuta + (kurs ? ', kurs ' + kurs.toFixed(kurs >= 1 ? 2 : 4).replace('.', ',') : '');
+  }
 
   function oppnaUnderlag(ar) {
     return (ar.underlag || []).filter(function (u) { return u.verifikation == null && arBetalbartUnderlag(u); });
@@ -2455,8 +2471,9 @@ var VERSIONER = [
     var avrundning = utlaggAvrundning(us, bankrad);
     if (us.length === 1 && opt && opt.ungefar && summaUnderlag !== bankrad.belopp) {
       // Ett underlag som troligen hör hit men vars belopp skiljer: banken avgör beloppet.
+      // För utländsk valuta blir bankens belopp kronbeloppet, och kursen skrivs i texten.
       rader.push({ konto: giltigt(us[0].foreslagetKonto) || giltigt(regelKonto), belopp: -bankrad.belopp });
-      text = [us[0].motpart, us[0].beskrivning].filter(Boolean).join(': ');
+      text = [us[0].motpart, us[0].beskrivning].filter(Boolean).join(': ') + (us[0].valuta ? ' (' + valutaText(us[0], bankrad.belopp) + ')' : '');
       kalla = 'underlag';
     } else if (us.length && (summaUnderlag === bankrad.belopp || avrundning)) {
       us.forEach(function (u) { rader.push({ konto: giltigt(u.foreslagetKonto) || giltigt(regelKonto), belopp: -bankbelopp(u) }); });
@@ -2564,7 +2581,12 @@ var VERSIONER = [
         bankrader: nyttAr.bankrader.map(function (r) { return r.id === bankrad.id ? Object.assign({}, r, { verifikation: nr }) : r; })
       });
     }
-    us.forEach(function (u, i) { nyttAr = andraUnderlag(nyttAr, u.id, { verifikation: nr, arkivnamn: namn[i] }); });
+    us.forEach(function (u, i) {
+      var andring = { verifikation: nr, arkivnamn: namn[i] };
+      // Utländsk valuta utan kronbelopp: bankens belopp blir underlagets belopp i kronor.
+      if (bankrad && us.length === 1 && valutaUtanSek(u)) andring.belopp = Math.abs(bankrad.belopp);
+      nyttAr = andraUnderlag(nyttAr, u.id, andring);
+    });
     return { ar: nyttAr, verifikation: res.verifikation };
   }
 
@@ -4835,6 +4857,8 @@ var VERSIONER = [
     andraUnderlag: andraUnderlag,
     taBortUnderlag: taBortUnderlag,
     oppnaUnderlag: oppnaUnderlag,
+    valutaUtanSek: valutaUtanSek,
+    valutaText: valutaText,
     matchaUnderlag: matchaUnderlag,
     forslagForBankrad: forslagForBankrad,
     bokforKopplat: bokforKopplat,
@@ -8085,7 +8109,7 @@ var VERSIONER = [
       var valbara = oppnaU.filter(function (u) { return f.underlagIds.indexOf(u.id) < 0; });
       if (valbara.length) {
         html += '<select data-action-change="koppla" data-id="' + esc(r.id) + '" style="width:auto;max-width:100%"><option value="">Koppla underlag…</option>' +
-          valbara.map(function (u) { return '<option value="' + esc(u.id) + '">' + esc((u.datum || '') + ' ' + (u.motpart || u.filnamn)) + ' ' + kr(u.belopp) + '</option>'; }).join('') + '</select>';
+          valbara.map(function (u) { return '<option value="' + esc(u.id) + '">' + esc((u.datum || '') + ' ' + (u.motpart || u.filnamn)) + ' ' + (K.valutaUtanSek(u) ? K.valutaText(u) : kr(u.belopp)) + '</option>'; }).join('') + '</select>';
       }
       if (inkorgVal[r.id] && inkorgVal[r.id].underlagIds) html += '<button class="btn btn-secondary btn-small" data-action="aterstall" data-id="' + esc(r.id) + '">Återställ</button>';
       html += '</div>';
@@ -8112,7 +8136,7 @@ var VERSIONER = [
           '<td data-etikett="Underlag"><div>' + esc(u.motpart) + (u.utlagg ? ' <span class="tag">utlägg ' + esc(u.utlaggPerson) + '</span>' : '') + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') +
           (u.utlagg && u.kvittobelopp !== u.belopp ? '<div class="faint">Kvitto ' + kr(u.kvittobelopp) + ' kr' + (u.privat ? ', privat: ' + esc(u.privat) : '') + '</div>' : '') + underlagChip(u) +
           (u.valuta ? '<div class="faint">' + esc(u.valuta) + ' ' + (u.originalbelopp != null ? kr(u.originalbelopp) : '') + '</div>' : '') + '</div></td>' +
-          '<td class="num" data-etikett="Belopp"><div><input class="num" style="width:110px" data-underlag="belopp" data-id="' + esc(u.id) + '" value="' + (u.belopp ? kr(u.belopp) : '') + '" aria-label="Belopp i kronor">' +
+          '<td class="num" data-etikett="Belopp"><div><input class="num" style="width:110px"' + (K.valutaUtanSek(u) ? ' placeholder="Ange SEK"' : '') + ' data-underlag="belopp" data-id="' + esc(u.id) + '" value="' + (u.belopp ? kr(u.belopp) : '') + '" aria-label="Belopp i kronor">' +
           '<div class="faint">' + (u.riktning === 'intakt' ? 'intäkt' : 'utgift') + '</div></div></td>' +
           '<td data-etikett="Konto"><div><input list="kontolista" style="width:120px" data-underlag="foreslagetKonto" data-id="' + esc(u.id) + '" value="' + esc(u.foreslagetKonto || '') + '" aria-label="Konto">' +
           '<div class="faint">' + esc(u.foreslagetKonto ? K.kontonamn(ar, u.foreslagetKonto) : 'inget förslag') + (kontoKallaText(u) ? '<br>' + esc(kontoKallaText(u)) : '') + '</div></div></td>' +
@@ -10322,7 +10346,7 @@ var VERSIONER = [
     var html = '<h2>Utlägg' + hjalp('utlagg') + '</h2>';
     if (utlaggUtkast && !lasbar) {
       var andras = utlaggUtkast.id ? (ar.utlagg || []).find(function (a) { return a.id === utlaggUtkast.id; }) : null;
-      var kvitton = K.oppnaUnderlag(ar).filter(function (u) { return u.riktning !== 'intakt' && (!u.utlagg || (andras && u.utlagg === andras.id)); });
+      var kvitton = K.oppnaUnderlag(ar).filter(function (u) { return u.riktning !== 'intakt' && u.belopp > 0 && (!u.utlagg || (andras && u.utlagg === andras.id)); });
       var betalda = andras ? K.utlaggStatus(ar, andras.id).poster.filter(function (u) { return u.verifikation != null; }) : [];
       var kvittobelopp = function (u) { return u.kvittobelopp != null ? u.kvittobelopp : u.belopp; };
       html += '<div class="card arsmote-form" id="utlaggForm"><h3 style="margin-top:0">' + (andras ? 'Ändra utläggsredovisning' : 'Ny utläggsredovisning') + '</h3>' +

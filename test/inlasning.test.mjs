@@ -397,3 +397,20 @@ describe('koppla bankrader till redan bokförda verifikationer', () => {
     eq(K.oppnaBankrader(res.ar).map((r) => r.text).sort(), ['Fel belopp', 'Sent']);
   });
 });
+
+describe('utländsk valuta', () => {
+  test('ett kvitto i euro utan kronbelopp väntar, och bankens belopp blir kronbeloppet', () => {
+    let ar = K.skapaAr({ start: '2030-01-01', ingaendeBalans: { 1930: kr(5000), 2067: kr(-5000) } });
+    ar = K.laggTillUnderlag(ar, { id: 'eur', filnamn: 'flyg.pdf', dokumenttyp: 'kvitto', motpart: 'Flygbolaget', datum: '2030-07-06', belopp: 0, valuta: 'EUR', originalbelopp: kr(100), riktning: 'utgift', beskrivning: 'Flyg', foreslagetKonto: '5810' });
+    assert.equal(K.oppnaUnderlag(ar).length, 1, 'syns bland väntande underlag');
+    assert.equal(K.valutaText(ar.underlag[0]), '100,00 EUR');
+    ar = K.importeraBankrader(ar, [{ datum: '2030-11-16', text: 'Ers utlägg flyg', referens: '', belopp: kr(-1110), saldo: null }]).ar;
+    const f = K.forslagForBankrad(ar, ar.bankrader[0], [], { underlagIds: ['eur'], ungefar: true });
+    assert.deepEqual(json(f.rader), [{ konto: '1930', belopp: kr(-1110) }, { konto: '5810', belopp: kr(1110) }]);
+    assert.match(f.text, /100,00 EUR, kurs 11,10/);
+    ar = K.bokforKopplat(ar, { datum: f.datum, text: f.text, rader: f.rader, underlagKommentar: '' }, { bankradId: f.bankradId, underlagIds: f.underlagIds }).ar;
+    const u = ar.underlag[0];
+    assert.deepEqual([u.belopp, u.verifikation != null], [kr(1110), true]);
+    assert.equal(K.oppnaUnderlag(ar).length, 0);
+  });
+});
