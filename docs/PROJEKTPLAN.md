@@ -162,6 +162,10 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Regler lärs inte in av texter med bara allmänna bankord (swish, bankgiro, inbetalning, överföring via internet …), och sådana regler som redan finns kan tas bort med ett klick (från 1.56).
 - Förslag kan avfärdas med ett skäl (från 1.36). Avfärdade förslag sparas i bokföringsfilen med skäl, vem och när, föreslås inte igen och kan ångras. Vid "Börja om" följer de med reglerna.
 
+## Utländsk valuta (från version 1.59)
+
+- Underlag i utländsk valuta utan kronbelopp syns bland väntande underlag och i Koppla underlag. Kopplas de till en bankrad blir bankens belopp kronbeloppet, och kursen skrivs i verifikationens text.
+
 ## Rättelser (från version 1.58)
 
 - En rättad verifikation och dess rättelse räknas inte i avstämningen per månad, eftersom de tar ut varandra. Rättelsens datum är förvalt till originalets datum när perioden inte är låst.
