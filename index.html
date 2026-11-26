@@ -364,6 +364,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.62', datum: '2026-11-26',
+    nyheter: [
+      'Under Medlemsregister, Betalare: listan Medlemmar utan betalare, med förslag från Swish-rapporten (avsändare vars meddelanden nämner barnet). Koppla med ett klick; betalaren får avsändarens namn.',
+      'Barn som bara betalats via Fritidskortet märks, eftersom de inte behöver någon betalare förrän föräldern swishar.'
+    ]
+  },
+  {
     version: '1.61', datum: '2026-11-26',
     nyheter: [
       'Swish för flera barn: ett meddelande som "Anna & Bo Exempelsson" delas upp i ett namn per barn, och stämmer beloppet för alla föreslås hela fördelningen direkt.',
@@ -1913,6 +1920,26 @@ var VERSIONER = [
       return { namn: okand || hel, kandidater: k.medlemmar };
     }
     return { namn: okand, kandidater: ut };
+  }
+
+  // Aktiva medlemmar utan betalare, med förslag från Swish-rapporten: avsändare vars meddelanden nämner medlemmen.
+  function betalareForslag(reg) {
+    var harBetalare = {};
+    reg.betalare.forEach(function (b) { b.medlemmar.forEach(function (id) { harBetalare[id] = true; }); });
+    var perMedlem = {};
+    (reg.swish || []).forEach(function (x) {
+      if (!x.nummer || !x.meddelande) return;
+      swishKandidater(reg, x.meddelande).kandidater.forEach(function (id) {
+        if (harBetalare[id]) return;
+        var l = perMedlem[id] = perMedlem[id] || [];
+        var f = l.find(function (y) { return y.nummer === x.nummer; });
+        if (f) { f.antal++; if (!f.namn && x.namn) f.namn = x.namn; } else l.push({ nummer: x.nummer, namn: x.namn || '', antal: 1 });
+      });
+    });
+    return reg.medlemmar.filter(function (m) { return !m.avford && !harBetalare[m.id]; }).map(function (m) {
+      return { medlem: m.id, forslag: (perMedlem[m.id] || []).sort(function (a, b) { return b.antal - a.antal; }),
+        fritidskort: reg.betalningar.some(function (b) { return b.nyckel === FRITIDSKORT.nyckel && b.poster.some(function (p) { return p.medlem === m.id; }); }) };
+    });
   }
 
   // Medlemsbetalningar som hör till en verifikation (för att visa vem en avgift gällde, för den som får se registret).
@@ -4865,6 +4892,7 @@ var VERSIONER = [
     delaNamnlista: delaNamnlista,
     swishKandidater: swishKandidater,
     betalningarForVerifikation: betalningarForVerifikation,
+    betalareForslag: betalareForslag,
     interAvgiftText: interAvgiftText,
     fritidskortFordelning: fritidskortFordelning,
     fritidskortForslag: fritidskortForslag,
@@ -11428,9 +11456,27 @@ var VERSIONER = [
     return html;
   }
 
+  // Medlemmar som saknar betalare, med förslag från Swish-rapporten att koppla med ett klick.
+  function vyUtanBetalare(r) {
+    var lista = K.betalareForslag(r);
+    if (!lista.length) return '';
+    var skriv = !lasLage();
+    return '<details class="card"' + (lista.some(function (x) { return x.forslag.length; }) ? ' open' : '') + '><summary><strong>Medlemmar utan betalare (' + lista.length + ')</strong></summary>' +
+      '<p class="faint">Förslagen kommer från Swish-rapporten: avsändare vars meddelanden nämner medlemmen. Läs in rapporten under Bokföring, Läs in, för att få förslag.</p>' +
+      '<div class="scroll"><table class="kortlista"><tbody>' + lista.map(function (x) {
+        var m = medlemAv(x.medlem);
+        return '<tr><td><button class="tag knapp-tag" data-action="medlem-visa" data-id="' + esc(x.medlem) + '">' + esc(K.visaNamn(m)) + '</button>' +
+          (x.fritidskort ? ' <span class="faint">betalt via Fritidskortet</span>' : '') + '</td><td>' +
+          (x.forslag.length ? x.forslag.map(function (f) {
+            var text = (f.namn ? K.visningsnamn(f.namn) + ' ' : '') + '(' + K.visaMobilnummer(f.nummer) + ')' + (f.antal > 1 ? ', ' + f.antal + ' betalningar' : '');
+            return skriv ? '<button class="btn btn-secondary btn-small" style="margin:2px" data-action="betalare-forslag-koppla" data-m="' + esc(x.medlem) + '" data-nr="' + esc(f.nummer) + '" data-namn="' + esc(f.namn) + '">Koppla ' + esc(text) + '</button>' : esc(text);
+          }).join(' ') : '<span class="faint">inget förslag</span>') + '</td></tr>';
+      }).join('') + '</tbody></table></div></details>';
+  }
+
   function vyBetalare() {
     var r = reg();
-    var html = '<p class="muted">Ett Swish-nummer eller en bankgiroreferens som appen känner igen. Samma medlem kan ha flera betalare, till exempel båda föräldrarna, och en betalare kan betala för flera. Ge gärna betalaren ett namn, till exempel "Fritidskortet".</p>';
+    var html = vyUtanBetalare(r) + '<p class="muted">Ett Swish-nummer eller en bankgiroreferens som appen känner igen. Samma medlem kan ha flera betalare, till exempel båda föräldrarna, och en betalare kan betala för flera. Ge gärna betalaren ett namn, till exempel "Fritidskortet".</p>';
     if (!r.betalare.length) return html + '<p class="muted">Inga betalare ännu. De läggs till när du kopplar en betalning till en medlem.</p>';
     r.betalare.slice().sort(function (a, b) { return (a.namn || a.visning).localeCompare(b.namn || b.visning, 'sv'); }).forEach(function (b) {
       var n = esc(b.nyckel);
@@ -12581,6 +12627,14 @@ var VERSIONER = [
       if (!window.confirm('Ta bort ' + m.namn + ' ur medlemsregistret?')) return;
       sparaReg(K.taBortMedlem(reg(), t.dataset.id));
       render();
+    },
+    'betalare-forslag-koppla': function (t) {
+      var b = { nyckel: t.dataset.nr, visning: K.visaMobilnummer(t.dataset.nr), typ: 'swish' };
+      var r = K.kopplaBetalare(reg(), b, [t.dataset.m]);
+      var finns = K.hittaBetalare(r, b.nyckel);
+      if (finns && !finns.namn && t.dataset.namn) r = K.andraBetalare(r, b.nyckel, { namn: K.visningsnamn(t.dataset.namn) });
+      sparaReg(r);
+      visa(b.visning + ' är kopplad som betalare.');
     },
     'betalare-ta-bort': function (t) {
       if (!window.confirm('Ta bort betalaren? Registrerade betalningar finns kvar.')) return;
