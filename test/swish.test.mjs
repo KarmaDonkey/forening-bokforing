@@ -108,3 +108,22 @@ test('syskon i meddelandet föreslås båda, och betalningen hittas från verifi
   assert.equal(K.betalningarForVerifikation(reg, '2030', 85).length, 0);
   assert.equal(K.betalningarForVerifikation(reg, '2029', 84).length, 0);
 });
+
+test('medlemmar utan betalare får förslag från Swish-rapporten', () => {
+  let reg = K.tomtRegister();
+  for (const n of ['Anna Exempelsson', 'Bo Exempelsson', 'Cecilia Påhittad', 'Dan Testberg']) reg = K.laggTillMedlem(reg, { namn: n, kategori: 'barn' }).reg;
+  const [a, bo, c, d] = reg.medlemmar.map((m) => m.id);
+  reg = K.kopplaBetalare(reg, { nyckel: '+46700000009', visning: '070-000 00 09' }, [c]);
+  reg = K.registreraBetalning(reg, { datum: '2030-09-23', belopp: kr(550), termin: 'HT-30', nyckel: K.FRITIDSKORT.nyckel, poster: [{ medlem: d, typ: 'termin', belopp: kr(550) }] });
+  reg = K.laggTillSwish(reg, [
+    { datum: '2030-01-08', nummer: '+46700000001', namn: 'FÖRÄLDER EXEMPELSSON', meddelande: 'Anna & Bo Exempelsson', belopp: kr(2600) },
+    { datum: '2030-08-30', nummer: '+46700000001', namn: 'FÖRÄLDER EXEMPELSSON', meddelande: 'Anna Exempelsson HT', belopp: kr(1300) },
+    { datum: '2030-08-31', nummer: '+46700000002', namn: 'ANNAN FÖRÄLDER', meddelande: 'Anna Exempelsson', belopp: kr(500) },
+    { datum: '2030-09-01', nummer: '+46700000009', namn: 'PERSON PÅHITTAD', meddelande: 'Cecilia Påhittad', belopp: kr(1300) }], '2030-10-01').reg;
+  const f = K.betalareForslag(reg);
+  const for_ = (id) => f.find((x) => x.medlem === id);
+  assert.equal(for_(c), undefined, 'har redan betalare');
+  assert.deepEqual(json(for_(a).forslag), [{ nummer: '+46700000001', namn: 'FÖRÄLDER EXEMPELSSON', antal: 2 }, { nummer: '+46700000002', namn: 'ANNAN FÖRÄLDER', antal: 1 }]);
+  assert.deepEqual(json(for_(bo).forslag.map((x) => x.nummer)), ['+46700000001']);
+  assert.deepEqual(json([for_(d).forslag, for_(d).fritidskort]), [[], true]);
+});

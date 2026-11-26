@@ -160,6 +160,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Swedbanks kolumnnamn (Bokfdag, Avsändarnr) känns igen, och en fil som liknar en Swish-rapport läses aldrig som kontoutdrag. Originalfilerna (CSV/Excel) sparas i OneDrive: kontoutdrag under årets Bokföringsunderlag/Kontoutdrag, Swish-rapporter under Medlemsregister/Swish-rapporter (från 1.54).
 - Swish-rapportens avsändare och meddelande visas vid alla Swish-rader och under Att koppla. Tyder meddelandet på annat än en avgift (kläder, workshop, instrument, lån …) ges inget avgiftsförslag (från 1.55).
 - Swish-meddelanden med flera namn ("Anna & Bo Exempelsson") delas per barn, och stämmer beloppet för alla föreslås hela fördelningen. Verifikationens detaljer visar vem en medlemsavgift gällde och betalaren, hämtat från medlemsregistret och bara för den som får se registret (från 1.61).
+- Under Betalare listas medlemmar utan betalare, med förslag från Swish-rapporten (avsändare vars meddelanden nämner medlemmen) som kopplas med ett klick; medlemmar som bara betalats via Fritidskortet märks (från 1.62).
 - Regler lärs inte in av texter med bara allmänna bankord (swish, bankgiro, inbetalning, överföring via internet …), och sådana regler som redan finns kan tas bort med ett klick (från 1.56).
 - Förslag kan avfärdas med ett skäl (från 1.36). Avfärdade förslag sparas i bokföringsfilen med skäl, vem och när, föreslås inte igen och kan ångras. Vid "Börja om" följer de med reglerna.
 
