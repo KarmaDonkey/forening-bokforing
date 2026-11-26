@@ -82,3 +82,29 @@ test('meddelanden som gäller annat än avgifter känns igen', () => {
   for (const t of ['Exempel byxor stl 14', 'Workshop maj Barn Exempelsson', 'Abadá storlek M', 'T-shirt', 'Kläder till uppvisning', 'Lån 2']) assert.equal(K.interAvgiftText(t), true, t);
   for (const t of ['Barn Exempelsson', 'Terminsavgift VT 26', 'Familj - VT -26', 'Resterande efter fritidskort', '']) assert.equal(K.interAvgiftText(t), false, t);
 });
+
+test('ett meddelande med flera barn delas upp, och ett gemensamt efternamn gäller alla', () => {
+  assert.deepEqual(json(K.delaNamnlista('Anna & Bo Exempelsson')), ['Anna Exempelsson', 'Bo Exempelsson']);
+  assert.deepEqual(json(K.delaNamnlista('Anna och Bo Exempelsson')), ['Anna Exempelsson', 'Bo Exempelsson']);
+  assert.deepEqual(json(K.delaNamnlista('Anna + Bo Exempelsson')), ['Anna Exempelsson', 'Bo Exempelsson']);
+  assert.deepEqual(json(K.delaNamnlista('Anna + Bo')), ['Anna', 'Bo']);
+  assert.deepEqual(json(K.delaNamnlista('Anna Påhittad, Bo Exempelsson')), ['Anna Påhittad', 'Bo Exempelsson']);
+  assert.deepEqual(json(K.delaNamnlista('Barn Exempelsson')), ['Barn Exempelsson']);
+});
+
+test('syskon i meddelandet föreslås båda, och betalningen hittas från verifikationen', () => {
+  let reg = K.tomtRegister();
+  reg = K.sattTermin(reg, 'HT-30', { barn: kr(1300) });
+  reg.arsavgift = { vanlig: kr(500), funktionar: 0, ingar: true };
+  for (const n of ['Anna Exempelsson', 'Bo Exempelsson', 'Annan Person']) reg = K.laggTillMedlem(reg, { namn: n, kategori: 'barn' }).reg;
+  const [a, b] = reg.medlemmar.map((m) => m.id);
+  const k = K.swishKandidater(reg, 'Anna & Bo Exempelsson');
+  assert.deepEqual(json(k.kandidater), [a, b]);
+  const f = K.avgiftsforslag(reg, { datum: '2030-11-02', belopp: kr(2600), medlemIds: k.kandidater });
+  assert.equal(f.stammer, true);
+  assert.deepEqual(json(f.poster.map((p) => [p.typ, p.belopp])), [['termin', kr(800)], ['arsavgift', kr(500)], ['termin', kr(800)], ['arsavgift', kr(500)]]);
+  reg = K.registreraBetalning(reg, { datum: '2030-11-02', belopp: kr(2600), termin: 'HT-30', arId: '2030', ver: 84, nyckel: '+46700000001', poster: f.poster });
+  assert.equal(K.betalningarForVerifikation(reg, '2030', 84).length, 1);
+  assert.equal(K.betalningarForVerifikation(reg, '2030', 85).length, 0);
+  assert.equal(K.betalningarForVerifikation(reg, '2029', 84).length, 0);
+});
