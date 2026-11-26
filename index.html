@@ -364,6 +364,12 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.57', datum: '2026-11-26',
+    nyheter: [
+      'Rättelse: meddelandet under panelen "Vem gäller betalningen?" uppdateras medan du skriver, så att det inte står ett gammalt fel kvar när beloppen stämmer.'
+    ]
+  },
+  {
     version: '1.56', datum: '2026-11-26',
     nyheter: [
       'Rättelse: appen lär sig inte längre konteringsregler av texter med bara allmänna ord, till exempel "Swish" eller "Bankgiro inbetalning". En sådan regel gav samma konto åt alla Swish-inbetalningar.',
@@ -11007,12 +11013,15 @@ var VERSIONER = [
     var ok = summa === rad.belopp && poster.length > 0 && K.giltigtTerminId(u.termin);
     document.querySelectorAll('[data-avgsumma]').forEach(function (el) { if (el.dataset.avgsumma === id) el.innerHTML = summaText(summa, rad.belopp); });
     document.querySelectorAll('[data-action="avg-koppla"]').forEach(function (b) { if (b.dataset.id === id) b.disabled = !ok; });
-    document.querySelectorAll('[data-action="bokfor-rad"]').forEach(function (b) { if (b.dataset.id === id) b.disabled = !forslagMedVal(ar, rad).komplett; });
+    // Bokför-knappen och felmeddelandet under panelen följer det du skriver, så att inget gammalt fel står kvar.
+    var f = forslagMedVal(ar, rad);
+    document.querySelectorAll('[data-action="bokfor-rad"]').forEach(function (b) { if (b.dataset.id === id) b.disabled = !f.komplett; });
+    document.querySelectorAll('[data-avgfel]').forEach(function (el) { if (el.dataset.avgfel === id) { el.textContent = f.avgiftFel || ''; el.hidden = !f.avgiftFel; } });
   }
 
   function avgiftIInkorg(r, f) {
     if (r.belopp <= 0) return '';
-    if (avgiftUtkast[r.id]) return avgiftPanel(r, 'bokfor') + (f.avgiftFel ? '<p class="fel" style="margin:4px 0 0">' + esc(f.avgiftFel) + '</p>' : '');
+    if (avgiftUtkast[r.id]) return avgiftPanel(r, 'bokfor') + '<p class="fel" style="margin:4px 0 0" data-avgfel="' + esc(r.id) + '"' + (f.avgiftFel ? '' : ' hidden') + '>' + esc(f.avgiftFel || '') + '</p>';
     var namn = function (poster) {
       var ut = [];
       poster.forEach(function (p) { var m = medlemAv(p.medlem); if (m && ut.indexOf(m.namn) < 0) ut.push(m.namn); });
