@@ -364,6 +364,12 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.60', datum: '2026-11-26',
+    nyheter: [
+      'Underlag i utländsk valuta: verifikationens text får alltid originalbelopp och kurs, också när kronbeloppet skrivits in för hand, och kursen visas i listan Underlag som väntar på betalning.'
+    ]
+  },
+  {
     version: '1.59', datum: '2026-11-26',
     nyheter: [
       'Rättelse: kvitton och fakturor i utländsk valuta utan belopp i kronor syns nu under Underlag som väntar på betalning (med rutan "Ange SEK") och i Koppla underlag på bankraderna.',
@@ -2484,6 +2490,9 @@ var VERSIONER = [
         ? [us[0].motpart, us[0].beskrivning].filter(Boolean).join(': ')
         : bankrad.text + ' (' + us.length + ' underlag)';
       if (avrundning) text += ' (avrundat ' + formatBelopp(Math.abs(avrundning)) + ' kr)';
+      // Underlag i utländsk valuta: originalbelopp och kurs i texten, så att det syns hur kronbeloppet räknats fram.
+      var valuta = us.filter(function (u) { return u.valuta && u.originalbelopp; }).map(function (u) { return valutaText(u, u.belopp); });
+      if (valuta.length) text += ' (' + valuta.join('; ') + ')';
       kalla = 'underlag';
     } else if (!us.length && (motrad = overforingFor(ar, bankrad))) {
       // Samma belopp med omvänt tecken på ett annat eget bankkonto: en överföring mellan kontona.
@@ -8135,7 +8144,7 @@ var VERSIONER = [
         html += '<tr><td class="nowrap" data-etikett="Datum">' + esc(u.datum || '') + (u.forfallodatum ? '<div class="faint">förfaller ' + esc(u.forfallodatum) + '</div>' : '') + '</td>' +
           '<td data-etikett="Underlag"><div>' + esc(u.motpart) + (u.utlagg ? ' <span class="tag">utlägg ' + esc(u.utlaggPerson) + '</span>' : '') + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') +
           (u.utlagg && u.kvittobelopp !== u.belopp ? '<div class="faint">Kvitto ' + kr(u.kvittobelopp) + ' kr' + (u.privat ? ', privat: ' + esc(u.privat) : '') + '</div>' : '') + underlagChip(u) +
-          (u.valuta ? '<div class="faint">' + esc(u.valuta) + ' ' + (u.originalbelopp != null ? kr(u.originalbelopp) : '') + '</div>' : '') + '</div></td>' +
+          (u.valuta ? '<div class="faint">' + esc(K.valutaText(u, u.belopp) || u.valuta) + '</div>' : '') + '</div></td>' +
           '<td class="num" data-etikett="Belopp"><div><input class="num" style="width:110px"' + (K.valutaUtanSek(u) ? ' placeholder="Ange SEK"' : '') + ' data-underlag="belopp" data-id="' + esc(u.id) + '" value="' + (u.belopp ? kr(u.belopp) : '') + '" aria-label="Belopp i kronor">' +
           '<div class="faint">' + (u.riktning === 'intakt' ? 'intäkt' : 'utgift') + '</div></div></td>' +
           '<td data-etikett="Konto"><div><input list="kontolista" style="width:120px" data-underlag="foreslagetKonto" data-id="' + esc(u.id) + '" value="' + esc(u.foreslagetKonto || '') + '" aria-label="Konto">' +

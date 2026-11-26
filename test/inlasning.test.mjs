@@ -414,3 +414,15 @@ describe('utländsk valuta', () => {
     assert.equal(K.oppnaUnderlag(ar).length, 0);
   });
 });
+
+describe('utländsk valuta med kronbelopp', () => {
+  test('kursen kommer med i texten när kronbeloppet är ifyllt för hand', () => {
+    let ar = K.skapaAr({ start: '2030-01-01', ingaendeBalans: { 1930: kr(5000), 2067: kr(-5000) } });
+    ar = K.laggTillUnderlag(ar, { id: 'eur', filnamn: 'flyg.pdf', dokumenttyp: 'kvitto', motpart: 'Flygbolaget', datum: '2030-07-06', belopp: kr(1110), valuta: 'EUR', originalbelopp: kr(100), riktning: 'utgift', beskrivning: 'Flyg', foreslagetKonto: '5810' });
+    ar = K.importeraBankrader(ar, [{ datum: '2030-07-20', text: 'Ers utlägg flyg', referens: '', belopp: kr(-1110), saldo: null }]).ar;
+    const f = K.forslagForBankrad(ar, ar.bankrader[0], []);
+    assert.deepEqual(json(f.underlagIds), ['eur']);
+    assert.equal(f.text, 'Flygbolaget: Flyg (100,00 EUR, kurs 11,10)');
+    assert.equal(K.valutaText(ar.underlag[0], ar.underlag[0].belopp), '100,00 EUR, kurs 11,10');
+  });
+});
