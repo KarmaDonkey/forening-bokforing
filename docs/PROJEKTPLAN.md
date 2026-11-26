@@ -165,6 +165,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 ## Utländsk valuta (från version 1.59)
 
 - Underlag i utländsk valuta utan kronbelopp syns bland väntande underlag och i Koppla underlag. Kopplas de till en bankrad blir bankens belopp kronbeloppet, och kursen skrivs i verifikationens text.
+- Texten får originalbelopp och kurs även när kronbeloppet är ifyllt för hand, och kursen visas i listan (från 1.60).
 
 ## Rättelser (från version 1.58)
 
