@@ -364,6 +364,13 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.58', datum: '2026-11-26',
+    nyheter: [
+      'Avstämningen mot banken per månad räknar en rättad verifikation och dess rättelse som att de tar ut varandra, så att en rättelse med senare datum inte ger skillnad i månaderna däremellan.',
+      'Rätta: datumet för rättelsen är förvalt till samma dag som verifikationen som rättas, om den perioden inte är låst.'
+    ]
+  },
+  {
     version: '1.57', datum: '2026-11-26',
     nyheter: [
       'Rättelse: meddelandet under panelen "Vem gäller betalningen?" uppdateras medan du skriver, så att det inte står ett gammalt fel kvar när beloppen stämmer.'
@@ -1951,9 +1958,22 @@ var VERSIONER = [
   }
 
   // Avstämning månad för månad: bankens sista saldo i varje månad mot bokfört saldo samma dag.
+  // Verifikationer som rättats och deras rättelser tar ut varandra. I avstämningen per månad räknas ingen av dem,
+  // så att en rättelse som fått ett senare datum inte ger skillnad i månaderna däremellan.
+  function rattadePar(ar) {
+    var par = {};
+    ar.verifikationer.forEach(function (v) { if (v.rattar != null) { par[v.rattar] = true; par[v.nr] = true; } });
+    return par;
+  }
+
   function bankavstamningPerManad(ar, konto) {
     konto = konto || '1930';
     var rader = (ar.bankrader || []).filter(function (r) { return r.konto === konto; });
+    var par = rattadePar(ar);
+    var utanPar = function (tom) {
+      return ar.verifikationer.filter(function (v) { return par[v.nr] && v.datum <= tom; })
+        .reduce(function (x, v) { return x + v.rader.reduce(function (y, r) { return r.konto === konto ? y + r.belopp : y; }, 0); }, 0);
+    };
     var ut = [];
     var m = ar.start.slice(0, 7);
     var sista = ar.slut.slice(0, 7);
@@ -1965,7 +1985,7 @@ var VERSIONER = [
         var s = medSaldo[medSaldo.length - 1];
         post.datum = s.datum;
         post.bankSaldo = s.saldo;
-        post.bokfortSaldo = saldon(ar, { tom: s.datum })[konto] || 0;
+        post.bokfortSaldo = (saldon(ar, { tom: s.datum })[konto] || 0) - utanPar(s.datum);
         post.skillnad = post.bokfortSaldo - s.saldo;
       }
       ut.push(post);
@@ -1973,6 +1993,15 @@ var VERSIONER = [
       m = d.toISOString().slice(0, 7);
     }
     return ut;
+  }
+
+  // Förvalt datum för en rättelse: samma dag som verifikationen som rättas, om den perioden inte är låst. Annars idag.
+  function rattelseDatum(ar, nr, idag) {
+    var v = ar.verifikationer.find(function (x) { return x.nr === nr; });
+    if (!v) return idag;
+    var last = ar.lastTom && v.datum <= ar.lastTom;
+    var d = last ? idag : v.datum;
+    return d < ar.start ? ar.start : d > ar.slut ? ar.slut : d;
   }
 
   // Det som inte stämmer mellan bokföringen och kontoutdraget.
@@ -4797,6 +4826,7 @@ var VERSIONER = [
     oppnaBankrader: oppnaBankrader,
     bankavstamning: bankavstamning,
     bankavstamningPerManad: bankavstamningPerManad,
+    rattelseDatum: rattelseDatum,
     bankavvikelser: bankavvikelser,
     hittaRegel: hittaRegel,
     larRegel: larRegel,
@@ -11869,7 +11899,8 @@ var VERSIONER = [
     'ratta': function (t) {
       var ar = aktivt();
       var nr = Number(t.dataset.nr);
-      var datum = window.prompt('Datum för rättelsen (ÅÅÅÅ-MM-DD):', standardDatum(ar));
+      // Förvalt: samma dag som det som rättas (om perioden inte är låst), så att rättelsen hamnar i rätt månad.
+      var datum = window.prompt('Datum för rättelsen (ÅÅÅÅ-MM-DD). Förvalt är samma dag som verifikationen som rättas:', K.rattelseDatum(ar, nr, idag()));
       if (!datum) return;
       var ut = K.rattelse(ar, nr, { datum: datum.trim(), registrerad: new Date().toISOString() });
       setAktivt(ut.ar);

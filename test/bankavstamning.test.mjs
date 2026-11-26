@@ -58,3 +58,17 @@ test('saldofel i utdraget och inget utdrag alls', () => {
   ]).ar;
   assert.equal(K.bankavvikelser(ar).saldofel.length, 1);
 });
+
+test('en rättelse med senare datum ger ingen skillnad i månaderna däremellan', () => {
+  let ar = aret();
+  const v1 = ar.verifikationer.find((v) => v.text === 'A').nr;
+  assert.equal(K.rattelseDatum(ar, v1, '2030-11-26'), '2030-01-10', 'förvalt: samma dag som det som rättas');
+  assert.equal(K.rattelseDatum(Object.assign({}, ar, { lastTom: '2030-06-30' }), v1, '2030-11-26'), '2030-11-26', 'låst period: idag');
+  // Rättelsen dateras i november, och betalningen bokförs om på rätt konto med originaldatum.
+  ar = K.rattelse(ar, v1, { datum: '2030-11-26' }).ar;
+  const rad = ar.bankrader.find((r) => r.text === 'Swish A');
+  assert.equal(rad.verifikation, null, 'bankraden är fri igen');
+  ar = K.bokforKopplat(ar, { datum: rad.datum, text: 'A rätt', underlagKommentar: 'x', rader: [{ konto: '1930', belopp: kr(500) }, { konto: '3990', belopp: kr(-500) }] }, { bankradId: rad.id }).ar;
+  const m = K.bankavstamningPerManad(ar);
+  assert.equal(m[0].skillnad, 0, 'januari stämmer');
+});
