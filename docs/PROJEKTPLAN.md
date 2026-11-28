@@ -202,6 +202,8 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - Räkenskapsåren i årsväljaren står med det senaste överst. Plätts logotyp har verktygstipset med appens mening och öppnar Om Plätt (från 1.75).
 
+- "✦ AI-hjälp" i sidomenyn och länkarna "Till AI-inställningen" öppnar År och arkiv vid rutan AI-hjälp (från 1.76).
+
 ## Väntar på dig (från version 1.69)
 
 - Överst i översikten för den som ser styrelsens material: protokoll och årsrapporter som väntar på personens underskrift, personens egna uppgifter (ansvarig matchas mot namnet, t.ex. "Anna" eller "Anna E") med sista datum, och nästa planerade möte. Beräkningen görs av `vantarPaMig` i kärnan. I övningsläget, där ingen är inloggad, visas det som väntar på den första som inte har skrivit under.
