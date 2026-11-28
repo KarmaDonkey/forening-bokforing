@@ -70,3 +70,51 @@ test('styrelsens data har en lista för stadgar', () => {
   assert.deepEqual(json(K.tomStyrelse().stadgar), []);
   assert.equal(K.normaliseraStyrelse({ stadgar: [{ id: 'st1' }] }).stadgar.length, 1);
 });
+
+test('utkast och ändringar jämfört med gällande stadgar', () => {
+  const st = K.normaliseraStadgar(svarStruktur, { id: 'st1' });
+  const u = K.nyttStadgeutkast(st);
+  assert.equal(u.utkast, true);
+  assert.equal(u.baseradPa, 'st1');
+  assert.deepEqual(json(K.stadgeandringar(st, u)), [], 'ett nytt utkast har inga ändringar');
+  u.paragrafer[1].text = 'Föreningen har sitt säte i Stockholm.';
+  u.paragrafer.splice(2, 1);
+  u.paragrafer.push({ nr: '3', rubrik: 'Barnkonventionen', text: 'Föreningen arbetar utifrån barnkonventionen.', ursprung: null });
+  const a = K.stadgeandringar(st, u);
+  assert.deepEqual(json(a.map((x) => x.typ + ' ' + x.nr)), ['andrad 2', 'ny 3', 'borttagen 3']);
+  assert.equal(a[0].fore, 'Föreningen har sitt säte i Stockholms kommun.');
+  const t = K.stadgeandringarText(a, st);
+  assert.match(t, /3 ändringar/);
+  assert.match(t, /§ 2 Säte\nNuvarande lydelse:\nFöreningen har sitt säte i Stockholms kommun\.\nFöreslagen lydelse:\nFöreningen har sitt säte i Stockholm\./);
+  assert.match(t, /Ny paragraf § 3 Barnkonventionen/);
+  assert.match(t, /Paragraf § 3 Firmatecknare tas bort/);
+});
+
+test('Word-dokumenten är giltig XML med texten, och specialtecken skyddas', () => {
+  const st = K.normaliseraStadgar(svarStruktur, { id: 'st1' });
+  const x = K.stadgarWordXml(Object.assign({}, st, { titel: 'Stadgar för A & B <test>' }), 'Antagna 2027');
+  assert.match(x, /^<\?xml/);
+  assert.match(x, /Stadgar för A &amp; B &lt;test&gt;/);
+  assert.match(x, /§ 2 Säte/);
+  assert.match(x, /<w:sectPr>/);
+  assert.equal((x.match(/<w:p>/g) || []).length, (x.match(/<\/w:p>/g) || []).length);
+  const u = K.nyttStadgeutkast(st); u.paragrafer[0].text = 'Ny text.';
+  const j = K.jamforelseWordXml(K.stadgeandringar(st, u), st);
+  assert.match(j, /w:orient="landscape"/);
+  assert.match(j, /Nuvarande lydelse/);
+  assert.match(j, /Ny text\./);
+  assert.match(K.WORD_DELAR['[Content_Types].xml'], /word\/document\.xml/);
+});
+
+test('frågan till stadgarna innehåller stadgarna och frågan', () => {
+  const st = K.normaliseraStadgar(svarStruktur, { id: 'st1' });
+  const u = K.stadgeFragaUppdrag(st, 'Var har föreningen sitt säte?');
+  assert.match(u.text, /§ 2 Säte/);
+  assert.match(u.text, /Fråga: Var har föreningen sitt säte\?/);
+  assert.deepEqual(json(u.schema.required), ['svar', 'paragrafer']);
+});
+
+test('granskningen ber om hela paragrafens nya lydelse', () => {
+  const st = K.normaliseraStadgar(svarStruktur, { id: 'st1' });
+  assert.match(K.granskningsUppdrag(st, K.kravlista('grund')).system, /hela paragrafens nya text/);
+});
