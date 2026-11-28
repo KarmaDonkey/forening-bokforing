@@ -282,6 +282,7 @@
   .ai-status { text-decoration: none; color: var(--ink-soft); font-weight: 600; }
   .ai-status.av { color: var(--ink-faint); font-weight: 400; }
   .ai-kort { border-color: var(--guld); }
+  .ovning-banner .btn-secondary { background: #fff; color: #2B2F3A; border-color: rgba(43, 47, 58, 0.18); }
   .ai-kort textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; line-height: 1.5; }
   .ai-utkast-par { padding: 8px 0; border-top: 1px solid var(--hairline); }
   .ai-utkast-par div { margin-top: 2px; }
@@ -344,7 +345,7 @@
   @media (max-width: 700px) {
     /* Kompakt toppfält: Plätts plätt, föreningen och året på en rad. */
     .app { display: block; }
-    .sidomeny { position: relative; height: auto; width: auto; overflow: visible; border-right: 0; border-bottom: 1px solid var(--hairline); padding: calc(10px + env(safe-area-inset-top)) 14px 8px; }
+    .sidomeny { position: sticky; top: calc(-1 * var(--topphojd, 0px)); z-index: 40; height: auto; width: auto; overflow: visible; border-right: 0; border-bottom: 1px solid var(--hairline); padding: calc(10px + env(safe-area-inset-top)) 14px 8px; }
     header { flex-direction: row; align-items: center; gap: 10px; }
     header .platt-marke { padding: 0; }
     .platt-marke > span { display: none; }
@@ -500,6 +501,14 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.74', datum: '2026-11-28',
+    nyheter: [
+      'På telefonen stannar undermenyn (t.ex. Läs in, Verifikationer …) kvar högst upp när man rullar ner.',
+      'Diagrammet i översikten visas först när det finns intäkter eller kostnader.',
+      'Knapparna i övningslägets gula ruta syns tydligt även i mörkt läge.'
+    ]
+  },
   {
     version: '1.73', datum: '2026-11-28',
     nyheter: [
@@ -8786,6 +8795,14 @@ var VERSIONER = [
       }
     });
     markeraNavSlut();
+    sattTopphojd();
+  }
+  // På telefon rullar toppfältet bort men undermenyn stannar kvar högst upp.
+  function sattTopphojd() {
+    var sm = document.querySelector('.sidomeny'), un = document.getElementById('undernav');
+    if (!sm || !un) return;
+    var h = window.innerWidth <= 700 && un.offsetHeight ? sm.offsetHeight - un.offsetHeight : 0;
+    document.documentElement.style.setProperty('--topphojd', h + 'px');
   }
   function markeraNavSlut() {
     var nav = document.getElementById('undernav');
@@ -10508,7 +10525,8 @@ var VERSIONER = [
     var max = Math.max(1, Math.max.apply(null, manader.map(function (x) { return Math.max(x.intakter, x.kostnader); })));
     var hojd = function (b) { return Math.max(b > 0 ? 3 : 0, Math.round(110 * Math.max(0, b) / max)); };
     var MAN = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
-    var diagram = manader.length ? '<div class="card manadskort"><h3 style="margin-top:0">Intäkter och kostnader per månad</h3>' +
+    var tomt = !manader.some(function (x) { return x.intakter || x.kostnader; });
+    var diagram = manader.length && !tomt ? '<div class="card manadskort"><h3 style="margin-top:0">Intäkter och kostnader per månad</h3>' +
       '<div class="manadsdiagram" role="img" aria-label="' + esc(manader.map(function (x) { return MAN[Number(x.manad.slice(5, 7)) - 1] + ': intäkter ' + kr(x.intakter) + ' kr, kostnader ' + kr(x.kostnader) + ' kr'; }).join('; ')) + '">' +
       manader.map(function (x) {
         return '<div class="manad"><div class="staplar"><span class="intakt" style="height:' + hojd(x.intakter) + 'px" title="Intäkter ' + kr(x.intakter) + ' kr"></span>' +
@@ -11342,7 +11360,7 @@ var VERSIONER = [
 
   function ovningsBanner() {
     if (!OVNING) return '';
-    return '<div class="card" style="background:#fff3c4;color:#5a4500;border-left:4px solid var(--guld)"><strong>ÖVNINGSLÄGE</strong> – påverkar inte den riktiga bokföringen. Inget sparas i OneDrive. ' +
+    return '<div class="card ovning-banner" style="background:#fff3c4;color:#5a4500;border-left:4px solid var(--guld)"><strong>ÖVNINGSLÄGE</strong> – påverkar inte den riktiga bokföringen. Inget sparas i OneDrive. ' +
       '<span class="row" style="display:inline-flex;margin-left:6px"><button class="btn btn-secondary btn-small" data-action="ovning-aterstall">Återställ övningen</button>' +
       '<button class="btn btn-secondary btn-small" data-action="ovning-avsluta">Avsluta övningsläge</button></span></div>';
   }
@@ -14298,7 +14316,7 @@ var VERSIONER = [
     document.querySelectorAll('#narvaro .avatar.oppen').forEach(function (x) { if (x !== a) x.classList.remove('oppen'); });
     if (a) a.classList.toggle('oppen');
   });
-  window.addEventListener('resize', function () { skalaForhandsvisningar(); markeraNavSlut(); });
+  window.addEventListener('resize', function () { skalaForhandsvisningar(); markeraNavSlut(); sattTopphojd(); });
 
   // Hämta igen när appen kommer tillbaka i fokus, så att ändringar från en annan enhet syns.
   document.addEventListener('visibilitychange', function () {
