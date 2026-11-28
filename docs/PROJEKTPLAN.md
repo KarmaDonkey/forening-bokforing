@@ -242,6 +242,14 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Rollerna man hade senast sparas per person på enheten (`forening-bokforing:sedda-roller`). Första gången sparas läget tyst.
 - Får man en ny roll visas ett kort i översikten med en kort genomgång (`ROLLSTEG`, `nyaRollsteg`): bara stegen för den nya rollen, utan steg som de tidigare rollerna redan hade. Påminn mig senare (tre dagar) eller Jag kan det redan. En förlorad roll ger inget kort.
 
+## Testversion och huvudversion (från version 1.87)
+
+- Två kanaler på samma webbplats. `test/index.html` (…/test/) är testversionen där alla ändringar hamnar först, med testband och versionsnummer som `1.88-test.1`. `index.html` i roten är huvudversionen och ändras bara när en version släpps till alla.
+- Kanalen avgörs av adressen (`KANAL`). Testversionen sparar i webbläsaren under egna nycklar (`forening-bokforing-test:` och en egen IndexedDB), så att kanalerna inte påverkar varandra. Den ska användas med en testförening eller i övningsläget, inte med föreningens riktiga mapp.
+- Huvudversionen visar bara släppta versioner (`SYNLIGA_VERSIONER`). Ett test kontrollerar att roten aldrig har en testversion överst.
+- Appregistreringen behöver omdirigeringsadressen …/forening-bokforing/test/ för inloggning i testversionen.
+- De automatiska testerna ligger i `tester/` och läser `test/index.html`.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.

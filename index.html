@@ -336,6 +336,8 @@
   .km-ny { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
   .km-ny textarea { flex: 1; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 10px; padding: 8px 10px; }
   tr.kommentar-rad td { background: var(--bg); }
+  .test-band { position: relative; z-index: 60; padding: 6px 16px; background: repeating-linear-gradient(-45deg, #C2410C, #C2410C 12px, #B23A0A 12px, #B23A0A 24px); color: #fff; font-size: 13px; text-align: center; }
+  .test-band a { color: #fff; text-decoration: underline; }
   .om-slogan { font-size: 18px; font-weight: 600; margin-top: 0; }
   .ovning-banner .btn-secondary { background: #fff; color: #2B2F3A; border-color: rgba(43, 47, 58, 0.18); }
   .ai-kort textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; line-height: 1.5; }
@@ -569,6 +571,12 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.87', datum: '2026-11-28',
+    nyheter: [
+      'Plätt har fått en testversion på en egen adress (…/test/), där nya funktioner provas innan de släpps till alla. Huvudversionen ändras bara när en ny version släpps.'
+    ]
+  },
   {
     version: '1.86', datum: '2026-11-28',
     nyheter: [
@@ -6328,13 +6336,19 @@ var VERSIONER = [
 (function () {
   'use strict';
   var K = window.Karna;
+  // Kanal: /test/ är testversionen där varje ändring hamnar först; roten är huvudversionen som alla använder.
+  // Testversionen sparar allt i webbläsaren under egna nycklar, så att de två inte påverkar varandra.
+  var KANAL = /\/test\/(index\.html)?$/.test(location.pathname) ? 'test' : 'skarp';
+  var LS = KANAL === 'test' ? 'forening-bokforing-test:' : 'forening-bokforing:';
+  // Huvudversionen visar bara de versioner som släppts till alla; testversionen visar alla.
+  var SYNLIGA_VERSIONER = KANAL === 'test' ? VERSIONER : VERSIONER.filter(function (v) { return !/-test/.test(v.version); });
   // Övningsläge (?ovning i adressen): en egen kopia i webbläsaren, aldrig kopplad till OneDrive.
   var OVNING = /[?&]ovning\b/.test(location.search);
-  var LAGRING = OVNING ? 'forening-bokforing:ovning:v1' : 'forening-bokforing:v1';
-  var RIKTIG_LAGRING = 'forening-bokforing:v1';
+  var LAGRING = OVNING ? LS + 'ovning:v1' : LS + 'v1';
+  var RIKTIG_LAGRING = LS + 'v1';
   // Medlemsregistret sparas för sig, i webbläsaren och i en egen mapp i OneDrive, aldrig i bokföringsfilen.
-  var REG_LAGRING = OVNING ? 'forening-bokforing:ovning:medlemsregister' : 'forening-bokforing:medlemsregister';
-  var RIKTIG_REG_LAGRING = 'forening-bokforing:medlemsregister';
+  var REG_LAGRING = OVNING ? LS + 'ovning:medlemsregister' : LS + 'medlemsregister';
+  var RIKTIG_REG_LAGRING = LS + 'medlemsregister';
   var REGFIL = 'Medlemsregister.json';
   // Appens egen mapp innehåller två undermappar: bokföringen (delas med revisorn) och medlemsregistret (delas inte).
   // Från 1.26 heter mapparna Bokföring, Medlemsregister och Styrelsearbete, samlade i en mapp (t.ex. Föreningsadministration).
@@ -6348,7 +6362,7 @@ var VERSIONER = [
   var GENVAG = 'Öppna appen.url';
   var senastRegJson = null;
   // Styrelsens material: egen mapp i OneDrive (Styrelsen) och egen lagring i webbläsaren.
-  var STYR_LAGRING = OVNING ? 'forening-bokforing:ovning:styrelsen' : 'forening-bokforing:styrelsen';
+  var STYR_LAGRING = OVNING ? LS + 'ovning:styrelsen' : LS + 'styrelsen';
   var STYRFIL = 'Styrelsen.json';
   var UPPDRAGFIL = 'Förtroendeuppdrag.json';
   var PROTOKOLLMAPP = 'Undertecknade protokoll';
@@ -6358,8 +6372,8 @@ var VERSIONER = [
   var styrVy = 'moten';
   var oppetMote = null;
 
-  var NYCKEL = 'forening-bokforing:claude-nyckel';
-  var NYCKEL_UTGAR = 'forening-bokforing:claude-nyckel-utgar';
+  var NYCKEL = LS + 'claude-nyckel';
+  var NYCKEL_UTGAR = LS + 'claude-nyckel-utgar';
   var nyckelAvvisad = false;
   var visaNyckelForm = false;
   var SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.4.0/+esm';
@@ -6531,7 +6545,7 @@ var VERSIONER = [
 
   // ---------- Filer (sparas i webbläsarens IndexedDB tills OneDrive är på plats) ----------
 
-  var FILDB = 'forening-bokforing-filer';
+  var FILDB = KANAL === 'test' ? 'forening-bokforing-test-filer' : 'forening-bokforing-filer';
   function oppnaDb(namn) {
     return new Promise(function (ok, fel) {
       var r = indexedDB.open(namn || (OVNING ? FILDB + '-ovning' : FILDB), 1);
@@ -6688,7 +6702,7 @@ var VERSIONER = [
     }
   };
   // Personliga uppgifter för de andra tjänsterna (nyckel, Azure-resurs, modell). Sparas bara i den här webbläsaren.
-  var AI_KONFIG = 'forening-bokforing:ai-tjanster';
+  var AI_KONFIG = LS + 'ai-tjanster';
   function aiKonfig() { try { return JSON.parse(localStorage.getItem(AI_KONFIG) || '{}') || {}; } catch (e) { return {}; } }
   function sparaAiKonfig(k) { try { localStorage.setItem(AI_KONFIG, JSON.stringify(k)); } catch (e) { throw new Error('Uppgifterna kunde inte sparas i webbläsaren.'); } }
   function aiKonfigurerad(t) {
@@ -6949,7 +6963,7 @@ var VERSIONER = [
   document.addEventListener('input', function (e) { if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-at')) visaAt(e.target); });
 
   // ---------- Välkommen till Plätt ----------
-  var VALKOMMEN = 'forening-bokforing:valkommen';
+  var VALKOMMEN = LS + 'valkommen';
   function valkommenLage() { try { return JSON.parse(localStorage.getItem(VALKOMMEN) || 'null') || { status: 'ny' }; } catch (e) { return { status: 'ny' }; } }
   function sattValkommen(x) { try { localStorage.setItem(VALKOMMEN, JSON.stringify(x)); } catch (e) { /* tomt */ } }
   function visaValkommen() { var v = valkommenLage(); return v.status === 'ny' || (v.status === 'senare' && (!v.till || v.till <= idag())); }
@@ -6979,7 +6993,7 @@ var VERSIONER = [
   }
   // ---------- Ny roll ----------
   // Rollerna man hade senast sparas per person på enheten. Får man en ny roll visas ett kort med det som är nytt.
-  var SEDDA_ROLLER = 'forening-bokforing:sedda-roller';
+  var SEDDA_ROLLER = LS + 'sedda-roller';
   function seddaRoller() { try { return JSON.parse(localStorage.getItem(SEDDA_ROLLER) || '{}') || {}; } catch (e) { return {}; } }
   function sparaSeddaRoller(x) { try { var a = seddaRoller(); if (x) a[mig()] = x; else delete a[mig()]; localStorage.setItem(SEDDA_ROLLER, JSON.stringify(a)); } catch (e) { /* tomt */ } }
   function rollbyteLage() {
@@ -7056,7 +7070,7 @@ var VERSIONER = [
 
   // ---------- Kommentarer och länkar ----------
   var kommentarOppen = null;
-  var KM_SEDD = 'forening-bokforing:kommentarer-sedda';
+  var KM_SEDD = LS + 'kommentarer-sedda';
   function kommentarerSedda() { try { return localStorage.getItem(KM_SEDD) || ''; } catch (e) { return ''; } }
   function appLank() { return location.origin + location.pathname; }
   function kommentarTrad(typ, id) {
@@ -7420,13 +7434,13 @@ var VERSIONER = [
   // Inloggning med Microsoft-konto (OAuth 2.0 med PKCE, ingen server behövs) och Microsoft Graph.
   // Bokföringen sparas som en fil i föreningens mapp; underlagen som vanliga filer i årsmapparna.
 
-  var OD_NYCKEL = 'forening-bokforing:onedrive';
+  var OD_NYCKEL = LS + 'onedrive';
   // Privat Microsoft-konto (standard) eller föreningens jobb- eller skolkonto i Microsoft 365 (od.kontotyp 'forening').
   function odAuth() { return K.odAuktoritet(od.kontotyp); }
   // .All behövs för att läsa och skriva i mappar som någon annan har delat (revisor, styrelse, bokförare).
   var OD_OMFANG = 'Files.ReadWrite.All offline_access User.Read';
   // Mejl direkt från appen är ett personligt val: då begärs också behörigheten att skicka e-post från den egna brevlådan.
-  var MEJL_DIREKT = 'forening-bokforing:mejl-direkt';
+  var MEJL_DIREKT = LS + 'mejl-direkt';
   function mejlDirekt() { try { return localStorage.getItem(MEJL_DIREKT) === '1'; } catch (e) { return false; } }
   function sattMejlDirekt(pa) { try { if (pa) localStorage.setItem(MEJL_DIREKT, '1'); else localStorage.removeItem(MEJL_DIREKT); } catch (e) { /* tomt */ } }
   function odOmfang() { return OD_OMFANG + (mejlDirekt() ? ' Mail.Send' : ''); }
@@ -7442,8 +7456,8 @@ var VERSIONER = [
   var JSZIP_URL = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
   var XLSX_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
   var HTML2CANVAS_URL = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-  var NYCKEL_ANDRAD = 'forening-bokforing:claude-nyckel-andrad';
-  var INBJUDAN = 'forening-bokforing:inbjudan';
+  var NYCKEL_ANDRAD = LS + 'claude-nyckel-andrad';
+  var INBJUDAN = LS + 'inbjudan';
   var od = { clientId: null, refreshToken: null, konto: null, mapp: null, lage: null, eTag: null, senast: null, smutsig: false };
   var odNu = { token: null, utgar: 0, status: '', fel: null, konflikt: false, synkar: false, igen: false, inloggningKravs: false, timer: null, senastHamtat: 0, mappar: {} };
 
@@ -7486,19 +7500,19 @@ var VERSIONER = [
     var verifierare = slumptext(64);
     var utmaning = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifierare)));
     var tillstand = slumptext(24);
-    sessionStorage.setItem('forening-bokforing:inloggning', JSON.stringify({ verifierare: verifierare, tillstand: tillstand, tyst: !!tyst, syfte: avs ? 'avsandare' : '' }));
+    sessionStorage.setItem(LS + 'inloggning', JSON.stringify({ verifierare: verifierare, tillstand: tillstand, tyst: !!tyst, syfte: avs ? 'avsandare' : '' }));
     var p = new URLSearchParams({
       client_id: od.clientId, response_type: 'code', redirect_uri: omdirigering(), response_mode: 'query',
       scope: avs ? K.AVSANDARE_OMFANG : odOmfang(), code_challenge: utmaning, code_challenge_method: 'S256', state: tillstand
     });
     if (avs) { p.set('prompt', 'select_account'); if (avsandare.konto) p.set('login_hint', avsandare.konto); }
-    if (tyst) { p.set('prompt', 'none'); try { localStorage.setItem('forening-bokforing:tyst-inloggning', String(Date.now())); } catch (e) { /* tomt */ } }
+    if (tyst) { p.set('prompt', 'none'); try { localStorage.setItem(LS + 'tyst-inloggning', String(Date.now())); } catch (e) { /* tomt */ } }
     location.assign((avs ? K.odAuktoritet(avsandare.kontotyp) : odAuth()) + '/oauth2/v2.0/authorize?' + p.toString());
   }
 
   // ---------- Föreningens avsändaradress ----------
   // Inloggningen sparas bara på den här enheten och får bara skicka mejl, inte läsa filer.
-  var AVS_NYCKEL = 'forening-bokforing:avsandare';
+  var AVS_NYCKEL = LS + 'avsandare';
   var avsandare = (function () { try { return JSON.parse(localStorage.getItem(AVS_NYCKEL) || '{}') || {}; } catch (e) { return {}; } })();
   var avsNu = { token: null, utgar: 0, fel: null };
   function sparaAvs() { try { if (avsandare.konto || avsandare.refreshToken || avsandare.kontotyp) localStorage.setItem(AVS_NYCKEL, JSON.stringify(avsandare)); else localStorage.removeItem(AVS_NYCKEL); } catch (e) { /* tomt */ } }
@@ -7524,7 +7538,7 @@ var VERSIONER = [
     }
     return avsNu.token;
   }
-  var UTKAST_NYCKEL = 'forening-bokforing:utskick-utkast';
+  var UTKAST_NYCKEL = LS + 'utskick-utkast';
   function sparaUtskicksutkast() { try { sessionStorage.setItem(UTKAST_NYCKEL, JSON.stringify({ mall: utskickVal.mall, amne: utskickVal.amne, text: utskickVal.text, mottagare: utskickVal.mottagare })); } catch (e) { /* tomt */ } }
   function aterstallUtskicksutkast() {
     try { var u = JSON.parse(sessionStorage.getItem(UTKAST_NYCKEL) || 'null'); sessionStorage.removeItem(UTKAST_NYCKEL); if (u) Object.assign(utskickVal, u, { skickar: false }); } catch (e) { /* tomt */ }
@@ -7709,8 +7723,8 @@ var VERSIONER = [
     var q = new URLSearchParams(location.search);
     if (!q.has('code') && !q.has('error')) return;
     var sparad = null;
-    try { sparad = JSON.parse(sessionStorage.getItem('forening-bokforing:inloggning') || 'null'); } catch (e) { /* tomt */ }
-    sessionStorage.removeItem('forening-bokforing:inloggning');
+    try { sparad = JSON.parse(sessionStorage.getItem(LS + 'inloggning') || 'null'); } catch (e) { /* tomt */ }
+    sessionStorage.removeItem(LS + 'inloggning');
     history.replaceState(null, '', omdirigering() + location.hash);
     if (q.has('error')) {
       if (sparad && sparad.syfte === 'avsandare') { aterstallUtskicksutkast(); vy = 'st-utskick'; avsNu.fel = K.inloggningsfelText(q.get('error'), q.get('error_description'), avsandare.kontotyp); return; }
@@ -10066,7 +10080,7 @@ var VERSIONER = [
     document.getElementById('logoBricka').hidden = !logoUrl;
     if (logoUrl) document.getElementById('logo').src = logoUrl;
     sattIkon();
-    document.getElementById('versionLank').textContent = 'Plätt version ' + VERSIONER[0].version;
+    document.getElementById('versionLank').textContent = 'Plätt ' + (KANAL === 'test' ? 'test ' : 'version ') + SYNLIGA_VERSIONER[0].version;
     ritaChatt();
     ritaRundtur();
     var aiEl = document.getElementById('aiStatus');
@@ -11127,7 +11141,7 @@ var VERSIONER = [
     var html = '<h2>Om Plätt</h2><div class="card">' +
       '<p class="om-slogan">Gör bokföring och styrelsearbete lätt för ideella föreningar.</p>' +
       '<p><button class="btn btn-secondary btn-small" data-action="rundtur-start">Visa genomgången</button></p>' +
-      '<p><strong>Plätt ' + esc(VERSIONER[0].version) + '</strong> · ' + esc(VERSIONER[0].datum) + '</p>' +
+      '<p><strong>Plätt ' + esc(SYNLIGA_VERSIONER[0].version) + '</strong> · ' + esc(SYNLIGA_VERSIONER[0].datum) + '</p>' +
       '<p>Ett enkelt bokföringsverktyg för små ideella föreningar. Läs in fakturor, kvitton och kontoutdrag, låt appen föreslå verifikationerna och ta fram resultaträkning, balansräkning och underlag till årsmötet.</p>' +
       '<p class="faint">' + (odAnslutet() ? 'Bokföringen och underlagen sparas i föreningens OneDrive-mapp.' : 'Bokföringen sparas i den här webbläsaren tills appen kopplas till OneDrive under År och arkiv.') + '</p>' +
       '<p class="faint">Källkoden finns på <a href="https://github.com/KarmaDonkey/forening-bokforing" target="_blank" rel="noopener">GitHub</a>.</p></div>';
@@ -11135,7 +11149,7 @@ var VERSIONER = [
     html += '<h2>För revisorn</h2><div class="card">' + hjalpInnehall(HJALP.revisorn) + '</div>';
     html += '<h2>Förklaringar</h2><div class="card"><label style="font-weight:normal;display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="visaHjalp" style="width:auto"' + (visaHjalp() ? ' checked' : '') + '> Visa frågetecken med förklaringar vid rubrikerna</label></div>';
     html += '<h2>Vad som är nytt</h2>';
-    VERSIONER.forEach(function (v) {
+    SYNLIGA_VERSIONER.forEach(function (v) {
       html += '<div class="card"><h3 style="margin-top:0">Version ' + esc(v.version) + ' <span class="faint">· ' + esc(v.datum) + '</span></h3><ul>' +
         v.nyheter.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul></div>';
     });
@@ -11408,7 +11422,7 @@ var VERSIONER = [
     }
   };
 
-  var HJALP_NYCKEL = 'forening-bokforing:visa-hjalp';
+  var HJALP_NYCKEL = LS + 'visa-hjalp';
   var hjalpOppen = null;
   function visaHjalp() { try { return localStorage.getItem(HJALP_NYCKEL) !== '0'; } catch (e) { return true; } }
 
@@ -11652,7 +11666,7 @@ var VERSIONER = [
   }
 
   // ---------- Din bild i cirkeln ----------
-  var MIN_BILD = 'forening-bokforing:min-bild';
+  var MIN_BILD = LS + 'min-bild';
   function minBild() { try { return localStorage.getItem(MIN_BILD) || null; } catch (e) { return null; } }
   function sattMinBild(url) {
     try { if (url) localStorage.setItem(MIN_BILD, url); else localStorage.removeItem(MIN_BILD); } catch (e) { /* tomt */ }
@@ -12775,18 +12789,18 @@ var VERSIONER = [
   // Kopierar den riktiga bokföringen och medlemsregistret i den här webbläsaren till övningen.
   function kopieraTillOvning(tom) {
     try {
-      localStorage.removeItem('forening-bokforing:ovning:v1');
-      localStorage.removeItem('forening-bokforing:ovning:medlemsregister');
-      localStorage.removeItem('forening-bokforing:ovning:styrelsen');
+      localStorage.removeItem(LS + 'ovning:v1');
+      localStorage.removeItem(LS + 'ovning:medlemsregister');
+      localStorage.removeItem(LS + 'ovning:styrelsen');
       if (!tom) {
-        var d = localStorage.getItem(RIKTIG_LAGRING), r = localStorage.getItem(RIKTIG_REG_LAGRING), st = localStorage.getItem('forening-bokforing:styrelsen');
-        if (d) localStorage.setItem('forening-bokforing:ovning:v1', d);
-        if (r) localStorage.setItem('forening-bokforing:ovning:medlemsregister', r);
+        var d = localStorage.getItem(RIKTIG_LAGRING), r = localStorage.getItem(RIKTIG_REG_LAGRING), st = localStorage.getItem(LS + 'styrelsen');
+        if (d) localStorage.setItem(LS + 'ovning:v1', d);
+        if (r) localStorage.setItem(LS + 'ovning:medlemsregister', r);
         if (st) {
           // Övningen är aldrig kopplad till OneDrive: bara innehållet följer med.
           var x = JSON.parse(st);
           ['styr', 'upp'].forEach(function (k) { if (x[k]) { x[k].eTag = null; x[k].bas = null; x[k].smutsig = false; } });
-          localStorage.setItem('forening-bokforing:ovning:styrelsen', JSON.stringify(x));
+          localStorage.setItem(LS + 'ovning:styrelsen', JSON.stringify(x));
         }
       }
     } catch (e) { throw new Error('Övningen kunde inte skapas: webbläsarens lagring är full eller avstängd.'); }
@@ -12794,16 +12808,16 @@ var VERSIONER = [
 
   function raderaOvning() {
     try {
-      localStorage.removeItem('forening-bokforing:ovning:v1');
-      localStorage.removeItem('forening-bokforing:ovning:medlemsregister');
-      localStorage.removeItem('forening-bokforing:ovning:styrelsen');
+      localStorage.removeItem(LS + 'ovning:v1');
+      localStorage.removeItem(LS + 'ovning:medlemsregister');
+      localStorage.removeItem(LS + 'ovning:styrelsen');
     } catch (e) { /* tomt */ }
     try { indexedDB.deleteDatabase(FILDB + '-ovning'); } catch (e) { /* tomt */ }
   }
 
   // En helkopia: bokföringen, medlemsregistret och styrelsens material i en fil.
   function helkopia() {
-    return { format: 'foreningsbokforing-helkopia', skapad: new Date().toISOString(), version: VERSIONER[0].version, forening: store.forening.namn || '',
+    return { format: 'foreningsbokforing-helkopia', skapad: new Date().toISOString(), version: SYNLIGA_VERSIONER[0].version, forening: store.forening.namn || '',
       bokforing: bokforingsdata(), medlemsregister: store.medlemsregister, styrelsen: sty.styr.data, uppdrag: sty.upp.data };
   }
   function laddaNerHelkopia(prefix) {
@@ -12829,13 +12843,13 @@ var VERSIONER = [
     if (!bok || bok.format !== 1 || !bok.ar) throw new Error('Filen är ingen kopia från Plätt.');
     try {
       raderaOvning();
-      localStorage.setItem('forening-bokforing:ovning:v1', JSON.stringify(bok));
-      if (d.medlemsregister) localStorage.setItem('forening-bokforing:ovning:medlemsregister', JSON.stringify(d.medlemsregister));
+      localStorage.setItem(LS + 'ovning:v1', JSON.stringify(bok));
+      if (d.medlemsregister) localStorage.setItem(LS + 'ovning:medlemsregister', JSON.stringify(d.medlemsregister));
       if (d.styrelsen || d.uppdrag) {
         var x = tomSty();
         if (d.styrelsen) x.styr.data = K.normaliseraStyrelse(d.styrelsen);
         if (d.uppdrag) x.upp.data = K.normaliseraUppdrag(d.uppdrag);
-        localStorage.setItem('forening-bokforing:ovning:styrelsen', JSON.stringify(x));
+        localStorage.setItem(LS + 'ovning:styrelsen', JSON.stringify(x));
       }
     } catch (e) { throw new Error('Övningen kunde inte skapas: webbläsarens lagring är full eller avstängd.'); }
   }
@@ -12949,7 +12963,7 @@ var VERSIONER = [
     var zip = new JSZip();
     var ar = store.ar[arId];
     var namn = K.arNamn(ar);
-    var data = K.revisionspaketData(bokforingsdata(), arId, { skapad: idag(), version: VERSIONER[0].version });
+    var data = K.revisionspaketData(bokforingsdata(), arId, { skapad: idag(), version: SYNLIGA_VERSIONER[0].version });
     var steg = function (t) { paketStatus = t; var el = document.getElementById('paketStatus'); if (el) el.textContent = t; };
     zip.file('bokforing.json', JSON.stringify(data));
     var saknas = [];
@@ -12972,7 +12986,7 @@ var VERSIONER = [
     var adress = omdirigering();
     zip.file('Läs mig.txt', [
       'Revisionspaket för ' + (store.forening.namn || 'föreningen') + ', räkenskapsår ' + namn + '.',
-      'Skapat ' + idag() + ' med Plätt ' + VERSIONER[0].version + '.',
+      'Skapat ' + idag() + ' med Plätt ' + SYNLIGA_VERSIONER[0].version + '.',
       '',
       'Så öppnar du paketet (inget konto behövs, och inget sparas):',
       '1. Gå till ' + adress,
@@ -15910,6 +15924,14 @@ var VERSIONER = [
   ladda();
   if (!OVNING) laddaOd();
   else document.title = 'Övning – ' + document.title;
+  if (KANAL === 'test') {
+    document.title = 'Test – ' + document.title;
+    var band = document.createElement('div');
+    band.className = 'test-band ej-utskrift';
+    band.innerHTML = '<strong>TESTVERSION ' + esc(VERSIONER[0].version) + '</strong> · Här provas nya saker innan de släpps till alla. Använd en testförening, inte föreningens riktiga mapp. <a href="../">Till huvudversionen</a>';
+    document.body.insertBefore(band, document.body.firstChild);
+    var ai = document.querySelector('link[rel=apple-touch-icon]'); if (ai) ai.href = '../ikon-apple-180.png';
+  }
   fangaInbjudan();
   laggTillManifest();
   LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
@@ -15953,7 +15975,7 @@ var VERSIONER = [
     sattStatus(err.message, true);
     // Försök logga in tyst i bakgrunden högst en gång i timmen; annars visas en knapp.
     var senast = 0;
-    try { senast = Number(localStorage.getItem('forening-bokforing:tyst-inloggning')) || 0; } catch (e) { /* tomt */ }
+    try { senast = Number(localStorage.getItem(LS + 'tyst-inloggning')) || 0; } catch (e) { /* tomt */ }
     if (odNu.inloggningKravs && od.clientId && od.mapp && Date.now() - senast > 3600000) startaInloggning(true);
   }).then(render);
 
