@@ -570,6 +570,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.85', datum: '2026-11-28',
+    nyheter: [
+      'Föreningar med Microsoft 365 kan logga in med sina jobb- eller skolkonton i stället för privata Microsoft-konton. Välj "Logga in med föreningens konto" vid inloggningen. Appregistreringen behöver tillåta den sortens konton (se guiden under Inställningar, OneDrive).',
+      'Föreningens egen avsändaradress: under Styrelsen, Utskick kan du logga in med föreningens konto bara för att skicka. Då kommer utskick och påminnelser från föreningens adress och svaren hamnar i föreningens brevlåda. Kontot får inte läsa några filer, och inloggningen finns bara på den enheten.',
+      'Begripligare felmeddelanden när Microsoft säger nej vid inloggningen, med vad föreningen kan göra.'
+    ]
+  },
+  {
     version: '1.84', datum: '2026-11-28',
     nyheter: [
       'Kommentarer på uppgifter, möten och ärenden, med @namn för att nämna någon. Nya kommentarer till dig syns under Väntar på dig.',
@@ -5110,6 +5118,27 @@ var VERSIONER = [
     if (i < rader.length) kropp += '…\n';
     return (amne ? '*' + amne + '*\n' : '') + kropp + (lank ? 'Läs mer i Plätt: ' + lank : '').trim();
   }
+  // ---------- Inloggning med föreningskonton ----------
+  // Privata Microsoft-konton (Outlook.com, Hotmail) loggar in via 'consumers'. Föreningar med Microsoft 365
+  // har jobb- eller skolkonton och loggar in via 'organizations'. Föreningens avsändaradress kan vara vilken som helst.
+  var KONTOTYPER = { privat: 'consumers', forening: 'organizations', alla: 'common' };
+  function odAuktoritet(typ) { return 'https://login.microsoftonline.com/' + (KONTOTYPER[typ] || 'consumers'); }
+  var AVSANDARE_OMFANG = 'Mail.Send User.Read offline_access';
+  // Microsofts felkoder vid inloggning, översatta till vad föreningen kan göra.
+  function inloggningsfelText(fel, beskrivning, typ) {
+    var t = String(fel || '') + ' ' + String(beskrivning || '');
+    if (/AADSTS50194|AADSTS700016|AADSTS50020|unauthorized_client|not enabled for consumers|userAudience/i.test(t)) {
+      return typ === 'forening'
+        ? 'Appregistreringen tar inte emot jobb- eller skolkonton ännu. Den som äger appregistreringen ändrar "Supported account types" till "Accounts in any organizational directory and personal Microsoft accounts" (se Inställningar, OneDrive). Logga in med ett privat Microsoft-konto så länge.'
+        : 'Appregistreringen tar inte emot den här sortens konto. Prova att logga in med den andra kontotypen, eller be den som äger appregistreringen att tillåta både privata konton och jobb- eller skolkonton.';
+    }
+    if (/AADSTS65001|AADSTS90094|AADSTS90008|consent_required|admin/i.test(t)) {
+      return 'Föreningens Microsoft 365 kräver att en administratör godkänner appen först. Be den som administrerar föreningens Microsoft 365 att godkänna Plätt (Enterprise applications, Grant admin consent), och försök sedan igen.';
+    }
+    if (/access_denied|AADSTS65004/i.test(t)) return 'Inloggningen avbröts, eller så godkändes inte behörigheterna. Försök igen och välj Godkänn.';
+    return 'Inloggningen avbröts: ' + (beskrivning || fel || 'okänt fel');
+  }
+
   function mailtoMangaLank(mottagare, amne, text) {
     return 'mailto:?bcc=' + mottagare.map(encodeURIComponent).join(',') + '&subject=' + encodeURIComponent(amne) + '&body=' + encodeURIComponent(text);
   }
@@ -6137,6 +6166,9 @@ var VERSIONER = [
     utskickMall: utskickMall,
     whatsappText: whatsappText,
     mailtoMangaLank: mailtoMangaLank,
+    odAuktoritet: odAuktoritet,
+    AVSANDARE_OMFANG: AVSANDARE_OMFANG,
+    inloggningsfelText: inloggningsfelText,
     atForslag: atForslag,
     hjalpKunskap: hjalpKunskap,
     hjalpUppdrag: hjalpUppdrag,
@@ -6989,9 +7021,33 @@ var VERSIONER = [
     try { andraStyr('styr', Object.assign({}, styrData(), { utskick: (styrData().utskick || []).concat([{ id: 'us' + Date.now().toString(36), typ: typ, tid: new Date().toISOString(), av: mig(), antal: antal }]) }), false); } catch (e) { /* bara läsrätt */ }
   }
   async function skickaGrafMejl(m) {
+    if (avsandareKlar()) {
+      var token = await hamtaAvsToken();
+      var res = await fetch(GRAF + '/me/sendMail', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(K.grafMejl(m)) });
+      if (res.status !== 202) { var d = await res.json().catch(function () { return {}; }); throw new Error((d.error && d.error.message) || ('Microsoft svarade med fel ' + res.status + '.')); }
+      return;
+    }
     await graf('/me/sendMail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(K.grafMejl(m)), tillat: [202] });
   }
-  function kanSkickaDirekt() { return mejlDirekt() && odAnslutet(); }
+  function kanSkickaDirekt() { return avsandareKlar() || (mejlDirekt() && odAnslutet()); }
+  function avsandarKort() {
+    var html = '<div class="card"><h3 style="margin-top:0">Avsändare</h3>';
+    if (OVNING) return html + '<p class="faint" style="margin:0">I övningsläget skickas inga mejl från föreningens adress.</p></div>';
+    if (avsNu.fel) html += '<p class="fel" role="alert" style="margin-top:0">' + esc(avsNu.fel) + '</p>';
+    if (avsandareKlar()) {
+      return html + '<p style="margin-top:0">Utskick och påminnelser skickas från föreningens adress <strong>' + esc(avsandare.konto) + '</strong>' + (avsandare.namn ? ' (' + esc(avsandare.namn) + ')' : '') + '. Inloggningen finns bara på den här enheten och får bara skicka mejl.</p>' +
+        '<div class="row"><button class="btn btn-secondary btn-small" data-action="avs-logga-in">Byt konto</button><button class="btn btn-secondary btn-small" data-action="avs-glom">Sluta skicka från föreningens adress</button></div></div>';
+    }
+    if (avsandare.konto) {
+      return html + '<p style="margin-top:0">Inloggningen för föreningens adress <strong>' + esc(avsandare.konto) + '</strong> har gått ut. Microsoft låter en webbapp vara inloggad ett dygn i taget, så det är vanligt att logga in igen inför ett utskick. Det du har skrivit finns kvar.</p>' +
+        '<div class="row"><button class="btn btn-small" data-action="avs-logga-in">Logga in som föreningen igen</button><button class="btn btn-secondary btn-small" data-action="avs-glom">Sluta skicka från föreningens adress</button></div></div>';
+    }
+    if (!od.clientId) return html + '<p class="faint" style="margin:0">Mejlen skickas från ditt eget mejlprogram.</p></div>';
+    return html + '<p style="margin-top:0">Mejlen skickas nu från ' + (mejlDirekt() && odAnslutet() ? 'din egen e-post' : 'ditt mejlprogram') + '. Har föreningen en egen e-postadress hos Microsoft kan utskicken komma därifrån i stället, så att svaren hamnar i föreningens brevlåda. ' +
+      'Du loggar in med föreningens konto bara för att skicka; det kontot får inte läsa några filer.</p>' +
+      '<label for="avsTyp">Föreningens konto är</label><select id="avsTyp" style="width:auto;max-width:100%"><option value="privat"' + (avsandare.kontotyp !== 'forening' ? ' selected' : '') + '>Outlook.com eller Hotmail</option><option value="forening"' + (avsandare.kontotyp === 'forening' ? ' selected' : '') + '>Microsoft 365 (jobb- eller skolkonto)</option></select>' +
+      '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="avs-logga-in">Logga in som föreningen</button></div></div>';
+  }
   function mallFakta(mall) {
     var fran = odNu.roller && mig() ? K.visaPerson(odNu.roller, mig()) : '';
     var f = { forening: store.forening.namn, lank: appLank(), fran: fran };
@@ -7011,7 +7067,8 @@ var VERSIONER = [
     var skriv = styrBeh('styr') === 'write';
     var personer = styrPersonerMedEpost();
     var html = '<p class="faint" style="margin-top:0">Mejl till styrelsen när det behövs, aldrig automatiskt. Använd gärna WhatsApp-gruppen för att påminna, och mejlen för den samlade informationen.' +
-      (kanSkickaDirekt() ? ' Mejlen skickas direkt från din e-post.' : ' Mejlen öppnas i ditt mejlprogram; slå på "Skicka mejl direkt från appen" på Min sida för att skicka med ett klick.') + '</p>';
+      (avsandareKlar() ? ' Mejlen skickas från föreningens adress.' : kanSkickaDirekt() ? ' Mejlen skickas direkt från din e-post.' : ' Mejlen öppnas i ditt mejlprogram; slå på "Skicka mejl direkt från appen" på Min sida, eller logga in med föreningens adress nedan, för att skicka med ett klick.') + '</p>';
+    html += avsandarKort();
     // Påminnelser
     if (kanPaminna()) {
       var sp = senastePaminnelse(), sedan = sp ? sp.tid : '';
@@ -7281,7 +7338,8 @@ var VERSIONER = [
   // Bokföringen sparas som en fil i föreningens mapp; underlagen som vanliga filer i årsmapparna.
 
   var OD_NYCKEL = 'forening-bokforing:onedrive';
-  var OD_AUTH = 'https://login.microsoftonline.com/consumers';
+  // Privat Microsoft-konto (standard) eller föreningens jobb- eller skolkonto i Microsoft 365 (od.kontotyp 'forening').
+  function odAuth() { return K.odAuktoritet(od.kontotyp); }
   // .All behövs för att läsa och skriva i mappar som någon annan har delat (revisor, styrelse, bokförare).
   var OD_OMFANG = 'Files.ReadWrite.All offline_access User.Read';
   // Mejl direkt från appen är ett personligt val: då begärs också behörigheten att skicka e-post från den egna brevlådan.
@@ -7339,22 +7397,59 @@ var VERSIONER = [
   }
   function slumptext(n) { var a = new Uint8Array(n); crypto.getRandomValues(a); return b64url(a.buffer).slice(0, n); }
 
-  async function startaInloggning(tyst) {
+  // syfte 'avsandare': en separat inloggning med föreningens konto, bara för att skicka mejl.
+  async function startaInloggning(tyst, syfte) {
+    var avs = syfte === 'avsandare';
     var verifierare = slumptext(64);
     var utmaning = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifierare)));
     var tillstand = slumptext(24);
-    sessionStorage.setItem('forening-bokforing:inloggning', JSON.stringify({ verifierare: verifierare, tillstand: tillstand, tyst: !!tyst }));
+    sessionStorage.setItem('forening-bokforing:inloggning', JSON.stringify({ verifierare: verifierare, tillstand: tillstand, tyst: !!tyst, syfte: avs ? 'avsandare' : '' }));
     var p = new URLSearchParams({
       client_id: od.clientId, response_type: 'code', redirect_uri: omdirigering(), response_mode: 'query',
-      scope: odOmfang(), code_challenge: utmaning, code_challenge_method: 'S256', state: tillstand
+      scope: avs ? K.AVSANDARE_OMFANG : odOmfang(), code_challenge: utmaning, code_challenge_method: 'S256', state: tillstand
     });
+    if (avs) { p.set('prompt', 'select_account'); if (avsandare.konto) p.set('login_hint', avsandare.konto); }
     if (tyst) { p.set('prompt', 'none'); try { localStorage.setItem('forening-bokforing:tyst-inloggning', String(Date.now())); } catch (e) { /* tomt */ } }
-    location.assign(OD_AUTH + '/oauth2/v2.0/authorize?' + p.toString());
+    location.assign((avs ? K.odAuktoritet(avsandare.kontotyp) : odAuth()) + '/oauth2/v2.0/authorize?' + p.toString());
+  }
+
+  // ---------- Föreningens avsändaradress ----------
+  // Inloggningen sparas bara på den här enheten och får bara skicka mejl, inte läsa filer.
+  var AVS_NYCKEL = 'forening-bokforing:avsandare';
+  var avsandare = (function () { try { return JSON.parse(localStorage.getItem(AVS_NYCKEL) || '{}') || {}; } catch (e) { return {}; } })();
+  var avsNu = { token: null, utgar: 0, fel: null };
+  function sparaAvs() { try { if (avsandare.konto || avsandare.refreshToken || avsandare.kontotyp) localStorage.setItem(AVS_NYCKEL, JSON.stringify(avsandare)); else localStorage.removeItem(AVS_NYCKEL); } catch (e) { /* tomt */ } }
+  function avsandareKlar() { return !OVNING && !!(avsandare.refreshToken && avsandare.konto && od.clientId); }
+  async function avsTokenAnrop(param) {
+    var kropp = new URLSearchParams(Object.assign({ client_id: od.clientId, scope: K.AVSANDARE_OMFANG }, param));
+    var res = await fetch(K.odAuktoritet(avsandare.kontotyp) + '/oauth2/v2.0/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: kropp.toString() });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok) { var e = new Error(data.error_description || data.error || 'Inloggningen misslyckades.'); e.kod = data.error; throw e; }
+    avsNu.token = data.access_token; avsNu.utgar = Date.now() + (data.expires_in || 3600) * 1000; avsNu.fel = null;
+    if (data.refresh_token) avsandare.refreshToken = data.refresh_token;
+    sparaAvs();
+  }
+  async function hamtaAvsToken() {
+    if (avsNu.token && Date.now() < avsNu.utgar - 60000) return avsNu.token;
+    try { await avsTokenAnrop({ grant_type: 'refresh_token', refresh_token: avsandare.refreshToken }); }
+    catch (err) {
+      if (['invalid_grant', 'interaction_required', 'consent_required', 'invalid_scope'].indexOf(err.kod) >= 0) {
+        avsandare.refreshToken = null; sparaAvs();
+        throw new Error('Inloggningen för föreningens adress har gått ut. Logga in som föreningen igen under Utskick.');
+      }
+      throw err;
+    }
+    return avsNu.token;
+  }
+  var UTKAST_NYCKEL = 'forening-bokforing:utskick-utkast';
+  function sparaUtskicksutkast() { try { sessionStorage.setItem(UTKAST_NYCKEL, JSON.stringify({ mall: utskickVal.mall, amne: utskickVal.amne, text: utskickVal.text, mottagare: utskickVal.mottagare })); } catch (e) { /* tomt */ } }
+  function aterstallUtskicksutkast() {
+    try { var u = JSON.parse(sessionStorage.getItem(UTKAST_NYCKEL) || 'null'); sessionStorage.removeItem(UTKAST_NYCKEL); if (u) Object.assign(utskickVal, u, { skickar: false }); } catch (e) { /* tomt */ }
   }
 
   async function tokenAnrop(param) {
     var kropp = new URLSearchParams(Object.assign({ client_id: od.clientId, scope: odOmfang() }, param));
-    var res = await fetch(OD_AUTH + '/oauth2/v2.0/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: kropp.toString() });
+    var res = await fetch(odAuth() + '/oauth2/v2.0/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: kropp.toString() });
     var data = await res.json().catch(function () { return {}; });
     if (!res.ok) { var e = new Error(data.error_description || data.error || 'Inloggningen misslyckades.'); e.kod = data.error; throw e; }
     odNu.token = data.access_token;
@@ -7535,11 +7630,25 @@ var VERSIONER = [
     sessionStorage.removeItem('forening-bokforing:inloggning');
     history.replaceState(null, '', omdirigering() + location.hash);
     if (q.has('error')) {
+      if (sparad && sparad.syfte === 'avsandare') { aterstallUtskicksutkast(); vy = 'st-utskick'; avsNu.fel = K.inloggningsfelText(q.get('error'), q.get('error_description'), avsandare.kontotyp); return; }
       odNu.inloggningKravs = true;
-      if (!(sparad && sparad.tyst)) sattStatus('Inloggningen avbröts: ' + (q.get('error_description') || q.get('error')), true);
+      if (!(sparad && sparad.tyst)) sattStatus(K.inloggningsfelText(q.get('error'), q.get('error_description'), od.kontotyp), true);
       return;
     }
     if (!sparad || sparad.tillstand !== q.get('state')) { sattStatus('Inloggningen kunde inte verifieras. Försök igen.', true); return; }
+    if (sparad.syfte === 'avsandare') {
+      aterstallUtskicksutkast(); vy = 'st-utskick';
+      try {
+        await avsTokenAnrop({ grant_type: 'authorization_code', code: q.get('code'), redirect_uri: omdirigering(), code_verifier: sparad.verifierare });
+        var res = await fetch(GRAF + '/me', { headers: { Authorization: 'Bearer ' + avsNu.token } });
+        var vem = await res.json().catch(function () { return {}; });
+        avsandare.konto = vem.mail || vem.userPrincipalName || 'föreningens konto';
+        avsandare.namn = vem.displayName || '';
+        sparaAvs();
+        meddelande = { text: 'Utskick och påminnelser skickas nu från ' + avsandare.konto + '.' };
+      } catch (err) { avsNu.fel = K.inloggningsfelText(err.kod, err.message, avsandare.kontotyp); }
+      return;
+    }
     await tokenAnrop({ grant_type: 'authorization_code', code: q.get('code'), redirect_uri: omdirigering(), code_verifier: sparad.verifierare });
     var jag = await graf('/me');
     od.konto = jag.userPrincipalName || jag.mail || jag.displayName || 'Microsoft-konto';
@@ -10011,7 +10120,7 @@ var VERSIONER = [
     if (location.protocol !== 'file:' && od.clientId && !od.refreshToken) {
       snabb = '<div class="card"><h2 style="margin-top:0">Använder föreningen redan appen?</h2>' +
         '<p>Logga in med ditt Microsoft-konto, så hämtas bokföringen från OneDrive.</p>' +
-        '<button class="btn" data-action="od-logga-in">Logga in med Microsoft</button></div><h2>Ny förening</h2>';
+        '<button class="btn" data-action="od-logga-in">Logga in med Microsoft</button>' + foreningskontoLank() + '</div><h2>Ny förening</h2>';
     } else if (location.protocol !== 'file:' && od.refreshToken && !od.mapp) {
       snabb = '<p class="muted" style="margin-bottom:0">Du är inloggad, men appen hittade ingen sparad mapp för ditt konto. Välj föreningens mapp, så hämtas bokföringen.</p>' +
         vyOneDrive() + '<h2>Ny förening</h2>';
@@ -10829,6 +10938,9 @@ var VERSIONER = [
       '<button class="btn btn-secondary btn-small" data-action="exportera">Spara en kopia av den här versionen</button></div></div>';
   }
 
+  function foreningskontoLank() {
+    return '<p class="faint" style="margin:10px 0 0">Har föreningen Microsoft 365 med egna konton (jobb- eller skolkonto)? <button class="lank-text" data-action="od-logga-in-forening">Logga in med föreningens konto</button></p>';
+  }
   function inloggningsBanner() {
     if (!od.clientId || !od.mapp || !odNu.inloggningKravs) return '';
     return '<div class="card" role="alert"><strong>Logga in med Microsoft igen för att synka med OneDrive.</strong> ' +
@@ -10849,13 +10961,14 @@ var VERSIONER = [
         '<details style="margin-top:10px"><summary class="faint">Hur skaffar jag ett Client ID?</summary><ol>' +
         '<li>Gå till portal.azure.com, sök efter <strong>App registrations</strong> och öppna en befintlig registrering (eller skapa en ny för personliga Microsoft-konton).</li>' +
         '<li>Under <strong>Authentication</strong>, lägg till plattformen <strong>Single-page application</strong> med omdirigeringsadressen <code>' + esc(omdirigering()) + '</code>.</li>' +
-        '<li>Kopiera <strong>Application (client) ID</strong> från översikten och klistra in det här.</li></ol></details></div>';
+        '<li>Kopiera <strong>Application (client) ID</strong> från översikten och klistra in det här.</li>' +
+        '<li>Ska styrelsen kunna logga in med föreningens Microsoft 365-konton (jobb- eller skolkonton)? Välj då <strong>Accounts in any organizational directory and personal Microsoft accounts</strong> under <strong>Supported account types</strong>. Tänk på att alla som delar mappen behöver samma sorts konto: en mapp i ett jobbkontos OneDrive kan inte delas med ett privat konto på samma sätt.</li></ol></details></div>';
     }
     if (!od.refreshToken) {
       return html + '<p style="margin-top:0">Logga in med det Microsoft-konto som har föreningens OneDrive-mapp, eller som mappen är delad med. ' +
         'Har du redan använt appen på en annan enhet hittar den mappen själv.</p>' +
         '<div class="row"><button class="btn" data-action="od-logga-in">Logga in med Microsoft</button>' +
-        (STANDARD_KLIENTER[location.host] === od.clientId ? '' : '<button class="btn btn-secondary btn-small" data-action="od-glom-klient">Byt Client ID</button>') + '</div></div>';
+        (STANDARD_KLIENTER[location.host] === od.clientId ? '' : '<button class="btn btn-secondary btn-small" data-action="od-glom-klient">Byt Client ID</button>') + '</div>' + foreningskontoLank() + '</div>';
     }
     if (!od.mapp) {
       html += '<p style="margin-top:0">Inloggad som <strong>' + esc(od.konto || '') + '</strong>. Välj var bokföringen ska ligga.</p>' +
@@ -13751,7 +13864,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'till-ai-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'wa-lank', 'djuplank', 'kommentarer-lasta', 'kommentar-visa', 'utskick-wa', 'rundtur-start', 'rundtur-fram', 'rundtur-bak', 'rundtur-slut', 'valkommen-senare', 'valkommen-nej', 'hjalp-chatt', 'hjalp-chatt-stang', 'hjalp-skicka', 'hjalp-exempel', 'hjalp-bilaga-bort', 'hjalp-medlem', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'till-ai-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'wa-lank', 'djuplank', 'kommentarer-lasta', 'kommentar-visa', 'utskick-wa', 'kommentar-ny', 'paminn-en', 'paminn-logga', 'paminn-alla', 'utskick-skicka', 'utskick-aterstall', 'avs-logga-in', 'avs-glom', 'rundtur-start', 'rundtur-fram', 'rundtur-bak', 'rundtur-slut', 'valkommen-senare', 'valkommen-nej', 'hjalp-chatt', 'hjalp-chatt-stang', 'hjalp-skicka', 'hjalp-exempel', 'hjalp-bilaga-bort', 'hjalp-medlem', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport],[data-grupp]');
@@ -15503,7 +15616,16 @@ var VERSIONER = [
       if (navigator.clipboard) navigator.clipboard.writeText(el.value).then(klart, function () { el.select(); document.execCommand('copy'); klart(); });
       else { el.select(); document.execCommand('copy'); klart(); }
     },
-    'od-logga-in': function () { startaInloggning(false); },
+    'od-logga-in': function () { if (!od.mapp && !od.refreshToken) { od.kontotyp = 'privat'; sparaOd(); } startaInloggning(false); },
+    'od-logga-in-forening': function () { od.kontotyp = 'forening'; sparaOd(); startaInloggning(false); },
+    'avs-logga-in': function () {
+      var typ = document.getElementById('avsTyp'); if (typ) avsandare.kontotyp = typ.value;
+      sparaAvs(); sparaUtskicksutkast(); startaInloggning(false, 'avsandare');
+    },
+    'avs-glom': function () {
+      if (!window.confirm('Sluta skicka från föreningens adress på den här enheten? Mejlen skickas då från din egen e-post eller ditt mejlprogram.')) return;
+      avsandare = {}; avsNu = { token: null, utgar: 0, fel: null }; sparaAvs(); render();
+    },
     'avbryt-inbjudan': function () { localStorage.removeItem(INBJUDAN); render(); },
     'od-visa-delade': function () {
       sattStatus('Hämtar delade mappar…');

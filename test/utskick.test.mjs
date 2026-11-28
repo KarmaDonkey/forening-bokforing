@@ -60,3 +60,16 @@ test('mallar, WhatsApp och mejl till många', () => {
   assert.doesNotMatch(w, /Hej alla/);
   assert.match(K.mailtoMangaLank(['a@x.se', 'b@x.se'], 'Ämne', 'Text'), /^mailto:\?bcc=a%40x\.se,b%40x\.se&subject=%C3%84mne&body=Text$/);
 });
+
+test('inloggning med föreningskonton', () => {
+  assert.equal(K.odAuktoritet(), 'https://login.microsoftonline.com/consumers');
+  assert.equal(K.odAuktoritet('privat'), 'https://login.microsoftonline.com/consumers');
+  assert.equal(K.odAuktoritet('forening'), 'https://login.microsoftonline.com/organizations');
+  assert.equal(K.odAuktoritet('alla'), 'https://login.microsoftonline.com/common');
+  assert.match(K.AVSANDARE_OMFANG, /Mail\.Send/);
+  assert.doesNotMatch(K.AVSANDARE_OMFANG, /Files/, 'avsändarkontot får inte läsa filer');
+  assert.match(K.inloggningsfelText('unauthorized_client', 'AADSTS50194: Application is not configured as a multi-tenant application.', 'forening'), /Supported account types/);
+  assert.match(K.inloggningsfelText('consent_required', 'AADSTS65001: The user or administrator has not consented', 'forening'), /administratör godkänner/);
+  assert.match(K.inloggningsfelText('access_denied', '', 'privat'), /Försök igen/);
+  assert.equal(K.inloggningsfelText('x', 'Något annat', 'privat'), 'Inloggningen avbröts: Något annat');
+});
