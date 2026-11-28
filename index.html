@@ -285,6 +285,13 @@
   .ai-status.av { color: var(--ink-faint); font-weight: 400; }
   .ai-kort { border-color: var(--guld); }
   #claude-installning { scroll-margin-top: 16px; }
+  .granskning-pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+  .granskning-pill.ok { background: #E3F1E8; color: #2E6B45; }
+  .granskning-pill.delvis { background: #FBF1D3; color: #7A5A06; }
+  .granskning-pill.saknas { background: #FCE3CF; color: #8A3D0B; }
+  .granskning-pill.oklart { background: var(--surface-2); color: var(--ink-soft); }
+  .forslag-lydelse { margin: 6px 0; padding: 8px 10px; background: var(--surface-2); border-radius: 8px; white-space: pre-line; }
+  .stadgetext p { margin: 10px 0; white-space: normal; }
   .om-slogan { font-size: 18px; font-weight: 600; margin-top: 0; }
   .ovning-banner .btn-secondary { background: #fff; color: #2B2F3A; border-color: rgba(43, 47, 58, 0.18); }
   .ai-kort textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; line-height: 1.5; }
@@ -506,6 +513,14 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.77', datum: '2026-11-28',
+    nyheter: [
+      'Ny flik Stadgar under Styrelsen: läs in stadgarna som Word, PDF eller text. AI delar upp dem i paragrafer och återger texten ordagrant; de sparas i styrelsens fil.',
+      'Granska stadgarna med AI mot Stockholms stads villkor för föreningsstöd, Skatteverkets krav för allmännyttig ideell förening eller en allmän checklista. Varje krav får en bedömning, ett citat ur stadgarna och vid behov ett förslag till ny lydelse.',
+      'Ett förslag blir ett ärende om stadgeändring till årsmötet med ett klick, med nuvarande och föreslagen lydelse och vad stadgarna säger om ändringar. Citat som inte finns ordagrant i stadgarna markeras.'
+    ]
+  },
   {
     version: '1.76', datum: '2026-11-28',
     nyheter: [
@@ -4291,12 +4306,12 @@ var VERSIONER = [
   var STYRFORMAT = 'foreningsbokforing-styrelse';
   var UPPDRAGFORMAT = 'foreningsbokforing-uppdrag';
 
-  function tomStyrelse() { return { format: STYRFORMAT, moten: [], uppgifter: [], dokument: [], arenden: [], rapporter: [] }; }
+  function tomStyrelse() { return { format: STYRFORMAT, moten: [], uppgifter: [], dokument: [], arenden: [], rapporter: [], stadgar: [] }; }
   function tomaUppdrag() { return { format: UPPDRAGFORMAT, uppdrag: [] }; }
   function normaliseraStyrelse(d) {
     var t = tomStyrelse();
     d = d && typeof d === 'object' ? d : {};
-    ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter'].forEach(function (k) { if (Array.isArray(d[k])) t[k] = d[k]; });
+    ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter', 'stadgar'].forEach(function (k) { if (Array.isArray(d[k])) t[k] = d[k]; });
     return t;
   }
   function normaliseraUppdrag(d) { return { format: UPPDRAGFORMAT, uppdrag: d && Array.isArray(d.uppdrag) ? d.uppdrag : [] }; }
@@ -4582,6 +4597,110 @@ var VERSIONER = [
     if (json.status === 'incomplete') throw BokforingsFel('Svaret blev för långt eller avbröts. Dela upp underlaget i mindre delar.');
     if (!delar.length) throw BokforingsFel('AI-tjänsten gav inget svar.');
     return JSON.parse(delar.join(''));
+  }
+
+  // ---------- Stadgar ----------
+  // Kravlistor att granska stadgarna mot. Sammanfattade från källorna; kontrollera alltid mot originalet, kraven ändras.
+  var KRAVLISTOR = [
+    { id: 'stockholm', namn: 'Stockholms stad (idrottsförvaltningens föreningsstöd)', kontrollerad: '2026-11',
+      kallor: ['https://foreningsservice.stockholm/stod-till-foreningar-och-organisationer/generell-information/idrottsforvaltningens-foreningsstod/'],
+      not: 'Sammanfattning av stadens grundläggande villkor för föreningsstöd som rör stadgar och organisation. Läs stadens aktuella regler innan ni ändrar stadgarna.',
+      krav: [
+        ['ideell', 'Ideell förening', 'Föreningen är en ideell förening utan vinstsyfte.'],
+        ['demokrati', 'Demokratiskt uppbyggd', 'Föreningen är uppbyggd och styrs enligt demokratiska principer: årsmötet är högsta beslutande organ, medlemmarna har rösträtt och styrelsen väljs av årsmötet.'],
+        ['demokrativillkor', 'Demokrati och värdegrund', 'Verksamheten följer demokratins idéer och stadens demokrativillkor, inklusive jämställdhet och icke-diskriminering.'],
+        ['barnkonventionen', 'Barnkonventionen', 'Föreningen arbetar utifrån FN:s konvention om barnets rättigheter.'],
+        ['sate', 'Säte i Stockholm', 'Föreningens säte enligt stadgarna är i Stockholm.'],
+        ['oppen', 'Öppen för alla', 'Föreningen är öppen för alla och ingen diskrimineras på grund av till exempel kön, sexuell läggning, etnisk tillhörighet, religion eller funktionsnedsättning.'],
+        ['malgrupp', 'Verksamhet för stadens målgrupper', 'Verksamheten riktar sig till barn och unga, vuxna med funktionsnedsättning eller personer över 65 år.']
+      ] },
+    { id: 'skatteverket', namn: 'Skatteverket (allmännyttig ideell förening)', kontrollerad: '2026-11',
+      kallor: ['https://skatteverket.se/foreningar/driva/ideellforening/villkorforattvaraenallmannyttigideellforening.4.70ac421612e2a997f85800029958.html'],
+      not: 'Skatteverkets fyra krav. Verksamhets- och fullföljdskraven bedöms av hur föreningen faktiskt arbetar och använder pengarna; stadgarna visar ändamålet och öppenheten.',
+      krav: [
+        ['andamal', 'Ändamålskravet', 'Stadgarna anger ett allmännyttigt ändamål, till exempel idrott eller kultur, och att föreningen inte har vinstsyfte.'],
+        ['verksamhet', 'Verksamhetskravet', 'Verksamheten tillgodoser uteslutande eller så gott som uteslutande (minst 90 procent) det allmännyttiga ändamålet.'],
+        ['fullfoljd', 'Fullföljdskravet', 'Föreningens inkomster används i skälig omfattning för det allmännyttiga ändamålet.'],
+        ['oppenhet', 'Öppenhetskravet', 'Föreningen är öppen för alla som vill bli medlemmar; eventuella villkor för medlemskap har saklig grund.']
+      ] },
+    { id: 'grund', namn: 'God sed för en ideell förening (checklista)', kontrollerad: '2026-11', kallor: [],
+      not: 'En allmän checklista över vad stadgar brukar innehålla. Inte ett myndighetskrav.',
+      krav: [
+        ['namn', 'Namn', 'Föreningens namn.'],
+        ['andamal', 'Ändamål', 'Vad föreningen ska göra.'],
+        ['sate', 'Säte', 'Vilken kommun föreningen har sitt säte i.'],
+        ['medlemskap', 'Medlemskap', 'Hur man blir medlem, utträde, uteslutning och medlemsavgift.'],
+        ['arsmote', 'Årsmöte', 'När årsmötet hålls, hur och när kallelse sker och vilka ärenden som ska behandlas.'],
+        ['rosta', 'Rösträtt och beslut', 'Vem som har rösträtt, hur beslut fattas och vad som gäller vid lika röstetal.'],
+        ['styrelse', 'Styrelse', 'Styrelsens sammansättning, mandattid och uppgifter.'],
+        ['firma', 'Firmateckning', 'Vem som tecknar föreningens firma.'],
+        ['rakenskapsar', 'Räkenskapsår och verksamhetsår', 'Vilken period räkenskapsåret och verksamhetsåret omfattar.'],
+        ['revision', 'Revision', 'Revisorer och deras uppdrag.'],
+        ['andring', 'Stadgeändring', 'Hur stadgarna ändras, till exempel majoritet och antal årsmöten.'],
+        ['upplosning', 'Upplösning', 'Hur föreningen upplöses och vad som händer med tillgångarna.']
+      ] }
+  ];
+  function kravlista(id) { return KRAVLISTOR.find(function (k) { return k.id === id; }) || null; }
+
+  var STADGE_SCHEMA = { type: 'object', additionalProperties: false, required: ['titel', 'paragrafer', 'andringsregel'], properties: {
+    titel: { type: 'string' }, andringsregel: { type: 'string' },
+    paragrafer: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['nr', 'rubrik', 'text'], properties: { nr: { type: 'string' }, rubrik: { type: 'string' }, text: { type: 'string' } } } }
+  } };
+  function stadgeStrukturUppdrag(text, block) {
+    return { schema: STADGE_SCHEMA, block: block || null, maxTokens: 16000,
+      text: block ? 'Läs stadgarna i dokumentet.' : 'Stadgarna:\n"""\n' + utanPersonnummer(text) + '\n"""',
+      system: GEMENSAMT + ' Du delar upp föreningens stadgar i paragrafer. Återge texten ordagrant, utan att ändra, förkorta eller rätta något. ' +
+        'nr är paragrafens nummer som i stadgarna (t.ex. "1", "4 a"), rubrik paragrafens rubrik (tom om den saknas), text hela paragrafens text med radbrytningar mellan stycken och punkter. ' +
+        'titel är dokumentets rubrik. andringsregel är en kort sammanfattning av vad stadgarna säger om hur de ändras (majoritet, antal årsmöten), eller tomt om det inte står.' };
+  }
+  function normaliseraStadgar(svar, meta) {
+    svar = svar || {}; meta = meta || {};
+    var str = function (x) { return typeof x === 'string' ? x.trim() : ''; };
+    var paragrafer = (svar.paragrafer || []).filter(function (p) { return p && (str(p.text) || str(p.rubrik)); })
+      .map(function (p) { return { nr: str(p.nr).replace(/^§\s*/, ''), rubrik: str(p.rubrik), text: utanPersonnummer(str(p.text)) }; });
+    if (!paragrafer.length) throw BokforingsFel('Inga paragrafer hittades i stadgarna.');
+    return { id: meta.id || styrId('st'), titel: str(svar.titel) || 'Stadgar', paragrafer: paragrafer, andringsregel: str(svar.andringsregel),
+      filnamn: meta.filnamn || '', inlast: meta.inlast || '', granskningar: {} };
+  }
+  function stadgarSomText(st) {
+    return (st.paragrafer || []).map(function (p) { return '§ ' + p.nr + (p.rubrik ? ' ' + p.rubrik : '') + '\n' + p.text; }).join('\n\n');
+  }
+
+  var GRANSKNING_SCHEMA = { type: 'object', additionalProperties: false, required: ['sammanfattning', 'resultat'], properties: {
+    sammanfattning: { type: 'string' },
+    resultat: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['krav', 'status', 'paragraf', 'citat', 'kommentar', 'forslag'], properties: {
+      krav: { type: 'string' }, status: { type: 'string', enum: ['uppfylls', 'delvis', 'saknas', 'oklart'] },
+      paragraf: { type: 'string' }, citat: { type: 'string' }, kommentar: { type: 'string' }, forslag: { type: 'string' } } } }
+  } };
+  function granskningsUppdrag(st, lista) {
+    return { schema: GRANSKNING_SCHEMA, maxTokens: 12000,
+      text: 'Kravlista: ' + lista.namn + '\n' + lista.krav.map(function (k) { return '- ' + k[0] + ': ' + k[1] + '. ' + k[2]; }).join('\n') + '\n\nStadgarna:\n' + stadgarSomText(st),
+      system: GEMENSAMT + ' Du granskar föreningens stadgar mot kravlistan. Bedöm varje krav för sig, och bara mot det som står i stadgarna. ' +
+        'status: uppfylls, delvis, saknas eller oklart (om kravet gäller hur föreningen arbetar och inte kan bedömas av stadgarna). ' +
+        'paragraf: paragrafens nummer, citat: den mening ur stadgarna som bedömningen bygger på, ordagrant. kommentar: en kort förklaring. ' +
+        'forslag: vid delvis eller saknas en föreslagen ny eller ändrad lydelse som kan stå i stadgarna, annars tomt. krav: kravets id. Avsluta med en kort sammanfattning.' };
+  }
+  function normaliseraGranskning(svar, lista, st) {
+    svar = svar || {};
+    var helText = stadgarSomText(st || {}).replace(/\s+/g, ' ').toLowerCase();
+    var str = function (x) { return typeof x === 'string' ? x.trim() : ''; };
+    var resultat = lista.krav.map(function (k) {
+      var r = (svar.resultat || []).find(function (x) { return x && str(x.krav) === k[0]; });
+      if (!r) return { krav: k[0], rubrik: k[1], status: 'oklart', paragraf: '', citat: '', kommentar: 'AI gav ingen bedömning av kravet.', forslag: '', citatOsakert: false };
+      var status = ['uppfylls', 'delvis', 'saknas', 'oklart'].indexOf(str(r.status)) >= 0 ? str(r.status) : 'oklart';
+      var citat = str(r.citat);
+      return { krav: k[0], rubrik: k[1], status: status, paragraf: str(r.paragraf).replace(/^§\s*/, ''), citat: citat, kommentar: str(r.kommentar),
+        forslag: status === 'delvis' || status === 'saknas' ? str(r.forslag) : '',
+        citatOsakert: !!citat && helText.indexOf(citat.replace(/\s+/g, ' ').toLowerCase()) < 0 };
+    });
+    return { lista: lista.id, sammanfattning: str(svar.sammanfattning), resultat: resultat };
+  }
+  // Ett förslag blir ett ärende om stadgeändring till årsmötet, med nuvarande och föreslagen lydelse.
+  function stadgearendeText(rad, st) {
+    var p = (st.paragrafer || []).find(function (x) { return x.nr === rad.paragraf; });
+    return 'Stadgeändring: ' + rad.rubrik + '.\n' +
+      (p ? 'Nuvarande lydelse (§ ' + p.nr + (p.rubrik ? ' ' + p.rubrik : '') + '):\n' + p.text + '\n' : 'Nuvarande lydelse: saknas i stadgarna.\n') +
+      'Föreslagen lydelse:\n' + rad.forslag + (st.andringsregel ? '\nEnligt stadgarna: ' + st.andringsregel : '');
   }
 
   // ---------- AI-texter för styrelsen ----------
@@ -5547,6 +5666,14 @@ var VERSIONER = [
     arsrapportUnderskrifter: arsrapportUnderskrifter,
     vantarPaMig: vantarPaMig,
     aiHjalpPa: aiHjalpPa,
+    KRAVLISTOR: KRAVLISTOR,
+    kravlista: kravlista,
+    stadgeStrukturUppdrag: stadgeStrukturUppdrag,
+    normaliseraStadgar: normaliseraStadgar,
+    stadgarSomText: stadgarSomText,
+    granskningsUppdrag: granskningsUppdrag,
+    normaliseraGranskning: normaliseraGranskning,
+    stadgearendeText: stadgearendeText,
     AI_TJANSTVAL: AI_TJANSTVAL,
     aiTjanstFor: aiTjanstFor,
     aiTjanstNamn: aiTjanstNamn,
@@ -6068,7 +6195,7 @@ var VERSIONER = [
   };
   function aiTjanstValHtml() {
     var t = K.aiTjanstFor(store.forening);
-    return '<label for="aiTjanst">AI-tjänst (gäller hela föreningen)</label><select id="aiTjanst" data-aitjanst style="width:auto"' + (lasLage() ? ' disabled' : '') + '>' +
+    return '<label for="aiTjanst">AI-tjänst (gäller hela föreningen)</label><select id="aiTjanst" data-aitjanst style="width:auto;max-width:100%"' + (lasLage() ? ' disabled' : '') + '>' +
       K.AI_TJANSTVAL.map(function (x) { return '<option value="' + x[0] + '"' + (x[0] === t ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('') + '</select>';
   }
   function aiKonfigForm(t) {
@@ -6101,6 +6228,81 @@ var VERSIONER = [
         (x.beslut.length ? '<h3>Beslut</h3><ul>' + x.beslut.map(function (b) { return '<li>' + esc(b.text) + (b.belopp ? ' (' + kr(b.belopp) + ' kr)' : '') + '</li>'; }).join('') + '</ul>' : '') +
         (x.uppgifter.length ? '<h3>Uppgifter (läggs till under Uppgifter)</h3><ul>' + x.uppgifter.map(function (t) { return '<li>' + esc(t.text) + (t.ansvarig ? ' · ' + esc(t.ansvarig) : '') + (t.datum ? ' · senast ' + esc(t.datum) : '') + '</li>'; }).join('') + '</ul>' : '') +
         '<div class="row" style="margin-top:10px"><button class="btn" data-action="ai-protokoll-anvand">Använd utkastet</button><button class="btn btn-secondary" data-action="ai-protokoll-slang">Släng</button></div>';
+    }
+    return html + '</div>';
+  }
+
+  // ---------- Stadgar ----------
+  var stadgeVal = { lista: 'stockholm' };
+  function aktuellaStadgar() { var l = styrData().stadgar || []; return l.length ? l[l.length - 1] : null; }
+
+  // Texten ur en Word-fil (word/document.xml), ett stycke per rad.
+  async function wordTillText(fil) {
+    var JSZip = await laddaJsZip();
+    var zip = await JSZip.loadAsync(await fil.arrayBuffer());
+    var xml = zip.file('word/document.xml');
+    if (!xml) throw new Error('Filen ser inte ut som ett Word-dokument (.docx).');
+    var t = await xml.async('string');
+    var avkoda = function (x) { return x.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&'); };
+    return t.split(/<\/w:p>/).map(function (st) {
+      return avkoda(st.replace(/<w:tab\/>/g, ' ').replace(/<w:br[^>]*\/>/g, '\n').replace(/<[^>]+>/g, ''));
+    }).map(function (x) { return x.trim(); }).filter(Boolean).join('\n');
+  }
+
+  async function lasInStadgar(fil) {
+    var namn = fil.name || 'stadgar';
+    var uppdrag;
+    if (/\.docx$/i.test(namn)) uppdrag = K.stadgeStrukturUppdrag(await wordTillText(fil));
+    else if (/\.pdf$/i.test(namn) || fil.type === 'application/pdf') uppdrag = K.stadgeStrukturUppdrag('', { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: await blobTillBase64(fil) } });
+    else if (/\.(txt|md)$/i.test(namn) || /^text\//.test(fil.type)) uppdrag = K.stadgeStrukturUppdrag(await fil.text());
+    else throw new Error('Välj stadgarna som Word (.docx), PDF eller textfil. Äldre Word-filer (.doc) behöver sparas om som .docx.');
+    var svar = await aiSvar(uppdrag);
+    var st = K.normaliseraStadgar(svar, { filnamn: namn, inlast: idag() });
+    andraStyr('styr', Object.assign({}, styrData(), { stadgar: [st] }), false);
+    visa('Stadgarna är inlästa: ' + antal(st.paragrafer.length, 'paragraf', 'paragrafer') + '. Kontrollera att texten stämmer med originalet.');
+  }
+
+  var GRANSKNINGSTATUS = { uppfylls: ['Uppfylls', 'ok'], delvis: ['Delvis', 'delvis'], saknas: ['Saknas', 'saknas'], oklart: ['Kan inte bedömas', 'oklart'] };
+  function vyStadgar() {
+    var skriv = styrBeh('styr') === 'write';
+    var st = aktuellaStadgar();
+    var html = '<p class="faint" style="margin-top:0">Läs in föreningens stadgar och låt AI granska dem mot Stockholms stads villkor, Skatteverkets krav eller en allmän checklista. ' +
+      'Granskningen är ett stöd, inte juridisk rådgivning.</p>';
+    if (!st) {
+      return html + '<div class="card ai-kort"><h3 style="margin-top:0">✦ Läs in stadgarna</h3><p style="margin-top:0">Välj stadgarna som Word-fil (.docx), PDF eller text. Word ger renast text, men PDF fungerar också. ' +
+        'AI delar upp stadgarna i paragrafer och återger texten ordagrant. Stadgarna sparas i styrelsens fil i OneDrive.</p>' +
+        '<div class="row">' + (!skriv ? '<span class="faint">Du kan läsa styrelsens material men inte ändra det.</span>' : aiKanAnvandas()
+          ? '<button class="btn" data-action="stadgar-valj"' + (aiUtkast.arbetar ? ' disabled' : '') + '>' + (aiUtkast.arbetar === 'stadgar' ? '✦ AI läser stadgarna …' : 'Välj fil med stadgarna') + '</button>'
+          : aiSaknasHtml()) + '</div></div>';
+    }
+    html += '<div class="card"><h3 style="margin-top:0">' + esc(st.titel) + '</h3><p style="margin-top:0">' + antal(st.paragrafer.length, 'paragraf', 'paragrafer') +
+      (st.inlast ? ' · inläst ' + esc(st.inlast) : '') + (st.filnamn ? ' från ' + esc(st.filnamn) : '') + '</p>' +
+      (st.andringsregel ? '<p><strong>Stadgeändring:</strong> ' + esc(st.andringsregel) + '</p>' : '') +
+      '<details><summary>Visa stadgarna</summary><div class="stadgetext">' + st.paragrafer.map(function (p) {
+        return '<p><strong>§ ' + esc(p.nr) + (p.rubrik ? ' ' + esc(p.rubrik) : '') + '</strong><br>' + esc(p.text).replace(/\n/g, '<br>') + '</p>';
+      }).join('') + '</div></details>' +
+      (skriv ? '<div class="row" style="margin-top:10px">' + (aiKanAnvandas() ? '<button class="btn btn-secondary btn-small" data-action="stadgar-valj"' + (aiUtkast.arbetar ? ' disabled' : '') + '>' + (aiUtkast.arbetar === 'stadgar' ? '✦ AI läser …' : 'Läs in nya stadgar') + '</button>' : '') +
+        '<button class="btn btn-secondary btn-small" data-action="stadgar-bort">Ta bort stadgarna</button></div>' : '') + '</div>';
+    var lista = K.kravlista(stadgeVal.lista) || K.KRAVLISTOR[0];
+    var g = (st.granskningar || {})[lista.id];
+    html += '<div class="card ai-kort"><h3 style="margin-top:0">✦ Granska stadgarna</h3>' +
+      '<label for="stadgeLista">Granska mot</label><select id="stadgeLista" data-stadgelista style="width:auto;max-width:100%">' + K.KRAVLISTOR.map(function (l) {
+        return '<option value="' + l.id + '"' + (l.id === lista.id ? ' selected' : '') + '>' + esc(l.namn) + '</option>';
+      }).join('') + '</select>' +
+      '<p class="faint">' + esc(lista.not) + ' Kravlistan kontrollerades ' + esc(lista.kontrollerad) + '.' + (lista.kallor.length ? ' Källa: ' + lista.kallor.map(function (u) { return '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(u.replace(/^https:\/\/(www\.)?/, '').split('/')[0]) + '</a>'; }).join(', ') + '.' : '') + '</p>' +
+      '<div class="row">' + (skriv && aiKanAnvandas() ? '<button class="btn" data-action="stadgar-granska"' + (aiUtkast.arbetar ? ' disabled' : '') + '>' + (aiUtkast.arbetar === 'granska' ? '✦ AI granskar …' : g ? '✦ Granska igen' : '✦ Granska') + '</button>' : skriv ? aiSaknasHtml() : '') + '</div>';
+    if (g) {
+      html += '<p style="margin-bottom:6px"><strong>Granskad ' + esc(g.datum || '') + ':</strong> ' + esc(g.sammanfattning) + '</p>' +
+        '<div class="scroll"><table class="kortlista granskning"><thead><tr><th>Krav</th><th>Bedömning</th><th>I stadgarna</th><th>Kommentar och förslag</th></tr></thead><tbody>' +
+        g.resultat.map(function (r) {
+          var s0 = GRANSKNINGSTATUS[r.status] || GRANSKNINGSTATUS.oklart;
+          return '<tr><td data-etikett="Krav"><strong>' + esc(r.rubrik) + '</strong></td>' +
+            '<td data-etikett="Bedömning"><span class="granskning-pill ' + s0[1] + '">' + s0[0] + '</span></td>' +
+            '<td data-etikett="I stadgarna"><div>' + (r.paragraf ? '§ ' + esc(r.paragraf) : '') + (r.citat ? '<div class="faint">"' + esc(r.citat) + '"</div>' : '') +
+              (r.citatOsakert ? '<div class="fel">Citatet hittades inte ordagrant i stadgarna. Kontrollera.</div>' : '') + '</div></td>' +
+            '<td data-etikett="Kommentar"><div>' + esc(r.kommentar) + (r.forslag ? '<div class="forslag-lydelse"><span class="faint">Förslag till lydelse:</span><br>' + esc(r.forslag) + '</div>' +
+              (skriv ? (r.arende ? '<span class="ok">Ärende skapat</span> <button class="lank-text" data-vy="st-arenden">Till Ärenden</button>' : '<button class="btn btn-secondary btn-small" data-action="stadgar-arende" data-krav="' + esc(r.krav) + '">Skapa ärende till årsmötet</button>') : '') : '') + '</div></td></tr>';
+        }).join('') + '</tbody></table></div>';
     }
     return html + '</div>';
   }
@@ -6649,7 +6851,7 @@ var VERSIONER = [
   // Förtroendeuppdragen ligger i en egen fil i mappen, så att den kan delas med valberedningen utan resten.
 
   var STYRFILER = {
-    styr: { fil: STYRFIL, tom: K.tomStyrelse, norm: K.normaliseraStyrelse, nycklar: ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter'] },
+    styr: { fil: STYRFIL, tom: K.tomStyrelse, norm: K.normaliseraStyrelse, nycklar: ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter', 'stadgar'] },
     upp: { fil: UPPDRAGFIL, tom: K.tomaUppdrag, norm: K.normaliseraUppdrag, nycklar: ['uppdrag'] }
   };
 
@@ -8689,6 +8891,7 @@ var VERSIONER = [
     ['st-uppgifter', 'Uppgifter'],
     ['st-uppdrag', 'Förtroendeuppdrag'],
     ['st-arenden', 'Ärenden'],
+    ['st-stadgar', 'Stadgar'],
     ['arsmote', 'Årsmötet'],
     ['staden', 'Stockholms stad'],
     ['arkiv', 'År och arkiv'],
@@ -8700,7 +8903,7 @@ var VERSIONER = [
     ['oversikt', 'Översikt', ['oversikt']],
     ['bokforing', 'Bokföring', ['inlasning', 'verifikationer', 'ny', 'dokument', 'huvudbok', 'rapporter', 'bokslut', 'kontoplan']],
     ['medlemmar', 'Medlemsregister', ['m-statistik', 'm-koppla', 'm-lista', 'm-betalare', 'm-avgifter', 'm-personuppgifter']],
-    ['styrelsen', 'Styrelsen', ['st-moten', 'st-beslut', 'st-uppgifter', 'st-uppdrag', 'st-arenden', 'arsmote', 'staden']],
+    ['styrelsen', 'Styrelsen', ['st-moten', 'st-beslut', 'st-uppgifter', 'st-uppdrag', 'st-arenden', 'st-stadgar', 'arsmote', 'staden']],
     ['installningar', 'Inställningar', ['arkiv', 'om']]
   ];
   var senastIGrupp = {};
@@ -8774,7 +8977,7 @@ var VERSIONER = [
     var html = {
       oversikt: vyOversikt,
       arsmote: function (a) { return vyArsmoteSida(a); },
-      'st-moten': vyStyrelsen, 'st-beslut': vyStyrelsen, 'st-uppgifter': vyStyrelsen, 'st-uppdrag': vyStyrelsen, 'st-arenden': vyStyrelsen,
+      'st-moten': vyStyrelsen, 'st-beslut': vyStyrelsen, 'st-uppgifter': vyStyrelsen, 'st-uppdrag': vyStyrelsen, 'st-arenden': vyStyrelsen, 'st-stadgar': vyStyrelsen,
       staden: function (a) { return vyStaden(a); },
       inlasning: vyInlasning,
       verifikationer: vyVerifikationer,
@@ -10659,7 +10862,7 @@ var VERSIONER = [
 
   // ---------- Styrelsen ----------
 
-  var STYRFLIKAR = [['moten', 'Möten och protokoll'], ['beslut', 'Beslut'], ['uppgifter', 'Uppgifter'], ['uppdrag', 'Förtroendeuppdrag'], ['arenden', 'Ärenden till årsmötet']];
+  var STYRFLIKAR = [['moten', 'Möten och protokoll'], ['beslut', 'Beslut'], ['uppgifter', 'Uppgifter'], ['uppdrag', 'Förtroendeuppdrag'], ['arenden', 'Ärenden till årsmötet'], ['stadgar', 'Stadgar']];
   var UPPDRAGSROLLER = ['Ordförande', 'Vice ordförande', 'Kassör', 'Sekreterare', 'Ledamot', 'Suppleant', 'Revisor', 'Revisorssuppleant', 'Valberedning'];
   var ARENDETYPER = [['stadgar', 'Stadgeändring'], ['forslag', 'Styrelsens förslag'], ['motion', 'Motion']];
   var ARENDESTATUS = [['forslag', 'Förslag'], ['arsmote', 'Till årsmötet'], ['antaget', 'Antaget'], ['avslaget', 'Avslaget']];
@@ -10775,7 +10978,7 @@ var VERSIONER = [
     if (bs === 'read') html += '<p class="faint">Du kan läsa styrelsens material men inte ändra det.</p>';
     else if (!bs) html += '<p class="faint">Du ser förtroendeuppdragen. Resten av styrelsens material är inte delat med dig.</p>';
     if (odNu.styrFel) html += '<p class="fel">' + esc(odNu.styrFel) + '</p>';
-    html += '<div class="arsmote-form">' + { moten: vyMoten, beslut: vyBeslut, uppgifter: vyUppgifter, uppdrag: vyUppdrag, arenden: vyArenden }[styrVy](ar) + '</div>';
+    html += '<div class="arsmote-form">' + { moten: vyMoten, beslut: vyBeslut, uppgifter: vyUppgifter, uppdrag: vyUppdrag, arenden: vyArenden, stadgar: vyStadgar }[styrVy](ar) + '</div>';
     if (odAnslutet() && od.styrMapp) html += '<p class="faint" style="font-size:.85em;margin-top:14px">Sparas i mappen ' + esc(od.styrMapp.namn) + ' i OneDrive. Alla i styrelsen kan ändra samtidigt; ändrar två personer samma sak visas det.</p>';
     return html;
   }
@@ -12770,6 +12973,7 @@ var VERSIONER = [
       setAktivt(Object.assign({}, arA, { arsmote: am }));
       if (odNu.visaArsmote || ['motesdatum', 'dagordning', 'rostalder', 'bidragnot'].indexOf(t.dataset.arsmote) >= 0) { odNu.arsmoteVersion = (odNu.arsmoteVersion || 0) + 1; render(); }
     }
+    if (t.hasAttribute('data-stadgelista')) { stadgeVal.lista = t.value; render(); return; }
     if (t.hasAttribute('data-aitjanst')) {
       if (lasLage()) { visa('Endast läsning.', true); render(); return; }
       store.forening.aiTjanst = t.value;
@@ -13648,6 +13852,43 @@ var VERSIONER = [
       aiKorFor('kallelse', function () {
         return aiSvar(uppdrag).then(function (svar) { aiUtkast.kallelse = { text: svar.text || '', varning: K.siffrorUtanforFakta(svar.text, uppdrag.text) }; });
       });
+    },
+    'stadgar-valj': function () {
+      var input = document.createElement('input');
+      input.type = 'file'; input.accept = '.docx,.pdf,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain';
+      input.onchange = function () { var f = input.files[0]; if (f) aiKorFor('stadgar', function () { return lasInStadgar(f); }); };
+      input.click();
+    },
+    'stadgar-bort': function () {
+      if (!window.confirm('Ta bort de inlästa stadgarna och granskningarna från appen? Originalfilen påverkas inte.')) return;
+      andraStyr('styr', Object.assign({}, styrData(), { stadgar: [] }));
+      visa('Stadgarna är borttagna från appen.');
+    },
+    'stadgar-granska': function () {
+      var st = aktuellaStadgar(), lista = K.kravlista(stadgeVal.lista);
+      if (!st || !lista) return;
+      aiKorFor('granska', function () {
+        return aiSvar(K.granskningsUppdrag(st, lista)).then(function (svar) {
+          var g = Object.assign(K.normaliseraGranskning(svar, lista, st), { datum: idag() });
+          var ny = Object.assign({}, st, { granskningar: Object.assign({}, st.granskningar, (function () { var o = {}; o[lista.id] = g; return o; })()) });
+          andraStyr('styr', Object.assign({}, styrData(), { stadgar: (styrData().stadgar || []).map(function (x) { return x.id === st.id ? ny : x; }) }), false);
+        });
+      });
+    },
+    'stadgar-arende': function (t) {
+      var st = aktuellaStadgar(), lista = K.kravlista(stadgeVal.lista);
+      var g = st && st.granskningar && st.granskningar[lista.id];
+      var rad = g && g.resultat.find(function (r) { return r.krav === t.dataset.krav; });
+      if (!rad || !rad.forslag) return;
+      try {
+        var d = K.laggTillArende(styrData(), { text: K.stadgearendeText(rad, st), typ: 'stadgar' });
+        var arendeId = d.arenden[d.arenden.length - 1].id;
+        var g2 = Object.assign({}, g, { resultat: g.resultat.map(function (r) { return r.krav === rad.krav ? Object.assign({}, r, { arende: arendeId }) : r; }) });
+        var gr = Object.assign({}, st.granskningar); gr[lista.id] = g2;
+        d = Object.assign({}, d, { stadgar: d.stadgar.map(function (x) { return x.id === st.id ? Object.assign({}, x, { granskningar: gr }) : x; }) });
+        andraStyr('styr', d, false);
+        visa('Ett ärende om stadgeändring är skapat under Ärenden till årsmötet.');
+      } catch (err) { visa(err.message, true); }
     },
     'ai-konfig-spara': function () {
       var t = K.aiTjanstFor(store.forening), k = aiKonfig(), x = Object.assign({}, k[t]);
