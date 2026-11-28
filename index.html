@@ -281,6 +281,10 @@
   .ai-marke { display: inline-block; margin-top: 3px; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--guld-ljus); color: var(--ink); }
   .ai-status { text-decoration: none; color: var(--ink-soft); font-weight: 600; }
   .ai-status.av { color: var(--ink-faint); font-weight: 400; }
+  .ai-kort { border-color: var(--guld); }
+  .ai-kort textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; line-height: 1.5; }
+  .ai-utkast-par { padding: 8px 0; border-top: 1px solid var(--hairline); }
+  .ai-utkast-par div { margin-top: 2px; }
   .vaxel { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 15px; color: var(--ink); cursor: pointer; }
   .vaxel input { width: 20px; height: 20px; accent-color: var(--guld); margin: 0; }
   .lank-knapp { background: none; border: 0; color: var(--ink-faint); font: inherit; cursor: pointer; text-decoration: underline; padding: 0; text-align: left; }
@@ -496,6 +500,14 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.72', datum: '2026-11-28',
+    nyheter: [
+      'AI-hjälp för styrelsen: i ett protokoll kan sekreteraren klistra in sina stödanteckningar och få ett utkast med paragrafer, beslut och uppgifter, som granskas innan det sparas.',
+      'Under Årsmötet skriver AI utkast till verksamhetsberättelse och kallelse utifrån årets möten, beslut, medlemsantal och ekonomitexten. Siffror som inte finns i appens underlag markeras så att de kan kontrolleras.',
+      'Personnummer tas bort ur texterna innan de skickas. Funktionerna följer föreningens inställning för AI-hjälp.'
+    ]
+  },
   {
     version: '1.71', datum: '2026-11-28',
     nyheter: [
@@ -4483,6 +4495,92 @@ var VERSIONER = [
   // AI-hjälpen (Claude tolkar PDF:er och bilder) gäller hela föreningen. Den är på om föreningen inte har stängt av den.
   function aiHjalpPa(forening) { return !forening || forening.aiHjalp !== false; }
 
+  // ---------- AI-texter för styrelsen ----------
+  // Varje uppdrag är { system, text, schema } och fungerar med vilken AI-tjänst som helst. Svaren är alltid utkast som granskas.
+
+  var PERSONNUMMER = /\b(19|20)?\d{6}[-+ ]?\d{4}\b/g;
+  function utanPersonnummer(t) { return String(t == null ? '' : t).replace(PERSONNUMMER, '…'); }
+  var TEXTSCHEMA = { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false };
+  var PROTOKOLL_SCHEMA = { type: 'object', additionalProperties: false, required: ['paragrafer', 'beslut', 'uppgifter'], properties: {
+    paragrafer: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['rubrik', 'text'], properties: { rubrik: { type: 'string' }, text: { type: 'string' } } } },
+    beslut: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['text', 'belopp'], properties: { text: { type: 'string' }, belopp: { type: 'string' } } } },
+    uppgifter: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['text', 'ansvarig', 'datum'], properties: { text: { type: 'string' }, ansvarig: { type: 'string' }, datum: { type: 'string' } } } }
+  } };
+  var GEMENSAMT = 'Du hjälper styrelsen i en svensk ideell förening. Skriv på enkel, korrekt svenska. Hitta aldrig på fakta, namn, siffror eller beslut som inte står i underlaget. ' +
+    'Skriv aldrig personnummer. Texten är ett utkast som styrelsen granskar.';
+
+  function protokollUppdrag(mote, anteckningar) {
+    var system = GEMENSAMT + ' Du skriver protokoll utifrån sekreterarens stödanteckningar. ' +
+      'Använd mötets paragrafer i samma ordning och med samma rubriker. Skriv kort och sakligt i dåtid ("Styrelsen beslutade att …", "Mötet diskuterade …"). ' +
+      'Behåll paragrafens befintliga text om anteckningarna inte säger något om den, och lämna den tom om den var tom. Lägg inte till nya paragrafer. ' +
+      'Beslut: ett beslut per post, formulerat som "att …"; belopp i kronor som text om det nämns, annars tom. ' +
+      'Uppgifter: det någon ska göra, med ansvarig som den skrivs i anteckningarna och datum som ÅÅÅÅ-MM-DD om det nämns, annars tomt.';
+    var text = 'Möte: ' + (mote.typ || 'styrelse') + ' ' + (mote.datum || '') + '\nParagrafer:\n' +
+      (mote.paragrafer || []).map(function (p, i) { return (i + 1) + '. ' + p.rubrik + (p.text ? ': ' + p.text : ''); }).join('\n') +
+      '\n\nStödanteckningar:\n"""\n' + utanPersonnummer(anteckningar) + '\n"""';
+    return { system: system, text: text, schema: PROTOKOLL_SCHEMA };
+  }
+
+  // Svaret blir ett utkast med samma paragrafer som mötet, beslut med belopp i ören och uppgifter med giltigt datum.
+  function normaliseraProtokollutkast(svar, mote) {
+    svar = svar || {};
+    var str = function (x) { return utanPersonnummer(typeof x === 'string' ? x : '').trim(); };
+    var ut = (mote.paragrafer || []).map(function (p, i) {
+      var sp = svar.paragrafer || [];
+      // Matcha på rubriken; på plats i listan bara när svaret har exakt lika många paragrafer som mötet.
+      var f = sp.find(function (x) { return x && str(x.rubrik).toLowerCase() === String(p.rubrik).trim().toLowerCase(); }) ||
+        (sp.length === (mote.paragrafer || []).length ? sp[i] : null);
+      var t = f ? str(f.text) : '';
+      return { rubrik: p.rubrik, text: t || p.text || '' };
+    });
+    var beslut = (svar.beslut || []).filter(function (b) { return b && str(b.text); }).map(function (b) {
+      var belopp = 0;
+      if (str(b.belopp)) { try { belopp = Math.abs(parseBelopp(str(b.belopp).replace(/\s*(kr|kronor|sek):?$/i, ''))); } catch (e) { belopp = 0; } }
+      return { text: str(b.text), belopp: belopp, verifikation: null };
+    });
+    var uppgifter = (svar.uppgifter || []).filter(function (u) { return u && str(u.text); }).map(function (u) {
+      return { text: str(u.text), ansvarig: str(u.ansvarig), datum: arGiltigtDatum(str(u.datum)) ? str(u.datum) : '' };
+    });
+    return { paragrafer: ut, beslut: beslut, uppgifter: uppgifter };
+  }
+
+  // Fakta till verksamhetsberättelsen, samlade av appen. Siffrorna kommer härifrån, inte från AI.
+  function verksamhetsfakta(f) {
+    f = f || {};
+    var rader = ['Förening: ' + (f.forening || ''), 'Verksamhetsår: ' + (f.ar || '')];
+    var moten = f.moten || [];
+    var typer = {};
+    moten.forEach(function (m) { typer[m.typ] = (typer[m.typ] || 0) + 1; });
+    rader.push('Möten under året: ' + (moten.length ? Object.keys(typer).map(function (k) { return typer[k] + ' ' + k; }).join(', ') : 'inga registrerade'));
+    if ((f.beslut || []).length) rader.push('Beslut under året:\n' + f.beslut.map(function (b) { return '- ' + b.datum + ': ' + utanPersonnummer(b.text); }).join('\n'));
+    if ((f.medlemmar || []).length) rader.push('Betalande medlemmar per termin: ' + f.medlemmar.map(function (m) { return m.termin + ' ' + m.antal; }).join(', '));
+    if (f.ekonomitext) rader.push('Ekonomi (färdig text med siffror från bokföringen, återge den oförändrad):\n' + f.ekonomitext);
+    if (f.ovrigt) rader.push('Styrelsens egna anteckningar:\n' + utanPersonnummer(f.ovrigt));
+    return rader.join('\n');
+  }
+  function verksamhetsberattelseUppdrag(fakta) {
+    return { schema: TEXTSCHEMA, text: fakta,
+      system: GEMENSAMT + ' Skriv ett utkast till styrelsens verksamhetsberättelse för årsmötet utifrån fakta nedan. Börja med "Styrelsen för … får härmed avge följande verksamhetsberättelse för …". ' +
+        'Ta upp styrelsens arbete och möten, viktiga beslut, medlemmarna och ekonomin. Ekonomitexten återges ordagrant. Använd bara siffror som finns i fakta. ' +
+        'Avsluta med en mening om att styrelsen tackar medlemmarna och föreslår att årsmötet beviljar ansvarsfrihet. Svara i fältet text.' };
+  }
+  function kallelseUppdrag(k) {
+    k = k || {};
+    var fakta = ['Förening: ' + (k.forening || ''), 'Datum: ' + (k.datum || '[datum]'), 'Tid: ' + (k.tid || '[tid]'), 'Plats: ' + (k.plats || '[plats]'),
+      'Rösträtt från ålder: ' + (k.rostalder || ''), 'Handlingar finns tillgängliga från: ' + (k.handlingarFran || ''), 'Föredragningslista:\n' + (k.dagordning || '')].join('\n');
+    return { schema: TEXTSCHEMA, text: fakta,
+      system: GEMENSAMT + ' Skriv en kort, vänlig kallelse till föreningens årsmöte utifrån fakta. Ta med datum, tid, plats, föredragningslistan som numrerad lista, ' +
+        'när handlingarna finns tillgängliga och vem som har rösträtt. Saknas en uppgift, skriv platshållaren inom hakparentes. Svara i fältet text.' };
+  }
+
+  // Tal i AI-texten som inte finns i underlaget (t.ex. ett hittat belopp). Årtal och små tal räknas inte.
+  function siffrorUtanforFakta(text, fakta) {
+    var tal = function (t) { return (String(t || '').match(/\d[\d\s.,]*\d|\d/g) || []).map(function (x) { return x.replace(/[\s.]/g, '').replace(/,00$/, '').replace(/,/g, ''); }); };
+    var finns = {};
+    tal(fakta).forEach(function (x) { finns[x] = true; });
+    return tal(text).filter(function (x, i, l) { return l.indexOf(x) === i && x.length >= 3 && !/^(19|20)\d\d$/.test(x) && !finns[x]; });
+  }
+
   // Det som väntar på en person i styrelsen: protokoll och årsrapporter att skriva under, egna uppgifter och nästa möte.
   // jag: e-post. opt.namn: personens namn (uppgifternas ansvarig är fritext). opt.idag: dagens datum.
   function vantarPaMig(styr, jag, opt) {
@@ -5360,6 +5458,12 @@ var VERSIONER = [
     arsrapportUnderskrifter: arsrapportUnderskrifter,
     vantarPaMig: vantarPaMig,
     aiHjalpPa: aiHjalpPa,
+    protokollUppdrag: protokollUppdrag,
+    normaliseraProtokollutkast: normaliseraProtokollutkast,
+    verksamhetsfakta: verksamhetsfakta,
+    verksamhetsberattelseUppdrag: verksamhetsberattelseUppdrag,
+    kallelseUppdrag: kallelseUppdrag,
+    siffrorUtanforFakta: siffrorUtanforFakta,
     lasUppProtokoll: lasUppProtokoll,
     signera: signera,
     registreraPapper: registreraPapper,
@@ -5765,21 +5869,107 @@ var VERSIONER = [
     return err.message;
   }
 
+  // Mellanlager för AI-tjänsterna. Ett uppdrag är { system, text, schema, block (PDF eller bild), maxTokens } och svaret är JSON enligt schemat.
+  // Varje tjänst översätter uppdraget till sitt eget API; resten av appen vet inte vilken tjänst som används.
+  var AI_TJANSTER = {
+    claude: {
+      namn: 'Claude',
+      svar: async function (u) {
+        var client = await claudeKlient();
+        var svar = await client.beta.messages.create({
+          model: MODELL,
+          max_tokens: u.maxTokens || 8000,
+          betas: ['server-side-fallback-2026-07-01'],
+          fallbacks: 'default',
+          output_config: { effort: 'medium', format: { type: 'json_schema', schema: u.schema } },
+          system: u.system,
+          messages: [{ role: 'user', content: (u.block ? [u.block] : []).concat([{ type: 'text', text: u.text }]) }]
+        });
+        if (svar.stop_reason === 'refusal') throw new Error('AI-tjänsten avböjde uppdraget.');
+        if (svar.stop_reason === 'max_tokens') throw new Error('Svaret blev för långt. Dela upp underlaget i mindre delar.');
+        return JSON.parse(svar.content.filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join(''));
+      }
+    }
+  };
+  function aiTjanst() { return AI_TJANSTER.claude; }
+  async function aiSvar(uppdrag) {
+    if (!K.aiHjalpPa(store.forening)) throw new Error('AI-hjälpen är avstängd för föreningen. Den kan slås på under Inställningar, År och arkiv.');
+    return aiTjanst().svar(uppdrag);
+  }
+
   async function tolkaMedClaude(ar, block) {
-    var client = await claudeKlient();
-    var svar = await client.beta.messages.create({
-      model: MODELL,
-      max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: K.TOLKNING_SCHEMA } },
-      system: K.tolkningsInstruktion(ar, store.forening, store.motpartsregler),
-      messages: [{ role: 'user', content: [block, { type: 'text', text: 'Tolka underlaget.' }] }]
-    });
-    if (svar.stop_reason === 'refusal') throw new Error('Claude avböjde att tolka underlaget.');
-    if (svar.stop_reason === 'max_tokens') throw new Error('Svaret blev för långt. Dela upp kontoutdraget i mindre delar.');
-    var text = svar.content.filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('');
-    return JSON.parse(text);
+    return aiSvar({ system: K.tolkningsInstruktion(ar, store.forening, store.motpartsregler), text: 'Tolka underlaget.', schema: K.TOLKNING_SCHEMA, block: block, maxTokens: 16000 });
+  }
+
+  // ---------- AI-utkast för styrelsen ----------
+  var aiUtkast = { protokoll: null, verksamhet: null, kallelse: null, arbetar: null };
+  function aiKorFor(nyckel, uppgift) {
+    aiUtkast.arbetar = nyckel; render();
+    return uppgift().then(function () { aiUtkast.arbetar = null; render(); }, function (err) { aiUtkast.arbetar = null; render(); visa(claudeFel(err), true); });
+  }
+  function aiKanAnvandas() { return K.aiHjalpPa(store.forening) && !!lasNyckel(); }
+  function aiSaknasText() { return !K.aiHjalpPa(store.forening) ? 'AI-hjälpen är avstängd för föreningen.' : 'Lägg in en API-nyckel under Inställningar, År och arkiv, för att använda AI-hjälpen.'; }
+
+  function aiProtokollKort(m, redigera) {
+    if (!redigera || !K.aiHjalpPa(store.forening)) return '';
+    var u = aiUtkast.protokoll && aiUtkast.protokoll.moteId === m.id ? aiUtkast.protokoll : null;
+    var html = '<div class="card ai-kort"><h3 style="margin-top:0">✦ Skriv protokollet från anteckningar</h3>';
+    if (!u || !u.utkast) {
+      html += '<p class="faint" style="margin-top:0">Klistra in dina stödanteckningar från mötet. AI fyller i paragraferna och föreslår beslut och uppgifter. Du granskar utkastet innan något sparas. ' +
+        'Anteckningarna skickas till AI-tjänsten; personnummer tas bort först.</p>' +
+        '<textarea id="aiAnteckningar" rows="5" placeholder="T.ex. Kassören redovisade. Beslut: höja terminsavgiften till 1 400 kr från HT. Anna kollar ny lokal till 1 dec.">' + esc(u ? u.anteckningar : '') + '</textarea>' +
+        '<div class="row" style="margin-top:8px">' + (aiKanAnvandas()
+          ? '<button class="btn" data-action="ai-protokoll"' + (aiUtkast.arbetar ? ' disabled' : '') + '>' + (aiUtkast.arbetar === 'protokoll' ? '✦ AI skriver …' : '✦ Skriv utkast') + '</button>'
+          : '<span class="faint">' + esc(aiSaknasText()) + '</span>') + '</div>';
+    } else {
+      var x = u.utkast;
+      html += '<p class="faint" style="margin-top:0">Utkast från AI. Läs igenom, och använd det eller släng det. Du kan ändra allt efteråt.</p>' +
+        x.paragrafer.map(function (p, i) { return '<div class="ai-utkast-par"><strong>§' + (i + 1) + ' ' + esc(p.rubrik) + '</strong><div>' + (p.text ? esc(p.text).replace(/\n/g, '<br>') : '<span class="faint">(tom)</span>') + '</div></div>'; }).join('') +
+        (x.beslut.length ? '<h3>Beslut</h3><ul>' + x.beslut.map(function (b) { return '<li>' + esc(b.text) + (b.belopp ? ' (' + kr(b.belopp) + ' kr)' : '') + '</li>'; }).join('') + '</ul>' : '') +
+        (x.uppgifter.length ? '<h3>Uppgifter (läggs till under Uppgifter)</h3><ul>' + x.uppgifter.map(function (t) { return '<li>' + esc(t.text) + (t.ansvarig ? ' · ' + esc(t.ansvarig) : '') + (t.datum ? ' · senast ' + esc(t.datum) : '') + '</li>'; }).join('') + '</ul>' : '') +
+        '<div class="row" style="margin-top:10px"><button class="btn" data-action="ai-protokoll-anvand">Använd utkastet</button><button class="btn btn-secondary" data-action="ai-protokoll-slang">Släng</button></div>';
+    }
+    return html + '</div>';
+  }
+
+  // Fakta och uppdrag för årsmötets texter.
+  function verksamhetsfaktaFor(ar) {
+    var s = styrData();
+    var iAr = function (d) { return d && d >= ar.start && d <= ar.slut; };
+    var moten = (s.moten || []).filter(function (m) { return iAr(m.datum); }).map(function (m) { return { typ: motesNamn(m).toLowerCase(), datum: m.datum }; });
+    var beslut = K.beslutslogg(s).filter(function (b) { return iAr(b.datum); }).reverse().map(function (b) { return { datum: b.datum, text: b.text }; });
+    var medlemmar = [];
+    if (K.registerHarData(reg())) {
+      [K.terminForDatum(ar.start), K.terminForDatum(ar.slut)].filter(function (t, i, l) { return l.indexOf(t) === i; }).forEach(function (t) {
+        medlemmar.push({ termin: t, antal: K.terminsstatistik(reg(), t, store.ar).totalt.antal });
+      });
+    }
+    return K.verksamhetsfakta({ forening: store.forening.namn, ar: K.arNamn(ar), moten: moten, beslut: beslut, medlemmar: medlemmar, ekonomitext: ekonomitextFor(ar),
+      ovrigt: aiUtkast.verksamhetAnteckningar || '' });
+  }
+
+  function aiArsmoteKort(ar) {
+    if (styrBeh('styr') !== 'write' || !K.aiHjalpPa(store.forening)) return '';
+    var a = arsmoteData(ar);
+    var knapp = function (action, nyckel, text) {
+      return aiKanAnvandas() ? '<button class="btn btn-small" data-action="' + action + '"' + (aiUtkast.arbetar ? ' disabled' : '') + '>' + (aiUtkast.arbetar === nyckel ? '✦ AI skriver …' : text) + '</button>' : '<span class="faint">' + esc(aiSaknasText()) + '</span>';
+    };
+    var resultat = function (nyckel, rubrik) {
+      var r = aiUtkast[nyckel];
+      if (!r) return '';
+      return '<label for="ai-' + nyckel + '">' + rubrik + ' (utkast från AI, ändra fritt)</label><textarea id="ai-' + nyckel + '" rows="10" data-aitext="' + nyckel + '">' + esc(r.text) + '</textarea>' +
+        (r.varning && r.varning.length ? '<p class="fel" style="margin:4px 0">Kontrollera: talen ' + esc(r.varning.join(', ')) + ' finns inte i appens underlag.</p>' : '') +
+        '<div class="row" style="margin-top:4px"><button class="btn btn-secondary btn-small" data-action="ai-kopiera" data-nyckel="' + nyckel + '">Kopiera texten</button></div>';
+    };
+    return '<div class="card ai-kort"><h3 style="margin-top:0">✦ AI-utkast till årsmötet</h3>' +
+      '<p class="faint" style="margin-top:0">AI skriver utkast utifrån det som finns i appen: årets möten och beslut, medlemsantal och ekonomitexten med siffror från bokföringen. Texterna skickas till AI-tjänsten och sparas inte i appen; kopiera dem till ert dokument.</p>' +
+      '<h3>Verksamhetsberättelse</h3><label for="aiVbAnteckningar">Egna anteckningar om året (valfritt), t.ex. läger, uppvisningar och nya grupper</label>' +
+      '<textarea id="aiVbAnteckningar" rows="3">' + esc(aiUtkast.verksamhetAnteckningar || '') + '</textarea>' +
+      '<div class="row" style="margin-top:6px">' + knapp('ai-verksamhet', 'verksamhet', '✦ Skriv utkast till verksamhetsberättelse') + '</div>' + resultat('verksamhet', 'Verksamhetsberättelse') +
+      '<h3>Kallelse</h3><div class="grid2"><div><label for="aiKalTid">Tid</label><input id="aiKalTid" value="' + esc(aiUtkast.kalTid || '') + '" placeholder="18.00"></div>' +
+      '<div><label for="aiKalPlats">Plats</label><input id="aiKalPlats" value="' + esc(aiUtkast.kalPlats || '') + '" placeholder="Klubblokalen"></div></div>' +
+      (a.motesdatum ? '' : '<p class="faint">Ange årsmötets datum ovan, så kommer det med i kallelsen.</p>') +
+      '<div class="row" style="margin-top:6px">' + knapp('ai-kallelse', 'kallelse', '✦ Skriv utkast till kallelse') + '</div>' + resultat('kallelse', 'Kallelse') + '</div>';
   }
 
   // ---------- OneDrive ----------
@@ -9437,8 +9627,10 @@ var VERSIONER = [
     var aiPa = K.aiHjalpPa(store.forening);
     html += '<h2 id="claude-installning">✦ AI-hjälp</h2><div class="card">' +
       '<label class="vaxel"><input type="checkbox" data-aihjalp' + (aiPa ? ' checked' : '') + (lasLage() ? ' disabled' : '') + '> <span><strong>Använd AI-hjälp</strong> ' + (aiPa ? 'på' : 'av') + '</span></label>' +
-      '<p class="faint" style="margin-top:6px">Gäller hela föreningen. Med AI-hjälp läser Claude fakturor, kvitton och kontoutdrag i PDF eller som bild och föreslår kontering. ' +
-      'Du godkänner alltid förslaget innan något bokförs. Underlagen skickas till Anthropic för tolkning. Utan AI-hjälp läses kontoutdrag i CSV och Excel som vanligt, och allt annat bokförs för hand.</p>' +
+      '<p class="faint" style="margin-top:6px">Gäller hela föreningen. Med AI-hjälp läser AI-tjänsten fakturor, kvitton och kontoutdrag i PDF eller som bild och föreslår kontering, ' +
+      'och hjälper styrelsen med utkast till protokoll, verksamhetsberättelse och kallelse. Du godkänner alltid förslag och utkast innan något sparas. ' +
+      'Underlag och texter skickas till AI-tjänsten (i dag Claude från Anthropic) när du använder funktionerna; personnummer tas bort ur styrelsens texter först. ' +
+      'Utan AI-hjälp läses kontoutdrag i CSV och Excel som vanligt, och allt annat görs för hand.</p>' +
       (aiPa ? '<h3>API-nyckel</h3><p>Claude kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. Nyckeln är personlig. ' +
       'Ett vanligt kvitto kostar några tiotals öre att tolka.</p>' +
       '<p class="faint">' + (od.refreshToken ? 'Nyckeln sparas i webbläsaren och i din privata appmapp i OneDrive (Appar/Föreningsbokföring), så att den följer med till dina andra enheter. Den ligger inte i föreningens delade mapp.'
@@ -10130,7 +10322,7 @@ var VERSIONER = [
         '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="styr-arsmote-protokoll">Skapa årsmötesprotokoll</button>' +
         '<button class="btn btn-secondary btn-small" data-action="styr-uppg-arsmote">Lägg in checklistan som uppgifter</button></div></div>';
     }
-    return html + vyArsmotesHandlingar(ar) + vyArsmotet(ar) + vyArsmote(ar);
+    return html + aiArsmoteKort(ar) + vyArsmotesHandlingar(ar) + vyArsmotet(ar) + vyArsmote(ar);
   }
 
   function nastaFrister() {
@@ -10533,6 +10725,7 @@ var VERSIONER = [
       f.justerare.map(function (j, i) { return funktionarRad('Justerare', 'justerare', i, j, dis); }).join('') +
       (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-just-ny">Lägg till justerare</button>' : '') + '</div>';
     // Paragrafer
+    html += aiProtokollKort(m, redigera);
     html += '<div class="card"><h3 style="margin-top:0">Paragrafer</h3>' + m.paragrafer.map(function (p, i) {
       return '<div style="border-top:1px solid var(--hairline);padding:8px 0"><div class="row" style="align-items:center"><strong>§ ' + (i + 1) + '</strong>' +
         '<input data-pf="rubrik" data-si="' + i + '" value="' + esc(p.rubrik) + '" placeholder="Rubrik" style="flex:1;min-width:160px" aria-label="Rubrik för paragraf ' + (i + 1) + '"' + dis + '>' +
@@ -12222,6 +12415,7 @@ var VERSIONER = [
       if (el) el.innerHTML = utlaggSummaText(aktivt());
       return;
     }
+    if (t.dataset && t.dataset.aitext && aiUtkast[t.dataset.aitext]) { aiUtkast[t.dataset.aitext].text = t.value; return; }
     if (t.hasAttribute && t.hasAttribute('data-versok')) {
       verSok = t.value; var pos = t.selectionStart; render();
       var nytt = document.getElementById('verSok'); if (nytt) { nytt.focus(); try { nytt.setSelectionRange(pos, pos); } catch (e2) { /* search-fält i vissa webbläsare */ } }
@@ -13223,6 +13417,52 @@ var VERSIONER = [
     },
     'ver-ordning': function () { verSenastForst = !verSenastForst; render(); },
     'ver-filter': function (t) { verFilter = t.dataset.filter; render(); },
+    'ai-protokoll': function () {
+      var m = oppetMoteObj(); if (!m) return;
+      var text = varde('aiAnteckningar');
+      if (!text) { visa('Klistra in dina anteckningar först.', true); return; }
+      aiUtkast.protokoll = { moteId: m.id, anteckningar: text, utkast: null };
+      aiKorFor('protokoll', function () {
+        return aiSvar(K.protokollUppdrag(m, text)).then(function (svar) { aiUtkast.protokoll.utkast = K.normaliseraProtokollutkast(svar, m); });
+      });
+    },
+    'ai-protokoll-slang': function () { if (aiUtkast.protokoll) aiUtkast.protokoll.utkast = null; render(); },
+    'ai-protokoll-anvand': function () {
+      var u = aiUtkast.protokoll; if (!u || !u.utkast) return;
+      try {
+        var x = u.utkast;
+        andraOppet(function (k) { k.paragrafer = x.paragrafer; k.beslut = k.beslut.concat(x.beslut); }, false);
+        x.uppgifter.forEach(function (t) { andraStyr('styr', K.laggTillUppgift(styrData(), t), false); });
+        aiUtkast.protokoll = null;
+        visa('Utkastet är inlagt i protokollet' + (x.uppgifter.length ? ', och ' + antal(x.uppgifter.length, 'uppgift', 'uppgifter') + ' under Uppgifter' : '') + '. Läs igenom och ändra det som behövs.');
+        render();
+      } catch (err) { visa(err.message, true); }
+    },
+    'ai-verksamhet': function () {
+      var ar = aktivt();
+      aiUtkast.verksamhetAnteckningar = varde('aiVbAnteckningar');
+      var fakta = verksamhetsfaktaFor(ar);
+      aiKorFor('verksamhet', function () {
+        return aiSvar(K.verksamhetsberattelseUppdrag(fakta)).then(function (svar) {
+          aiUtkast.verksamhet = { text: svar.text || '', varning: K.siffrorUtanforFakta(svar.text, fakta) };
+        });
+      });
+    },
+    'ai-kallelse': function () {
+      var ar = aktivt(), a = arsmoteData(ar);
+      aiUtkast.kalTid = varde('aiKalTid'); aiUtkast.kalPlats = varde('aiKalPlats');
+      var uppdrag = K.kallelseUppdrag({ forening: store.forening.namn, datum: a.motesdatum, tid: aiUtkast.kalTid, plats: aiUtkast.kalPlats, rostalder: a.rostalder,
+        handlingarFran: a.motesdatum ? K.laggTillDagar(a.motesdatum, -7) : '', dagordning: a.dagordning });
+      aiKorFor('kallelse', function () {
+        return aiSvar(uppdrag).then(function (svar) { aiUtkast.kallelse = { text: svar.text || '', varning: K.siffrorUtanforFakta(svar.text, uppdrag.text) }; });
+      });
+    },
+    'ai-kopiera': function (t) {
+      var el = document.getElementById('ai-' + t.dataset.nyckel);
+      if (!el) return;
+      (navigator.clipboard ? navigator.clipboard.writeText(el.value) : Promise.reject(new Error('Kopieringen stöds inte här.')))
+        .then(function () { visa('Texten är kopierad.'); }, function () { el.select(); document.execCommand('copy'); visa('Texten är kopierad.'); });
+    },
     'rensa-egna-betalare': function () {
       var egna = K.egnaBetalare(reg());
       if (!egna.length) return;
