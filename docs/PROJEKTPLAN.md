@@ -189,6 +189,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - Alla dokument som appen skapar (fakturor, kvitton, rapporter, årsrapport, årsmöteshandlingar, protokoll, utläggsredovisningar) har en grå rad vertikalt i vänsterkanten på varje sida: "Skapad med Plätt · Gör bokföring och styrelsearbete lätt för ideella föreningar" (formuleringen från 1.64). Raden finns både i PDF:erna och vid utskrift från webbläsaren, och PDF-filerna har Plätt som skapare.
 - Plätts logotyp, en gyllene plätt med en bock och ordet plätt, syns uppe till vänster i appens sidhuvud (från 1.64).
+- Appen heter Plätt (fliktitel, manifest, hemskärm, sidfot, Om appen, inbjudningar, protokolltext, SIE och revisionspaket). Datafilerna i OneDrive (Föreningsbokföring.json, appmappen och logotypfilen) behåller sina namn så att befintlig data hittas. Appikonen är plätten med bock på mörk bakgrund; fliken visar föreningens logotyp och Plätt när logotyp saknas. Kantraden på dokumenten har logotypen i stället för ordet Plätt (från 1.65).
 
 ## Kommande
 

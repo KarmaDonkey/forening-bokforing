@@ -7,10 +7,11 @@
 <meta name="theme-color" content="#2B2A27" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Bokföring">
+<meta name="apple-mobile-web-app-title" content="Plätt">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>Föreningsbokföring</title>
-<link rel="icon" id="ikon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23373F51'/%3E%3Cpath d='M20 22h24M20 32h24M20 42h16' stroke='%23E5AE1F' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<title>Plätt</title>
+<link rel="apple-touch-icon" href="ikon-192.png">
+<link rel="icon" id="ikon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23E5AE1F'/%3E%3Cpath d='M19 33 L29 43 L46 22' fill='none' stroke='%232B2F3A' stroke-width='9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,600;8..144,700;8..144,800&display=swap" rel="stylesheet">
@@ -324,13 +325,15 @@
     nav button { font-size: 15.5px; }
   }
   /* Raden i vänsterkanten som visar att dokumentet är skapat med Plätt. */
-  .platt-kant { position: absolute; left: 4mm; bottom: 14mm; writing-mode: vertical-rl; transform: rotate(180deg); font: 6.5pt Arial, sans-serif; color: #999; letter-spacing: .02em; white-space: nowrap; pointer-events: none; }
+  .platt-kant { position: absolute; left: 4mm; bottom: 14mm; display: flex; align-items: center; gap: .35em; transform-origin: 0 0; transform: rotate(-90deg); font: 6.5pt Arial, sans-serif; color: #999; letter-spacing: .02em; white-space: nowrap; pointer-events: none; }
+  .platt-kant svg { width: 1.35em; height: 1.35em; flex: none; }
+  .platt-kant b { color: #2B2F3A; font-weight: 700; letter-spacing: -0.01em; }
   #platt-utskrift { display: none; }
   @media print {
     /* Webbläsaren ritar inte i sidans marginal: raden ligger längst till vänster i innehållet, som flyttas in lika mycket. */
     .platt-kant { position: fixed; left: 0; bottom: 0; }
     body { padding-left: 5mm; }
-    #platt-utskrift { display: block; }
+    #platt-utskrift { display: flex; }
     body.skriver-dokument #platt-utskrift { display: none; }
     .topp, nav, footer, .ej-utskrift { display: none !important; }
     body { background: #fff; color: #000; }
@@ -357,7 +360,7 @@
   <header>
     <span class="platt-marke" role="img" aria-label="Plätt"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29"></circle><path d="M21 33 L29 41 L44 24"></path></svg><span>plätt</span></span>
     <span class="logo-bricka" id="logoBricka" hidden><img id="logo" alt=""></span>
-    <h1 id="rubrik">Föreningsbokföring</h1>
+    <h1 id="rubrik">Plätt</h1>
     <div class="row" id="arvaljare"></div>
     <div id="synkstatus" role="status"></div>
     <div id="narvaro" class="narvaro" aria-label="Har appen öppen"></div>
@@ -369,7 +372,7 @@
 </div>
 <footer class="ej-utskrift"><button class="lank-knapp" data-vy="om" id="versionLank"></button></footer>
 <div id="utskrift"></div>
-<div id="platt-utskrift" class="platt-kant">Skapad med Plätt · Gör bokföring och styrelsearbete lätt för ideella föreningar</div>
+<div id="platt-utskrift" class="platt-kant" role="img" aria-label="Skapad med Plätt"></div>
 
 <!--
   Kärnan: all bokföringslogik. Den har inga beroenden till sidan och testas
@@ -382,6 +385,14 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.65', datum: '2026-11-28',
+    nyheter: [
+      'Appen heter nu Plätt: i fliken, när den installeras, i sidfoten, under Om appen, i inbjudningar och i exporter. Filerna i OneDrive behåller sina namn, så inget behöver flyttas.',
+      'Ny appikon: den gyllene plätten med bock på mörk bakgrund. Fliken visar fortfarande föreningens logotyp, och Plätt när föreningen saknar logotyp. Installera om appen för att få nytt namn och ny ikon.',
+      'Raden i dokumentens vänsterkant har Plätts logotyp i stället för ordet Plätt.'
+    ]
+  },
   {
     version: '1.64', datum: '2026-11-28',
     nyheter: [
@@ -1687,7 +1698,7 @@ var VERSIONER = [
     opt = opt || {};
     var rader = [
       '#FLAGGA 0',
-      '#PROGRAM ' + sieText('Föreningsbokföring') + ' 1',
+      '#PROGRAM ' + sieText('Plätt') + ' 1',
       '#FORMAT PC8',
       '#GEN ' + sieDatum(opt.genererad || ar.slut),
       '#SIETYP 4'
@@ -4651,7 +4662,7 @@ var VERSIONER = [
   }
 
   function lasRevisionspaket(d) {
-    if (!d || d.format !== PAKETFORMAT || !d.ar || !d.ar[d.arId]) throw BokforingsFel('Filen är inget revisionspaket från Föreningsbokföring.');
+    if (!d || d.format !== PAKETFORMAT || !d.ar || !d.ar[d.arId]) throw BokforingsFel('Filen är inget revisionspaket från Plätt.');
     var fel = [];
     Object.keys(d.ar).forEach(function (id) { valideraAr(d.ar[id]).forEach(function (x) { fel.push(id + ': ' + x); }); });
     if (fel.length) throw BokforingsFel('Revisionspaketet är skadat: ' + fel.slice(0, 3).join(' '));
@@ -5442,7 +5453,7 @@ var VERSIONER = [
 
   var NY_NYCKEL_STEG = '<ol>' +
     '<li>Gå till <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com</a> och logga in.</li>' +
-    '<li>Välj <strong>API keys</strong> och sedan <strong>Create key</strong>. Skriv namnet Föreningsbokföring och välj en lång giltighetstid, t.ex. 1 år.</li>' +
+    '<li>Välj <strong>API keys</strong> och sedan <strong>Create key</strong>. Skriv namnet Plätt och välj en lång giltighetstid, t.ex. 1 år.</li>' +
     '<li>Kopiera nyckeln (den visas bara en gång).</li>' +
     '<li>Klistra in den här under <strong>År och arkiv → Claude</strong>, skriv in när den går ut och tryck Spara.</li>' +
     '<li>Läs in de filer som inte gick igenom en gång till.</li></ol>';
@@ -6931,9 +6942,6 @@ var VERSIONER = [
       var w = bild.width * skala, h = bild.height * skala;
       g.drawImage(bild, (128 - w) / 2, (128 - h) / 2, w, h);
       el.href = c.toDataURL('image/png');
-      var apple = document.getElementById('ikon-apple');
-      if (!apple) { apple = document.createElement('link'); apple.rel = 'apple-touch-icon'; apple.id = 'ikon-apple'; document.head.appendChild(apple); }
-      apple.href = el.href;
     };
     bild.src = logoUrl;
   }
@@ -7096,18 +7104,41 @@ var VERSIONER = [
 
   // PDF:ens standardtypsnitt klarar svenska bokstäver men inte alla specialtecken.
   // Raden i vänsterkanten på alla dokument som appen skapar.
-  var PLATT_RAD = 'Skapad med Plätt · Gör bokföring och styrelsearbete lätt för ideella föreningar';
-  function plattKant() { return '<div class="platt-kant">' + esc(PLATT_RAD) + '</div>'; }
+  // Raden består av text före logotypen, logotypen (plätten med bock och ordet plätt) och text efter.
+  var PLATT_FORE = 'Skapad med', PLATT_ORD = 'plätt', PLATT_EFTER = '· Gör bokföring och styrelsearbete lätt för ideella föreningar';
+  var PLATT_SYMBOL = '<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29" fill="#E5AE1F"></circle><path d="M21 33 L29 41 L44 24" fill="none" stroke="#2B2F3A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+  function plattKantInnehall() {
+    return '<span>' + esc(PLATT_FORE) + '</span>' + PLATT_SYMBOL + '<b>' + esc(PLATT_ORD) + '</b><span>' + esc(PLATT_EFTER) + '</span>';
+  }
+  function plattKant() { return '<div class="platt-kant" role="img" aria-label="Skapad med Plätt">' + plattKantInnehall() + '</div>'; }
+  (function () { var el = document.getElementById('platt-utskrift'); if (el) el.innerHTML = plattKantInnehall(); })();
   // Ritar raden vertikalt i vänstermarginalen på varje sida, nerifrån och upp.
   function ritaPlattKant(doc) {
     var sidor = doc.getNumberOfPages();
     for (var i = 1; i <= sidor; i++) {
       doc.setPage(i);
       var h = doc.internal.pageSize.getHeight();
+      // Texten löper uppåt: avståndet längs raden (u) räknas uppåt från y0, och bokstävernas ovansida pekar åt vänster.
+      var x0 = 8, y0 = h - 14, mell = 0.7, u = 0;
       doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(153, 153, 153);
-      doc.text(pt(PLATT_RAD), 8, h - 14, { angle: 90 });
+      doc.text(pt(PLATT_FORE), x0, y0, { angle: 90 });
+      u += doc.getTextWidth(pt(PLATT_FORE)) + mell;
+      // Plätten: en gyllene cirkel med bock, centrerad på textens mitthöjd.
+      var r = 1.15, cx = x0 - 0.8, cy = y0 - (u + r), sk = r / 29;
+      doc.setFillColor(229, 174, 31); doc.circle(cx, cy, r, 'F');
+      var punkt = function (sx, sy) { return [cx + (sy - 32) * sk, cy - (sx - 32) * sk]; };
+      var a = punkt(21, 33), b = punkt(29, 41), c = punkt(44, 24);
+      doc.setDrawColor(43, 47, 58); doc.setLineWidth(8 * sk); doc.setLineCap('round'); doc.setLineJoin('round');
+      doc.line(a[0], a[1], b[0], b[1]); doc.line(b[0], b[1], c[0], c[1]);
+      doc.setLineCap('butt'); doc.setLineJoin('miter');
+      u += 2 * r + mell * 0.8;
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(43, 47, 58);
+      doc.text(pt(PLATT_ORD), x0, y0 - u, { angle: 90 });
+      u += doc.getTextWidth(pt(PLATT_ORD)) + mell;
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(153, 153, 153);
+      doc.text(pt(PLATT_EFTER), x0, y0 - u, { angle: 90 });
     }
-    doc.setTextColor(26, 26, 26);
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(26, 26, 26); doc.setDrawColor(0, 0, 0); doc.setLineWidth(0.2);
   }
   function pt(t) {
     return String(t == null ? '' : t).replace(/[\u2212\u2013\u2014]/g, '-').replace(/[\u00a0\u202f]/g, ' ').replace(/\u2192/g, '->').replace(/\u2026/g, '...');
@@ -8044,9 +8075,9 @@ var VERSIONER = [
     document.getElementById('logoBricka').hidden = !logoUrl;
     if (logoUrl) document.getElementById('logo').src = logoUrl;
     sattIkon();
-    document.getElementById('versionLank').textContent = 'Föreningsbokföring version ' + VERSIONER[0].version;
+    document.getElementById('versionLank').textContent = 'Plätt version ' + VERSIONER[0].version;
     sattStatus(odNu.status, !!odNu.fel);
-    document.getElementById('rubrik').textContent = store.forening.namn || 'Föreningsbokföring';
+    document.getElementById('rubrik').textContent = store.forening.namn || 'Plätt';
     renderArvaljare();
     ritaNarvaro();
     var nav = document.getElementById('nav');
@@ -9057,7 +9088,7 @@ var VERSIONER = [
 
   function vyOm() {
     var html = '<h2>Om appen</h2><div class="card">' +
-      '<p><strong>Föreningsbokföring ' + esc(VERSIONER[0].version) + '</strong> · ' + esc(VERSIONER[0].datum) + '</p>' +
+      '<p><strong>Plätt ' + esc(VERSIONER[0].version) + '</strong> · ' + esc(VERSIONER[0].datum) + '</p>' +
       '<p>Ett enkelt bokföringsverktyg för små ideella föreningar. Läs in fakturor, kvitton och kontoutdrag, låt appen föreslå verifikationerna och ta fram resultaträkning, balansräkning och underlag till årsmötet.</p>' +
       '<p class="faint">' + (odAnslutet() ? 'Bokföringen och underlagen sparas i föreningens OneDrive-mapp.' : 'Bokföringen sparas i den här webbläsaren tills appen kopplas till OneDrive under År och arkiv.') + '</p>' +
       '<p class="faint">Källkoden finns på <a href="https://github.com/KarmaDonkey/forening-bokforing" target="_blank" rel="noopener">GitHub</a>.</p></div>';
@@ -9455,7 +9486,7 @@ var VERSIONER = [
       try { await sakerstallRegMapp(); } catch (e) { /* registret finns inte ännu */ }
       var b = K.behorighet(roller);
       var namn = K.ROLLER.filter(function (r) { return roller.indexOf(r[0]) >= 0; }).map(function (r) { return r[1]; }).join(' och ');
-      var text = 'Du har fått rollen ' + namn + ' i Föreningsbokföring för ' + (store.forening.namn || 'föreningen') + '. Öppna appen med den här länken och logga in med ditt Microsoft-konto: ' + inbjudningslank();
+      var text = 'Du har fått rollen ' + namn + ' i Plätt för ' + (store.forening.namn || 'föreningen') + '. Öppna appen med den här länken och logga in med ditt Microsoft-konto: ' + inbjudningslank();
       await sattDelning(od.mapp, epost, b.data, text);
       if (od.regMapp) await sattDelning(od.regMapp, epost, b.reg, text);
       // Styrelsens mapp, och förtroendeuppdragen för valberedningen.
@@ -9464,7 +9495,7 @@ var VERSIONER = [
         if (od.styrRot || od.styrMapp) await sattDelning(od.styrRot || od.styrMapp, epost, b.styr, text);
         var uf = odNu.roller && odNu.roller.uppdragFil;
         if (uf) {
-          var textValb = 'Du har fått rollen ' + namn + ' i Föreningsbokföring för ' + (store.forening.namn || 'föreningen') + '. Öppna förtroendeuppdragen med den här länken och logga in med ditt Microsoft-konto: ' + uppdragslank(uf);
+          var textValb = 'Du har fått rollen ' + namn + ' i Plätt för ' + (store.forening.namn || 'föreningen') + '. Öppna förtroendeuppdragen med den här länken och logga in med ditt Microsoft-konto: ' + uppdragslank(uf);
           await sattDelning(uf, epost, b.styr ? null : b.uppdrag, b.data ? text : textValb);
         }
       }
@@ -10415,7 +10446,7 @@ var VERSIONER = [
       skriv(u.kontrollsumma, 'normal', 8.5);
       skriv(summa === u.kontrollsumma ? 'Texten i den här utskriften har samma kontrollsumma, alltså är den oförändrad.' : 'OBS: texten har ändrats efter att protokollet låstes.', 'normal', 9, summa === u.kontrollsumma ? null : [170, 40, 40]);
       y += 3;
-      skriv('Protokollet har skrivits under i Föreningsbokföring. Varje person har loggat in med sitt Microsoft-konto och bekräftat att hen läst och godkänner protokollet. Underskrifterna kan kontrolleras i appen under Styrelsen, Möten och protokoll.', 'normal', 8.5, GRA);
+      skriv('Protokollet har skrivits under i Plätt. Varje person har loggat in med sitt Microsoft-konto och bekräftat att hen läst och godkänner protokollet. Underskrifterna kan kontrolleras i appen under Styrelsen, Möten och protokoll.', 'normal', 8.5, GRA);
     } else {
       // Rader för underskrift på papper.
       var namn = [];
@@ -10638,7 +10669,7 @@ var VERSIONER = [
   // Lägger en helkopia (eller en vanlig säkerhetskopia av bokföringen) i övningsläget.
   function helkopiaTillOvning(d) {
     var bok = d && d.format === 'foreningsbokforing-helkopia' ? d.bokforing : d;
-    if (!bok || bok.format !== 1 || !bok.ar) throw new Error('Filen är ingen kopia från Föreningsbokföring.');
+    if (!bok || bok.format !== 1 || !bok.ar) throw new Error('Filen är ingen kopia från Plätt.');
     try {
       raderaOvning();
       localStorage.setItem('forening-bokforing:ovning:v1', JSON.stringify(bok));
@@ -10784,7 +10815,7 @@ var VERSIONER = [
     var adress = omdirigering();
     zip.file('Läs mig.txt', [
       'Revisionspaket för ' + (store.forening.namn || 'föreningen') + ', räkenskapsår ' + namn + '.',
-      'Skapat ' + idag() + ' med Föreningsbokföring ' + VERSIONER[0].version + '.',
+      'Skapat ' + idag() + ' med Plätt ' + VERSIONER[0].version + '.',
       '',
       'Så öppnar du paketet (inget konto behövs, och inget sparas):',
       '1. Gå till ' + adress,
@@ -10840,7 +10871,7 @@ var VERSIONER = [
         var JSZip = await laddaJsZip();
         var zip = await JSZip.loadAsync(fil);
         var j = zip.file('bokforing.json');
-        if (!j) throw new Error('Zip-filen är inget revisionspaket från Föreningsbokföring.');
+        if (!j) throw new Error('Zip-filen är inget revisionspaket från Plätt.');
         var p = K.lasRevisionspaket(JSON.parse(await j.async('string')));
         revision = { zip: zip, filer: p.filer, skapad: p.skapad, version: p.version };
         clearTimeout(odNu.timer);
@@ -11964,7 +11995,7 @@ var VERSIONER = [
     if (t.dataset.forening) {
       store.forening[t.dataset.forening] = t.value.trim();
       spara();
-      document.getElementById('rubrik').textContent = store.forening.namn || 'Föreningsbokföring';
+      document.getElementById('rubrik').textContent = store.forening.namn || 'Plätt';
     }
     if (t.dataset.lista) {
       try {
@@ -13356,7 +13387,7 @@ var VERSIONER = [
         if (!fil) return;
         fil.text().then(function (txt) {
           var d = JSON.parse(txt);
-          if (!d || d.format !== 1 || !d.ar) throw new Error('Filen är ingen säkerhetskopia från Föreningsbokföring.');
+          if (!d || d.format !== 1 || !d.ar) throw new Error('Filen är ingen säkerhetskopia från Plätt.');
           var fel = [];
           Object.keys(d.ar).forEach(function (id) { K.valideraAr(d.ar[id]).forEach(function (f) { fel.push(id + ': ' + f); }); });
           if (fel.length) throw new Error('Säkerhetskopian har fel: ' + fel.slice(0, 5).join(' '));
