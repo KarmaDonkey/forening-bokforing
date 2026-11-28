@@ -257,6 +257,12 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Styrelsens funktioner styrs av rollens rätt till styrelsens material (`STYRHANDLINGAR`), inte av skrivrätten till bokföringen. Bokföringen är oförändrad.
 - Styrelsen börjar i översikten; den som bara är revisor börjar i rapporterna.
 
+## Ämnesgräns för AI och Kom igång (testversion 1.88-test.3)
+
+- Fråga Plätt och Fråga stadgarna svarar bara om appen och föreningens arbete (`AMNESREGEL`). AI markerar `inomAmne`; utanför ämnet visar appen alltid samma text (`UTANFOR_AMNE`), aldrig AI:s egen. Tydligt olämpliga och för långa frågor stoppas innan de skickas (`hjalpForkontroll`).
+- Tak per enhet och dag (standard 30, `forening.aiFragorPerDag`), kortare svar (1 000 tokens) och paus resten av dagen efter tre frågor utanför ämnet i rad (`hjalpKvot`). Inga frågor sparas; bara antalet räknas på enheten. Råd om månadsgräns hos AI-tjänsten.
+- Kom igång (`komIgangSteg`): checklista för systemadministratören med föreningens uppgifter, OneDrive, bank, styrelsen, välkomstmejl, medlemmar och AI. Bockas av automatiskt; Inte aktuellt och Dölj listan sparas på enheten. Fråga Plätt vet nästa steg.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
