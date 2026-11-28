@@ -237,6 +237,11 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Föreningens avsändaradress: en separat inloggning (`avsandare` i localStorage, bara på enheten) med enbart `Mail.Send User.Read offline_access`. Utskick och påminnelser skickas därifrån när den finns. Utkastet sparas i sessionStorage medan man loggar in. En webbapp får vara inloggad ett dygn i taget, så man loggar ofta in igen inför ett utskick.
 - Kommentarer, påminnelser och utskick fungerar även för styrelseledamöter som bara har läsrätt till bokföringen.
 
+## Ny roll (från version 1.86)
+
+- Rollerna man hade senast sparas per person på enheten (`forening-bokforing:sedda-roller`). Första gången sparas läget tyst.
+- Får man en ny roll visas ett kort i översikten med en kort genomgång (`ROLLSTEG`, `nyaRollsteg`): bara stegen för den nya rollen, utan steg som de tidigare rollerna redan hade. Påminn mig senare (tre dagar) eller Jag kan det redan. En förlorad roll ger inget kort.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
