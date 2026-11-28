@@ -122,7 +122,18 @@
   #synkstatus { font-size: 12px; color: var(--ink-faint); min-height: 1em; }
   /* Cirklar för dem som har appen öppen, som i Word. */
   /* Övre högra hörnet, som i Word och Teams, så att sidhuvudet inte blir högre. */
-  .narvaro { position: fixed; top: calc(14px + env(safe-area-inset-top)); right: 20px; display: flex; align-items: center; z-index: 45; }
+  .narvaro { display: flex; align-items: center; z-index: 45; margin: 0 -4px 6px; }
+  .narvaro:empty { display: none; }
+  /* Du själv längst ner i sidomenyn, med namn och roll, och de andra som har appen öppen bredvid. */
+  .mig-rad { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px; border-radius: 12px; }
+  .mig-rad:hover { background: var(--surface-2); }
+  .mig-namn { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.3; }
+  .mig-namn strong { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+  .mig-namn span { font-size: 12px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mig-rad .andra { display: flex; align-items: center; flex: none; }
+  .sidofot .avatar.jag { opacity: 1; margin-right: 0; }
+  .sidofot .avatar-info { top: auto; bottom: calc(100% + 8px); left: 0; right: auto; }
+  .mig-rad .andra .avatar-info { left: auto; right: 0; }
   .narvaro:empty { display: none; }
   .avatar { position: relative; width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--surface); color: #fff; font: 600 12px/1 "Roboto Flex", system-ui, sans-serif;
     display: inline-flex; align-items: center; justify-content: center; padding: 0; margin-left: -6px; cursor: default; }
@@ -267,6 +278,11 @@
   .diagramforklaring i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
   .logg { margin: 8px 0; padding-left: 18px; font-size: 14px; }
   a { color: var(--lank); }
+  .ai-marke { display: inline-block; margin-top: 3px; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--guld-ljus); color: var(--ink); }
+  .ai-status { text-decoration: none; color: var(--ink-soft); font-weight: 600; }
+  .ai-status.av { color: var(--ink-faint); font-weight: 400; }
+  .vaxel { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 15px; color: var(--ink); cursor: pointer; }
+  .vaxel input { width: 20px; height: 20px; accent-color: var(--guld); margin: 0; }
   .lank-knapp { background: none; border: 0; color: var(--ink-faint); font: inherit; cursor: pointer; text-decoration: underline; padding: 0; text-align: left; }
   .dropzon { border: 2px dashed rgba(55, 63, 81, 0.3); border-radius: 12px; }
   .listpost { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) auto; gap: 6px; align-items: end; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
@@ -332,13 +348,20 @@
     .forening { flex: 1 1 auto; border: 0; padding: 0; background: none; gap: 8px; }
     #logo { height: 30px; }
     #rubrik { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .narvaro { position: static; flex: none; }
+    .narvaro { position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 14px; margin: 0; }
+    .sidomeny:has(.narvaro:not(:empty)) header { padding-right: 96px; }
+    .mig-rad { padding: 0; gap: 0; width: auto; }
+    .mig-rad:hover { background: none; }
+    .mig-namn { display: none; }
+    .sidofot .avatar-info { top: calc(100% + 8px); bottom: auto; left: auto; right: 0; }
+    .sidofot .avatar.jag { margin-right: 6px; opacity: .7; }
     .narvaro .avatar { width: 26px; height: 26px; font-size: 10.5px; margin-left: -7px; }
     .narvaro .avatar:first-child { margin-left: 0; }
     .narvaro .avatar.jag { margin-right: 0; }
     .sidofot { flex-direction: row; justify-content: space-between; padding: 4px 0 0; font-size: 11.5px; }
-    .sidofot:has(#synkstatus:empty) #versionLank { display: none; }
-    .sidofot:has(#synkstatus:empty) { display: none; }
+    .sidofot { display: block; padding: 0; }
+    #versionLank, #aiStatus { display: none; }
+    #synkstatus:empty { display: none; }
     /* Undermenyn högst upp när man skrollar, huvudmenyn som flikrad längst ner. */
     #navbar { margin: 0; }
     h2 { font-size: 19px; margin: 18px 0 8px; }
@@ -449,10 +472,9 @@
       <span class="logo-bricka" id="logoBricka" hidden><img id="logo" alt=""></span>
       <div class="forening-text"><h1 id="rubrik">Plätt</h1><div class="row" id="arvaljare"></div></div>
     </div>
-    <div id="narvaro" class="narvaro" aria-label="Har appen öppen"></div>
   </header>
   <div id="navbar"><nav id="nav" aria-label="Huvudmeny"></nav><nav id="undernav" aria-label="Undermeny"></nav></div>
-  <div class="sidofot ej-utskrift"><div id="synkstatus" role="status"></div><button class="lank-knapp" data-vy="om" id="versionLank"></button></div>
+  <div class="sidofot ej-utskrift"><div id="narvaro" class="narvaro" aria-label="Du och andra som har appen öppen"></div><div id="synkstatus" role="status"></div><button class="lank-knapp ai-status" data-vy="arkiv" id="aiStatus" hidden></button><button class="lank-knapp" data-vy="om" id="versionLank"></button></div>
 </aside>
 <div class="innehall">
 <div class="wrap">
@@ -474,6 +496,14 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.70', datum: '2026-11-28',
+    nyheter: [
+      'AI-hjälp kan slås på och av för hela föreningen under Inställningar, År och arkiv. Avstängd tolkas inga PDF:er eller bilder; kontoutdrag i CSV och Excel läses som vanligt.',
+      'Det syns var AI har hjälpt till: ✦ Tolkat av AI vid inlästa underlag och ✦ AI-förslag vid konton. Längst ner i sidomenyn står om AI-hjälpen är på.',
+      'Du själv, med namn och roll, och de andra som har appen öppen visas längst ner i sidomenyn i stället för uppe till höger. På telefonen ligger cirklarna kvar i toppfältet.'
+    ]
+  },
   {
     version: '1.69', datum: '2026-11-28',
     nyheter: [
@@ -4444,6 +4474,9 @@ var VERSIONER = [
     return { klar: !kvar.length, kvar: kvar, signerade: r.signaturer.slice(), andrad: bokforingSumma != null && bokforingSumma !== r.bokforingSumma };
   }
 
+  // AI-hjälpen (Claude tolkar PDF:er och bilder) gäller hela föreningen. Den är på om föreningen inte har stängt av den.
+  function aiHjalpPa(forening) { return !forening || forening.aiHjalp !== false; }
+
   // Det som väntar på en person i styrelsen: protokoll och årsrapporter att skriva under, egna uppgifter och nästa möte.
   // jag: e-post. opt.namn: personens namn (uppgifternas ansvarig är fritext). opt.idag: dagens datum.
   function vantarPaMig(styr, jag, opt) {
@@ -5320,6 +5353,7 @@ var VERSIONER = [
     taBortArsrapportUnderskrift: taBortArsrapportUnderskrift,
     arsrapportUnderskrifter: arsrapportUnderskrifter,
     vantarPaMig: vantarPaMig,
+    aiHjalpPa: aiHjalpPa,
     lasUppProtokoll: lasUppProtokoll,
     signera: signera,
     registreraPapper: registreraPapper,
@@ -6940,7 +6974,7 @@ var VERSIONER = [
 
   function kontoKallaText(u) {
     if (u.kontoKalla === 'faktura') return 'från fakturan';
-    return u.kontoKalla === 'inlart' ? 'som förra gången' : u.kontoKalla === 'manuell' ? 'ditt val' : u.kontoKalla === 'claude' ? 'Claudes förslag' : '';
+    return u.kontoKalla === 'inlart' ? 'som förra gången' : u.kontoKalla === 'manuell' ? 'ditt val' : u.kontoKalla === 'claude' ? '✦ AI-förslag' : '';
   }
 
   function importeraRader(rader, konto) {
@@ -7021,6 +7055,7 @@ var VERSIONER = [
     var t = await tolkaMedClaude(arNu, block);
     var id = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     var n = K.normaliseraTolkning(t, { id: id, filnamn: sakertFilnamn(fil.name) });
+    n.underlag.tolkadAvAi = true;
     await sparaFil(id, fil, n.underlag.filnamn);
     if (n.bankrader) {
       setAktivt(K.laggTillUnderlag(aktivt(), n.underlag));
@@ -7047,7 +7082,10 @@ var VERSIONER = [
       try {
         if (/\.(csv|txt|tsv|skv)$/i.test(fil.name) || /^text\//.test(fil.type)) await sparaOriginalfil(fil, importeraBanktext(await lasText(fil), fil.name));
         else if (/\.xlsx?$/i.test(fil.name)) await sparaOriginalfil(fil, importeraBanktext(await excelTillText(fil), fil.name));
-        else if (fil.type === 'application/pdf' || /\.pdf$/i.test(fil.name) || /^image\//.test(fil.type)) await tolkaFil(fil);
+        else if (fil.type === 'application/pdf' || /\.pdf$/i.test(fil.name) || /^image\//.test(fil.type)) {
+          if (!K.aiHjalpPa(store.forening)) throw new Error('AI-hjälpen är avstängd för föreningen, så PDF:er och bilder tolkas inte. Bokför underlaget för hand, eller slå på AI-hjälpen under Inställningar.');
+          await tolkaFil(fil);
+        }
         else throw new Error('okänd filtyp.');
       } catch (err) {
         logga(fil.name + ': ' + claudeFel(err), true);
@@ -8315,6 +8353,10 @@ var VERSIONER = [
     if (logoUrl) document.getElementById('logo').src = logoUrl;
     sattIkon();
     document.getElementById('versionLank').textContent = 'Plätt version ' + VERSIONER[0].version;
+    var aiEl = document.getElementById('aiStatus');
+    aiEl.hidden = !store.ar || !Object.keys(store.ar).length;
+    aiEl.textContent = K.aiHjalpPa(store.forening) ? (lasNyckel() ? '✦ AI-hjälp på' : '✦ AI-hjälp på, nyckel saknas') : '✦ AI-hjälp av';
+    aiEl.classList.toggle('av', !K.aiHjalpPa(store.forening));
     sattStatus(odNu.status, !!odNu.fel);
     document.getElementById('rubrik').textContent = store.forening.namn || 'Plätt';
     renderArvaljare();
@@ -8467,13 +8509,14 @@ var VERSIONER = [
     var harNyckel = !!lasNyckel();
     var html = '<div class="card dropzon" id="dropzon">' +
       '<p style="margin-top:0"><strong class="bara-mus">Släpp fakturor, kvitton eller kontoutdrag här</strong><strong class="bara-touch">Läs in fakturor, kvitton eller kontoutdrag</strong></p>' +
-      '<p class="faint"><span class="bara-mus">PDF:er och bilder tolkas av Claude. Kontoutdrag som CSV läses direkt. Du kan också klistra in rader från Excel, eller en skärmbild, med Ctrl+V.</span>' +
+      '<p class="faint"><span class="bara-mus">' + (K.aiHjalpPa(store.forening) ? 'PDF:er och bilder tolkas med AI-hjälp (Claude).' : 'AI-hjälpen är avstängd, så PDF:er och bilder tolkas inte.') + ' Kontoutdrag som CSV läses direkt. Du kan också klistra in rader från Excel, eller en skärmbild, med Ctrl+V.</span>' +
       '<span class="bara-touch">Välj en PDF, ett foto av kvittot eller ett kontoutdrag (CSV). Du kan också ta en bild direkt med kameran.</span></p>' +
       '<div class="row"><button class="btn" data-action="valj-filer">Välj filer</button>' +
       (bankkonton().length > 1 ? '<label style="display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:normal">Kontoutdraget gäller <select id="inlasKonto" style="width:auto">' +
         '<option value="auto"' + (valtInlasKonto === 'auto' ? ' selected' : '') + '>Känn igen automatiskt</option>' +
         bankkonton().map(function (b) { return '<option value="' + esc(b.konto) + '"' + (valtInlasKonto === b.konto ? ' selected' : '') + '>' + esc(banknamn(b.konto, ar)) + '</option>'; }).join('') + '</select></label>' : '') + '</div>' +
-      (harNyckel ? '' : '<p class="fel">Claude är inte inställt ännu. Lägg in en API-nyckel under "År och arkiv" för att kunna läsa PDF:er och bilder.</p>') +
+      (!K.aiHjalpPa(store.forening) ? '<p class="faint">✦ AI-hjälpen är avstängd för föreningen. Den kan slås på under Inställningar, År och arkiv.</p>'
+        : harNyckel ? '' : '<p class="fel">AI-hjälpen är inte inställd ännu. Lägg in en API-nyckel för Claude under "År och arkiv" för att kunna läsa PDF:er och bilder.</p>') +
       '</div>';
     if (arbetar) html += '<p class="muted" id="arbetar" role="status">' + esc(arbetar) + '</p>';
     if (logg.length) {
@@ -8541,6 +8584,7 @@ var VERSIONER = [
         html += '<tr><td class="nowrap" data-etikett="Datum">' + esc(u.datum || '') + (u.forfallodatum ? '<div class="faint">förfaller ' + esc(u.forfallodatum) + '</div>' : '') + '</td>' +
           '<td data-etikett="Underlag"><div>' + esc(u.motpart) + (u.utlagg ? ' <span class="tag">utlägg ' + esc(u.utlaggPerson) + '</span>' : '') + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') +
           (u.utlagg && u.kvittobelopp !== u.belopp ? '<div class="faint">Kvitto ' + kr(u.kvittobelopp) + ' kr' + (u.privat ? ', privat: ' + esc(u.privat) : '') + '</div>' : '') + underlagChip(u) +
+          (u.tolkadAvAi ? '<div><span class="ai-marke" title="Uppgifterna är lästa av AI. Kontrollera belopp, datum och konto innan du bokför.">✦ Tolkat av AI, kontrollera</span></div>' : '') +
           (u.valuta ? '<div class="faint">' + esc(K.valutaText(u, u.belopp) || u.valuta) + '</div>' : '') + '</div></td>' +
           '<td class="num" data-etikett="Belopp"><div><input class="num" style="width:110px"' + (K.valutaUtanSek(u) ? ' placeholder="Ange SEK"' : '') + ' data-underlag="belopp" data-id="' + esc(u.id) + '" value="' + (u.belopp ? kr(u.belopp) : '') + '" aria-label="Belopp i kronor">' +
           '<div class="faint">' + (u.riktning === 'intakt' ? 'intäkt' : 'utgift') + '</div></div></td>' +
@@ -9384,7 +9428,12 @@ var VERSIONER = [
 
   function vyArkivRest(ar) {
     var html = '';
-    html += '<h2 id="claude-installning">Claude</h2><div class="card"><p>Claude läser fakturor, kvitton och kontoutdrag. Det kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. ' +
+    var aiPa = K.aiHjalpPa(store.forening);
+    html += '<h2 id="claude-installning">✦ AI-hjälp</h2><div class="card">' +
+      '<label class="vaxel"><input type="checkbox" data-aihjalp' + (aiPa ? ' checked' : '') + (lasLage() ? ' disabled' : '') + '> <span><strong>Använd AI-hjälp</strong> ' + (aiPa ? 'på' : 'av') + '</span></label>' +
+      '<p class="faint" style="margin-top:6px">Gäller hela föreningen. Med AI-hjälp läser Claude fakturor, kvitton och kontoutdrag i PDF eller som bild och föreslår kontering. ' +
+      'Du godkänner alltid förslaget innan något bokförs. Underlagen skickas till Anthropic för tolkning. Utan AI-hjälp läses kontoutdrag i CSV och Excel som vanligt, och allt annat bokförs för hand.</p>' +
+      (aiPa ? '<h3>API-nyckel</h3><p>Claude kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. Nyckeln är personlig. ' +
       'Ett vanligt kvitto kostar några tiotals öre att tolka.</p>' +
       '<p class="faint">' + (od.refreshToken ? 'Nyckeln sparas i webbläsaren och i din privata appmapp i OneDrive (Appar/Föreningsbokföring), så att den följer med till dina andra enheter. Den ligger inte i föreningens delade mapp.'
         : 'Nyckeln sparas i den här webbläsaren. När appen är kopplad till OneDrive följer den med till dina andra enheter.') +
@@ -9398,7 +9447,7 @@ var VERSIONER = [
           '<div><label for="claudeUtgar">Går ut (står i konsolen när du skapar nyckeln)</label><input type="date" id="claudeUtgar"></div></div>' +
           '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="spara-nyckel">Spara</button>' +
           (lasNyckel() ? '<button class="btn btn-secondary btn-small" data-action="avbryt-byt-nyckel">Avbryt</button>' : '') + '</div>' +
-          '<details style="margin-top:8px"><summary class="faint">Hur skaffar jag en nyckel?</summary>' + NY_NYCKEL_STEG + '</details>') +
+          '<details style="margin-top:8px"><summary class="faint">Hur skaffar jag en nyckel?</summary>' + NY_NYCKEL_STEG + '</details>') : '') +
       '</div>';
     html += vyForening();
     html += '<h2>Säkerhetskopia och export</h2><div class="card"><p>' + (odAnslutet()
@@ -9907,7 +9956,9 @@ var VERSIONER = [
       (jagP ? esc(jagP.roller.map(rollnamn).join(', ')) + '<br>' : '') + (kanSkriva() && f ? 'Har skrivrätten<br>' : '') +
       (inne.length ? antal(inne.length, 'annan har', 'andra har') + ' appen öppen' : 'Ingen annan har appen öppen just nu');
     var egen = mig() ? avatar(mig(), minBild(), 'jag' + (kanSkriva() && f ? ' skrivratt' : ''), jagInfo, 'Du' + (inne.length ? ', och ' + antal(inne.length, 'annan', 'andra') + ' har appen öppen' : '')) : '';
-    el.innerHTML = egen + visa0.map(function (x) {
+    var namnRad = mig() ? '<span class="mig-namn"><strong>' + esc(jagP ? K.visaPerson(f, mig()) : mig()) + '</strong><span>' +
+      esc(jagP ? jagP.roller.map(rollnamn).join(', ') : mig()) + '</span></span>' : '';
+    el.innerHTML = '<div class="mig-rad">' + egen + namnRad + '<span class="andra">' + visa0.map(function (x) {
       var p = f && f.personer.find(function (y) { return y.epost === x.vem; });
       var roller = p ? p.roller.map(rollnamn).join(', ') : '';
       var skriv = f ? f.skrivratt === x.vem : x.skrivratt;
@@ -9918,7 +9969,7 @@ var VERSIONER = [
         (s && s.vem && s.vem.toLowerCase() === x.vem ? '<br>Sparade bokföringen senast, ' + esc(klockslag(s.tid)) : '');
       return avatar(x.vem, x.bild, skriv ? 'skrivratt' : '', info, (p && p.apelido ? p.apelido : x.vem) + ' har appen öppen' + (skriv ? ' och har skrivrätten' : ''));
     }).join('') + (inne.length > max ? '<button type="button" class="avatar fler" aria-label="' + (inne.length - max) + ' till">+' + (inne.length - max) +
-      '<span class="avatar-info" role="tooltip">' + inne.slice(max).map(function (x) { return esc(x.namn); }).join('<br>') + '</span></button>' : '');
+      '<span class="avatar-info" role="tooltip">' + inne.slice(max).map(function (x) { return esc(x.namn); }).join('<br>') + '</span></button>' : '') + '</span></div>';
   }
 
   function narvaroText() {
@@ -12334,6 +12385,14 @@ var VERSIONER = [
       am[t.dataset.arsmote] = t.value;
       setAktivt(Object.assign({}, arA, { arsmote: am }));
       if (odNu.visaArsmote || ['motesdatum', 'dagordning', 'rostalder', 'bidragnot'].indexOf(t.dataset.arsmote) >= 0) { odNu.arsmoteVersion = (odNu.arsmoteVersion || 0) + 1; render(); }
+    }
+    if (t.hasAttribute('data-aihjalp')) {
+      if (lasLage()) { visa('Endast läsning.', true); render(); return; }
+      store.forening.aiHjalp = !!t.checked;
+      spara();
+      visa(t.checked ? 'AI-hjälpen är på för föreningen.' : 'AI-hjälpen är avstängd för föreningen. PDF:er och bilder tolkas inte längre.');
+      render();
+      return;
     }
     if (t.dataset.forening) {
       store.forening[t.dataset.forening] = t.value.trim();

@@ -202,6 +202,12 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - Överst i översikten för den som ser styrelsens material: protokoll och årsrapporter som väntar på personens underskrift, personens egna uppgifter (ansvarig matchas mot namnet, t.ex. "Anna" eller "Anna E") med sista datum, och nästa planerade möte. Beräkningen görs av `vantarPaMig` i kärnan. I övningsläget, där ingen är inloggad, visas det som väntar på den första som inte har skrivit under.
 
+## AI-hjälp (från version 1.70)
+
+- Inställningen `forening.aiHjalp` gäller hela föreningen (på om den saknas, `aiHjalpPa` i kärnan) och kan bara ändras med skrivrätt. Avstängd tolkas inga PDF:er eller bilder; API-nyckeln är fortfarande personlig.
+- Underlag som tolkats av Claude får `tolkadAvAi` och märket "✦ Tolkat av AI, kontrollera"; konton som Claude föreslagit visas som "✦ AI-förslag". Sidomenyn visar om AI-hjälpen är på.
+- Närvaron (du själv med namn och roll och de andra som har appen öppen) ligger längst ner i sidomenyn på dator och i toppfältet på telefon.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.

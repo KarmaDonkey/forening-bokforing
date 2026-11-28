@@ -43,3 +43,10 @@ test('avvisar fel filer och ogiltiga artiklar', () => {
   assert.throws(() => K.slaIhopForening({ forening: {} }, { format: 'foreningsbokforing-forening', artiklar: [{ beskrivning: 'X', pris: 1.5 }] }, id), /Artikel 1/);
   assert.throws(() => K.slaIhopForening({ forening: {} }, { format: 'foreningsbokforing-forening', artiklar: [{ beskrivning: 'X', pris: 100, konto: 'abc' }] }, id), /konto/);
 });
+
+test('AI-hjälpen är på om föreningen inte stängt av den', () => {
+  assert.equal(K.aiHjalpPa(undefined), true);
+  assert.equal(K.aiHjalpPa({ namn: 'Testföreningen' }), true, 'äldre föreningar utan inställning');
+  assert.equal(K.aiHjalpPa({ aiHjalp: true }), true);
+  assert.equal(K.aiHjalpPa({ aiHjalp: false }), false);
+});
