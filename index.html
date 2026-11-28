@@ -104,6 +104,8 @@
   .forening-text { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   .sidofot { margin-top: auto; padding: 14px 10px 4px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
   /* Plätts logotyp uppe till vänster: plätten med bock och ordet plätt. */
+  button.platt-marke { background: none; border: 0; cursor: pointer; text-align: left; align-self: flex-start; border-radius: 10px; }
+  button.platt-marke:hover { background: var(--surface-2); }
   .platt-marke { display: inline-flex; align-items: center; gap: 7px; font: 800 20px/1 "Roboto Flex", system-ui, sans-serif; letter-spacing: -0.035em; color: var(--ink); }
   .platt-marke svg { width: 26px; height: 26px; flex: none; }
   .platt-marke circle { fill: var(--guld); }
@@ -282,6 +284,7 @@
   .ai-status { text-decoration: none; color: var(--ink-soft); font-weight: 600; }
   .ai-status.av { color: var(--ink-faint); font-weight: 400; }
   .ai-kort { border-color: var(--guld); }
+  .om-slogan { font-size: 18px; font-weight: 600; margin-top: 0; }
   .ovning-banner .btn-secondary { background: #fff; color: #2B2F3A; border-color: rgba(43, 47, 58, 0.18); }
   .ai-kort textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; line-height: 1.5; }
   .ai-utkast-par { padding: 8px 0; border-top: 1px solid var(--hairline); }
@@ -472,7 +475,7 @@
 <div class="app">
 <aside class="topp sidomeny">
   <header>
-    <span class="platt-marke" role="img" aria-label="Plätt"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29"></circle><path d="M21 33 L29 41 L44 24"></path></svg><span>plätt</span></span>
+    <button type="button" class="platt-marke" data-vy="om" title="Gör bokföring och styrelsearbete lätt för ideella föreningar" aria-label="Plätt – gör bokföring och styrelsearbete lätt för ideella föreningar. Om Plätt"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29"></circle><path d="M21 33 L29 41 L44 24"></path></svg><span>plätt</span></button>
     <div class="forening">
       <span class="logo-bricka" id="logoBricka" hidden><img id="logo" alt=""></span>
       <div class="forening-text"><h1 id="rubrik">Plätt</h1><div class="row" id="arvaljare"></div></div>
@@ -501,6 +504,13 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.75', datum: '2026-11-28',
+    nyheter: [
+      'Räkenskapsåren i listan står med det senaste året överst.',
+      'Håller du muspekaren över Plätts logotyp visas "Gör bokföring och styrelsearbete lätt för ideella föreningar". Ett klick på logotypen öppnar Om Plätt.'
+    ]
+  },
   {
     version: '1.74', datum: '2026-11-28',
     nyheter: [
@@ -8811,7 +8821,8 @@ var VERSIONER = [
 
   function renderArvaljare() {
     var el = document.getElementById('arvaljare');
-    var ids = Object.keys(store.ar).sort();
+    // Senaste året överst, eftersom en förening kan ha många års historik.
+    var ids = Object.keys(store.ar).sort().reverse();
     if (!ids.length) { el.innerHTML = ''; return; }
     el.innerHTML = '<label for="valjAr" style="margin:0">Räkenskapsår</label>' +
       '<select id="valjAr" style="width:auto">' + ids.map(function (id) {
@@ -9745,7 +9756,8 @@ var VERSIONER = [
   }
 
   function vyOm() {
-    var html = '<h2>Om appen</h2><div class="card">' +
+    var html = '<h2>Om Plätt</h2><div class="card">' +
+      '<p class="om-slogan">Gör bokföring och styrelsearbete lätt för ideella föreningar.</p>' +
       '<p><strong>Plätt ' + esc(VERSIONER[0].version) + '</strong> · ' + esc(VERSIONER[0].datum) + '</p>' +
       '<p>Ett enkelt bokföringsverktyg för små ideella föreningar. Läs in fakturor, kvitton och kontoutdrag, låt appen föreslå verifikationerna och ta fram resultaträkning, balansräkning och underlag till årsmötet.</p>' +
       '<p class="faint">' + (odAnslutet() ? 'Bokföringen och underlagen sparas i föreningens OneDrive-mapp.' : 'Bokföringen sparas i den här webbläsaren tills appen kopplas till OneDrive under År och arkiv.') + '</p>' +
