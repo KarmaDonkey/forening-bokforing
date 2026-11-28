@@ -501,6 +501,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.73', datum: '2026-11-28',
+    nyheter: [
+      'Föreningen kan välja AI-tjänst: Claude (Anthropic), ChatGPT (OpenAI), Azure OpenAI eller Claude i Microsoft Foundry. Med Azure och Foundry kan föreningens Azure-krediter användas.',
+      'Var och en fyller i sin egen nyckel (och för Azure resurs och modell), med en knapp för att testa anslutningen. Uppgifterna sparas bara i webbläsaren.',
+      'Inlästa underlag visar vilken AI-tjänst som tolkade dem.'
+    ]
+  },
+  {
     version: '1.72', datum: '2026-11-28',
     nyheter: [
       'AI-hjälp för styrelsen: i ett protokoll kan sekreteraren klistra in sina stödanteckningar och få ett utkast med paragrafer, beslut och uppgifter, som granskas innan det sparas.',
@@ -4495,6 +4503,59 @@ var VERSIONER = [
   // AI-hjälpen (Claude tolkar PDF:er och bilder) gäller hela föreningen. Den är på om föreningen inte har stängt av den.
   function aiHjalpPa(forening) { return !forening || forening.aiHjalp !== false; }
 
+  // ---------- AI-tjänster ----------
+  // Föreningen väljer tjänst; nyckel, adress och modell är personliga. Claude är förvalt.
+  var AI_TJANSTVAL = [
+    ['claude', 'Claude (Anthropic)'],
+    ['openai', 'ChatGPT (OpenAI)'],
+    ['azure', 'Azure OpenAI (Microsoft)'],
+    ['foundry', 'Claude i Microsoft Foundry (Azure)']
+  ];
+  function aiTjanstFor(forening) {
+    var t = forening && forening.aiTjanst;
+    return AI_TJANSTVAL.some(function (x) { return x[0] === t; }) ? t : 'claude';
+  }
+  function aiTjanstNamn(t) { var x = AI_TJANSTVAL.find(function (y) { return y[0] === t; }); return x ? x[1].replace(/ \(.*\)$/, '') : 'AI'; }
+
+  // Azure-resursens namn eller adress blir API-adressen. "minresurs" och "https://minresurs.openai.azure.com/" fungerar båda.
+  function azureResurs(t) {
+    var s = String(t || '').trim().replace(/^https?:\/\//, '').split('/')[0];
+    var namn = s.split('.')[0];
+    return /^[a-z0-9][a-z0-9-]{1,62}$/i.test(namn) ? namn.toLowerCase() : '';
+  }
+  function aiAdress(tjanst, resurs) {
+    var r = azureResurs(resurs);
+    if (tjanst === 'openai') return 'https://api.openai.com/v1/responses';
+    if (tjanst === 'azure') return r ? 'https://' + r + '.openai.azure.com/openai/v1/responses' : '';
+    if (tjanst === 'foundry') return r ? 'https://' + r + '.services.ai.azure.com/anthropic' : '';
+    return '';
+  }
+
+  // Ett uppdrag i OpenAIs format (Responses API), som Azure OpenAI också använder. Underlaget (PDF eller bild) kommer i Claudes format och översätts.
+  function openaiBegaran(u, modell) {
+    var innehall = [];
+    if (u.block && u.block.source && u.block.source.type === 'base64') {
+      var url = 'data:' + u.block.source.media_type + ';base64,' + u.block.source.data;
+      innehall.push(u.block.type === 'document' ? { type: 'input_file', filename: 'underlag.pdf', file_data: url } : { type: 'input_image', image_url: url });
+    }
+    innehall.push({ type: 'input_text', text: u.text });
+    return { model: modell, instructions: u.system, input: [{ role: 'user', content: innehall }], max_output_tokens: u.maxTokens || 8000,
+      text: { format: { type: 'json_schema', name: 'svar', schema: u.schema, strict: false } } };
+  }
+  // Svaret från Responses API: texten i output, eller ett tydligt fel.
+  function openaiSvar(json) {
+    if (!json) throw BokforingsFel('AI-tjänsten svarade inte.');
+    if (json.error) throw BokforingsFel('AI-tjänsten svarade med ett fel: ' + (json.error.message || json.error.code || 'okänt fel'));
+    var delar = [];
+    (json.output || []).forEach(function (o) { (o.content || []).forEach(function (c) {
+      if (c.type === 'refusal') throw BokforingsFel('AI-tjänsten avböjde uppdraget.');
+      if (c.type === 'output_text') delar.push(c.text);
+    }); });
+    if (json.status === 'incomplete') throw BokforingsFel('Svaret blev för långt eller avbröts. Dela upp underlaget i mindre delar.');
+    if (!delar.length) throw BokforingsFel('AI-tjänsten gav inget svar.');
+    return JSON.parse(delar.join(''));
+  }
+
   // ---------- AI-texter för styrelsen ----------
   // Varje uppdrag är { system, text, schema } och fungerar med vilken AI-tjänst som helst. Svaren är alltid utkast som granskas.
 
@@ -5458,6 +5519,13 @@ var VERSIONER = [
     arsrapportUnderskrifter: arsrapportUnderskrifter,
     vantarPaMig: vantarPaMig,
     aiHjalpPa: aiHjalpPa,
+    AI_TJANSTVAL: AI_TJANSTVAL,
+    aiTjanstFor: aiTjanstFor,
+    aiTjanstNamn: aiTjanstNamn,
+    azureResurs: azureResurs,
+    aiAdress: aiAdress,
+    openaiBegaran: openaiBegaran,
+    openaiSvar: openaiSvar,
     protokollUppdrag: protokollUppdrag,
     normaliseraProtokollutkast: normaliseraProtokollutkast,
     verksamhetsfakta: verksamhetsfakta,
@@ -5891,9 +5959,62 @@ var VERSIONER = [
       }
     }
   };
-  function aiTjanst() { return AI_TJANSTER.claude; }
+  // Personliga uppgifter för de andra tjänsterna (nyckel, Azure-resurs, modell). Sparas bara i den här webbläsaren.
+  var AI_KONFIG = 'forening-bokforing:ai-tjanster';
+  function aiKonfig() { try { return JSON.parse(localStorage.getItem(AI_KONFIG) || '{}') || {}; } catch (e) { return {}; } }
+  function sparaAiKonfig(k) { try { localStorage.setItem(AI_KONFIG, JSON.stringify(k)); } catch (e) { throw new Error('Uppgifterna kunde inte sparas i webbläsaren.'); } }
+  function aiKonfigurerad(t) {
+    t = t || K.aiTjanstFor(store.forening);
+    if (t === 'claude') return !!lasNyckel();
+    var k = aiKonfig()[t] || {};
+    return !!(k.nyckel && k.modell && (t === 'openai' || K.azureResurs(k.resurs)));
+  }
+  // Fetch som ger begripliga fel. "Failed to fetch" betyder oftast att tjänsten inte tillåter anrop direkt från en webbsida.
+  async function aiFetch(adress, headers, body) {
+    var svar;
+    try {
+      svar = await fetch(adress, { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, headers), body: JSON.stringify(body) });
+    } catch (e) {
+      throw new Error('AI-tjänsten gick inte att nå från webbläsaren. Antingen saknas internet, adressen är fel, eller så tillåter tjänsten inte anrop direkt från en webbsida (CORS). Den kan i så fall inte användas från Plätt utan en egen server.');
+    }
+    var json = null;
+    try { json = await svar.json(); } catch (e) { json = null; }
+    if (svar.status === 401 || svar.status === 403) throw new Error('AI-tjänsten godtar inte nyckeln (' + svar.status + '). Kontrollera nyckeln' + (json && json.error && json.error.message ? ': ' + json.error.message : '.'));
+    if (svar.status === 404) throw new Error('AI-tjänsten hittar inte adressen eller modellen (404). Kontrollera resursens namn och modellens namn.');
+    if (svar.status === 429) throw new Error('AI-tjänsten har för många anrop just nu, eller krediterna är slut (429).');
+    if (!svar.ok && !(json && json.error)) throw new Error('AI-tjänsten svarade med fel ' + svar.status + '.');
+    return K.openaiSvar(json);
+  }
+  AI_TJANSTER.openai = { namn: 'ChatGPT', svar: function (u) {
+    var k = aiKonfig().openai || {};
+    return aiFetch(K.aiAdress('openai'), { Authorization: 'Bearer ' + k.nyckel }, K.openaiBegaran(u, k.modell));
+  } };
+  AI_TJANSTER.azure = { namn: 'Azure OpenAI', svar: function (u) {
+    var k = aiKonfig().azure || {};
+    return aiFetch(K.aiAdress('azure', k.resurs), { 'api-key': k.nyckel }, K.openaiBegaran(u, k.modell));
+  } };
+  // Claude i Microsoft Foundry har samma API som Claude, på föreningens Azure-adress.
+  AI_TJANSTER.foundry = { namn: 'Claude i Microsoft Foundry', svar: async function (u) {
+    var k = aiKonfig().foundry || {};
+    if (!sdkModul) sdkModul = await import(SDK_URL);
+    var client = new sdkModul.default({ apiKey: k.nyckel, baseURL: K.aiAdress('foundry', k.resurs), dangerouslyAllowBrowser: true });
+    var svar;
+    try {
+      svar = await client.messages.create({ model: k.modell, max_tokens: u.maxTokens || 8000, system: u.system,
+        output_config: { format: { type: 'json_schema', schema: u.schema } },
+        messages: [{ role: 'user', content: (u.block ? [u.block] : []).concat([{ type: 'text', text: u.text }]) }] });
+    } catch (e) {
+      if (sdkModul && e instanceof sdkModul.APIConnectionError) throw new Error('Foundry gick inte att nå från webbläsaren. Antingen är resursens namn fel, eller så tillåter tjänsten inte anrop direkt från en webbsida (CORS).');
+      throw e;
+    }
+    if (svar.stop_reason === 'refusal') throw new Error('AI-tjänsten avböjde uppdraget.');
+    if (svar.stop_reason === 'max_tokens') throw new Error('Svaret blev för långt. Dela upp underlaget i mindre delar.');
+    return JSON.parse(svar.content.filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join(''));
+  } };
+  function aiTjanst() { return AI_TJANSTER[K.aiTjanstFor(store.forening)] || AI_TJANSTER.claude; }
   async function aiSvar(uppdrag) {
     if (!K.aiHjalpPa(store.forening)) throw new Error('AI-hjälpen är avstängd för föreningen. Den kan slås på under Inställningar, År och arkiv.');
+    if (!aiKonfigurerad()) throw new Error('AI-tjänsten ' + K.aiTjanstNamn(K.aiTjanstFor(store.forening)) + ' är inte inställd. Fyll i uppgifterna under Inställningar, År och arkiv.');
     return aiTjanst().svar(uppdrag);
   }
 
@@ -5907,8 +6028,31 @@ var VERSIONER = [
     aiUtkast.arbetar = nyckel; render();
     return uppgift().then(function () { aiUtkast.arbetar = null; render(); }, function (err) { aiUtkast.arbetar = null; render(); visa(claudeFel(err), true); });
   }
-  function aiKanAnvandas() { return K.aiHjalpPa(store.forening) && !!lasNyckel(); }
-  function aiSaknasText() { return !K.aiHjalpPa(store.forening) ? 'AI-hjälpen är avstängd för föreningen.' : 'Lägg in en API-nyckel under Inställningar, År och arkiv, för att använda AI-hjälpen.'; }
+  function aiKanAnvandas() { return K.aiHjalpPa(store.forening) && aiKonfigurerad(); }
+  function aiSaknasText() { return !K.aiHjalpPa(store.forening) ? 'AI-hjälpen är avstängd för föreningen.' : 'Fyll i uppgifterna för ' + K.aiTjanstNamn(K.aiTjanstFor(store.forening)) + ' under Inställningar, År och arkiv, för att använda AI-hjälpen.'; }
+
+  // Val av tjänst (för föreningen) och personliga uppgifter för den valda tjänsten.
+  var AI_GUIDE = {
+    openai: 'Skapa en API-nyckel på platform.openai.com under API keys. Ett ChatGPT-abonnemang räcker inte; API:t betalas separat per anrop. Modell: namnet på den modell ni vill använda, en som läser PDF:er och bilder.',
+    azure: 'Skapa en Azure OpenAI-resurs i Azure-portalen (gärna i en region inom EU), driftsätt en modell som läser bilder, och hämta nyckeln under Keys and Endpoint. Resurs: resursens namn eller adress. Modell: namnet på driftsättningen. Kostnaden dras från föreningens Azure-krediter.',
+    foundry: 'Driftsätt en Claude-modell i Microsoft Foundry. Under driftsättningens Details finns adressen (Target URI) och nyckeln (Key). Resurs: resursens namn eller adressen. Modell: driftsättningens namn. Kostnaden dras från föreningens Azure-krediter.'
+  };
+  function aiTjanstValHtml() {
+    var t = K.aiTjanstFor(store.forening);
+    return '<label for="aiTjanst">AI-tjänst (gäller hela föreningen)</label><select id="aiTjanst" data-aitjanst style="width:auto"' + (lasLage() ? ' disabled' : '') + '>' +
+      K.AI_TJANSTVAL.map(function (x) { return '<option value="' + x[0] + '"' + (x[0] === t ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('') + '</select>';
+  }
+  function aiKonfigForm(t) {
+    var k = aiKonfig()[t] || {};
+    var azure = t === 'azure' || t === 'foundry';
+    return '<h3>Dina uppgifter för ' + esc(K.aiTjanstNamn(t)) + '</h3><p class="faint" style="margin-top:0">' + esc(AI_GUIDE[t]) + ' Uppgifterna är personliga och sparas bara i den här webbläsaren.</p>' +
+      '<p class="faint">Plätt anropar tjänsten direkt från webbläsaren, utan egen server. Alla tjänster tillåter inte det; tryck på Testa anslutningen för att se om det fungerar.</p>' +
+      '<div class="grid2"><div><label for="aiNyckel">API-nyckel</label><input type="password" id="aiNyckel" autocomplete="off" placeholder="' + (k.nyckel ? 'sparad – fyll i för att byta' : '') + '"></div>' +
+      (azure ? '<div><label for="aiResurs">Resurs (namn eller adress)</label><input id="aiResurs" value="' + esc(k.resurs || '') + '" placeholder="minforening-ai"></div>' : '') +
+      '<div><label for="aiModell">' + (azure ? 'Modell (driftsättningens namn)' : 'Modell') + '</label><input id="aiModell" value="' + esc(k.modell || '') + '"></div></div>' +
+      '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="ai-konfig-spara">Spara</button>' +
+      (aiKonfigurerad(t) ? '<button class="btn btn-secondary btn-small" data-action="ai-testa">Testa anslutningen</button><button class="btn btn-secondary btn-small" data-action="ai-konfig-bort">Ta bort uppgifterna</button>' : '') + '</div>';
+  }
 
   function aiProtokollKort(m, redigera) {
     if (!redigera || !K.aiHjalpPa(store.forening)) return '';
@@ -7251,7 +7395,7 @@ var VERSIONER = [
     var t = await tolkaMedClaude(arNu, block);
     var id = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     var n = K.normaliseraTolkning(t, { id: id, filnamn: sakertFilnamn(fil.name) });
-    n.underlag.tolkadAvAi = true;
+    n.underlag.tolkadAvAi = K.aiTjanstNamn(K.aiTjanstFor(store.forening));
     await sparaFil(id, fil, n.underlag.filnamn);
     if (n.bankrader) {
       setAktivt(K.laggTillUnderlag(aktivt(), n.underlag));
@@ -8551,7 +8695,7 @@ var VERSIONER = [
     document.getElementById('versionLank').textContent = 'Plätt version ' + VERSIONER[0].version;
     var aiEl = document.getElementById('aiStatus');
     aiEl.hidden = !store.ar || !Object.keys(store.ar).length;
-    aiEl.textContent = K.aiHjalpPa(store.forening) ? (lasNyckel() ? '✦ AI-hjälp på' : '✦ AI-hjälp på, nyckel saknas') : '✦ AI-hjälp av';
+    aiEl.textContent = K.aiHjalpPa(store.forening) ? '✦ AI-hjälp: ' + K.aiTjanstNamn(K.aiTjanstFor(store.forening)) + (aiKonfigurerad() ? '' : ', inte inställd') : '✦ AI-hjälp av';
     aiEl.classList.toggle('av', !K.aiHjalpPa(store.forening));
     sattStatus(odNu.status, !!odNu.fel);
     document.getElementById('rubrik').textContent = store.forening.namn || 'Plätt';
@@ -8702,17 +8846,17 @@ var VERSIONER = [
   }
 
   function vyInlasning(ar) {
-    var harNyckel = !!lasNyckel();
+    var harNyckel = aiKonfigurerad();
     var html = '<div class="card dropzon" id="dropzon">' +
       '<p style="margin-top:0"><strong class="bara-mus">Släpp fakturor, kvitton eller kontoutdrag här</strong><strong class="bara-touch">Läs in fakturor, kvitton eller kontoutdrag</strong></p>' +
-      '<p class="faint"><span class="bara-mus">' + (K.aiHjalpPa(store.forening) ? 'PDF:er och bilder tolkas med AI-hjälp (Claude).' : 'AI-hjälpen är avstängd, så PDF:er och bilder tolkas inte.') + ' Kontoutdrag som CSV läses direkt. Du kan också klistra in rader från Excel, eller en skärmbild, med Ctrl+V.</span>' +
+      '<p class="faint"><span class="bara-mus">' + (K.aiHjalpPa(store.forening) ? 'PDF:er och bilder tolkas med AI-hjälp (' + esc(K.aiTjanstNamn(K.aiTjanstFor(store.forening))) + ').' : 'AI-hjälpen är avstängd, så PDF:er och bilder tolkas inte.') + ' Kontoutdrag som CSV läses direkt. Du kan också klistra in rader från Excel, eller en skärmbild, med Ctrl+V.</span>' +
       '<span class="bara-touch">Välj en PDF, ett foto av kvittot eller ett kontoutdrag (CSV). Du kan också ta en bild direkt med kameran.</span></p>' +
       '<div class="row"><button class="btn" data-action="valj-filer">Välj filer</button>' +
       (bankkonton().length > 1 ? '<label style="display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:normal">Kontoutdraget gäller <select id="inlasKonto" style="width:auto">' +
         '<option value="auto"' + (valtInlasKonto === 'auto' ? ' selected' : '') + '>Känn igen automatiskt</option>' +
         bankkonton().map(function (b) { return '<option value="' + esc(b.konto) + '"' + (valtInlasKonto === b.konto ? ' selected' : '') + '>' + esc(banknamn(b.konto, ar)) + '</option>'; }).join('') + '</select></label>' : '') + '</div>' +
       (!K.aiHjalpPa(store.forening) ? '<p class="faint">✦ AI-hjälpen är avstängd för föreningen. Den kan slås på under Inställningar, År och arkiv.</p>'
-        : harNyckel ? '' : '<p class="fel">AI-hjälpen är inte inställd ännu. Lägg in en API-nyckel för Claude under "År och arkiv" för att kunna läsa PDF:er och bilder.</p>') +
+        : harNyckel ? '' : '<p class="fel">AI-hjälpen är inte inställd ännu. Fyll i uppgifterna för ' + esc(K.aiTjanstNamn(K.aiTjanstFor(store.forening))) + ' under Inställningar, År och arkiv, för att kunna läsa PDF:er och bilder.</p>') +
       '</div>';
     if (arbetar) html += '<p class="muted" id="arbetar" role="status">' + esc(arbetar) + '</p>';
     if (logg.length) {
@@ -8780,7 +8924,7 @@ var VERSIONER = [
         html += '<tr><td class="nowrap" data-etikett="Datum">' + esc(u.datum || '') + (u.forfallodatum ? '<div class="faint">förfaller ' + esc(u.forfallodatum) + '</div>' : '') + '</td>' +
           '<td data-etikett="Underlag"><div>' + esc(u.motpart) + (u.utlagg ? ' <span class="tag">utlägg ' + esc(u.utlaggPerson) + '</span>' : '') + (u.beskrivning ? '<div class="faint">' + esc(u.beskrivning) + '</div>' : '') +
           (u.utlagg && u.kvittobelopp !== u.belopp ? '<div class="faint">Kvitto ' + kr(u.kvittobelopp) + ' kr' + (u.privat ? ', privat: ' + esc(u.privat) : '') + '</div>' : '') + underlagChip(u) +
-          (u.tolkadAvAi ? '<div><span class="ai-marke" title="Uppgifterna är lästa av AI. Kontrollera belopp, datum och konto innan du bokför.">✦ Tolkat av AI, kontrollera</span></div>' : '') +
+          (u.tolkadAvAi ? '<div><span class="ai-marke" title="Uppgifterna är lästa av AI. Kontrollera belopp, datum och konto innan du bokför.">✦ Tolkat av AI' + (typeof u.tolkadAvAi === 'string' ? ' (' + esc(u.tolkadAvAi) + ')' : '') + ', kontrollera</span></div>' : '') +
           (u.valuta ? '<div class="faint">' + esc(K.valutaText(u, u.belopp) || u.valuta) + '</div>' : '') + '</div></td>' +
           '<td class="num" data-etikett="Belopp"><div><input class="num" style="width:110px"' + (K.valutaUtanSek(u) ? ' placeholder="Ange SEK"' : '') + ' data-underlag="belopp" data-id="' + esc(u.id) + '" value="' + (u.belopp ? kr(u.belopp) : '') + '" aria-label="Belopp i kronor">' +
           '<div class="faint">' + (u.riktning === 'intakt' ? 'intäkt' : 'utgift') + '</div></div></td>' +
@@ -9629,9 +9773,9 @@ var VERSIONER = [
       '<label class="vaxel"><input type="checkbox" data-aihjalp' + (aiPa ? ' checked' : '') + (lasLage() ? ' disabled' : '') + '> <span><strong>Använd AI-hjälp</strong> ' + (aiPa ? 'på' : 'av') + '</span></label>' +
       '<p class="faint" style="margin-top:6px">Gäller hela föreningen. Med AI-hjälp läser AI-tjänsten fakturor, kvitton och kontoutdrag i PDF eller som bild och föreslår kontering, ' +
       'och hjälper styrelsen med utkast till protokoll, verksamhetsberättelse och kallelse. Du godkänner alltid förslag och utkast innan något sparas. ' +
-      'Underlag och texter skickas till AI-tjänsten (i dag Claude från Anthropic) när du använder funktionerna; personnummer tas bort ur styrelsens texter först. ' +
+      'Underlag och texter skickas till den valda AI-tjänsten när du använder funktionerna; personnummer tas bort ur styrelsens texter först. ' +
       'Utan AI-hjälp läses kontoutdrag i CSV och Excel som vanligt, och allt annat görs för hand.</p>' +
-      (aiPa ? '<h3>API-nyckel</h3><p>Claude kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. Nyckeln är personlig. ' +
+      (aiPa ? aiTjanstValHtml() + (K.aiTjanstFor(store.forening) !== 'claude' ? aiKonfigForm(K.aiTjanstFor(store.forening)) : '<h3>API-nyckel</h3><p>Claude kräver en API-nyckel från platform.claude.com, där användningen betalas per anrop. Nyckeln är personlig. ' +
       'Ett vanligt kvitto kostar några tiotals öre att tolka.</p>' +
       '<p class="faint">' + (od.refreshToken ? 'Nyckeln sparas i webbläsaren och i din privata appmapp i OneDrive (Appar/Föreningsbokföring), så att den följer med till dina andra enheter. Den ligger inte i föreningens delade mapp.'
         : 'Nyckeln sparas i den här webbläsaren. När appen är kopplad till OneDrive följer den med till dina andra enheter.') +
@@ -9645,7 +9789,7 @@ var VERSIONER = [
           '<div><label for="claudeUtgar">Går ut (står i konsolen när du skapar nyckeln)</label><input type="date" id="claudeUtgar"></div></div>' +
           '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="spara-nyckel">Spara</button>' +
           (lasNyckel() ? '<button class="btn btn-secondary btn-small" data-action="avbryt-byt-nyckel">Avbryt</button>' : '') + '</div>' +
-          '<details style="margin-top:8px"><summary class="faint">Hur skaffar jag en nyckel?</summary>' + NY_NYCKEL_STEG + '</details>') : '') +
+          '<details style="margin-top:8px"><summary class="faint">Hur skaffar jag en nyckel?</summary>' + NY_NYCKEL_STEG + '</details>')) : '') +
       '</div>';
     html += vyForening();
     html += '<h2>Säkerhetskopia och export</h2><div class="card"><p>' + (odAnslutet()
@@ -12586,6 +12730,14 @@ var VERSIONER = [
       setAktivt(Object.assign({}, arA, { arsmote: am }));
       if (odNu.visaArsmote || ['motesdatum', 'dagordning', 'rostalder', 'bidragnot'].indexOf(t.dataset.arsmote) >= 0) { odNu.arsmoteVersion = (odNu.arsmoteVersion || 0) + 1; render(); }
     }
+    if (t.hasAttribute('data-aitjanst')) {
+      if (lasLage()) { visa('Endast läsning.', true); render(); return; }
+      store.forening.aiTjanst = t.value;
+      spara();
+      visa('Föreningen använder nu ' + K.aiTjanstNamn(t.value) + '. Var och en fyller i sina egna uppgifter för tjänsten.');
+      render();
+      return;
+    }
     if (t.hasAttribute('data-aihjalp')) {
       if (lasLage()) { visa('Endast läsning.', true); render(); return; }
       store.forening.aiHjalp = !!t.checked;
@@ -13456,6 +13608,29 @@ var VERSIONER = [
       aiKorFor('kallelse', function () {
         return aiSvar(uppdrag).then(function (svar) { aiUtkast.kallelse = { text: svar.text || '', varning: K.siffrorUtanforFakta(svar.text, uppdrag.text) }; });
       });
+    },
+    'ai-konfig-spara': function () {
+      var t = K.aiTjanstFor(store.forening), k = aiKonfig(), x = Object.assign({}, k[t]);
+      var nyckel = varde('aiNyckel'), modell = varde('aiModell'), resurs = varde('aiResurs');
+      if (nyckel) x.nyckel = nyckel;
+      x.modell = modell;
+      if (t !== 'openai') {
+        if (!K.azureResurs(resurs)) { visa('Skriv resursens namn eller adress, t.ex. minforening-ai eller https://minforening-ai.openai.azure.com.', true); return; }
+        x.resurs = resurs;
+      }
+      if (!x.nyckel || !x.modell) { visa('Fyll i både nyckel och modell.', true); return; }
+      k[t] = x; sparaAiKonfig(k);
+      visa('Uppgifterna för ' + K.aiTjanstNamn(t) + ' är sparade. Testa gärna anslutningen.');
+      render();
+    },
+    'ai-konfig-bort': function () {
+      if (!window.confirm('Ta bort dina uppgifter för den här AI-tjänsten från webbläsaren?')) return;
+      var t = K.aiTjanstFor(store.forening), k = aiKonfig(); delete k[t]; sparaAiKonfig(k); visa('Uppgifterna är borttagna.'); render();
+    },
+    'ai-testa': function () {
+      visa('Testar ' + K.aiTjanstNamn(K.aiTjanstFor(store.forening)) + ' …');
+      aiSvar({ system: 'Svara kort.', text: 'Svara med ordet ok i fältet text.', schema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false }, maxTokens: 200 })
+        .then(function () { visa('Anslutningen fungerar. ' + K.aiTjanstNamn(K.aiTjanstFor(store.forening)) + ' svarade.'); }, function (err) { visa(claudeFel(err), true); });
     },
     'ai-kopiera': function (t) {
       var el = document.getElementById('ai-' + t.dataset.nyckel);
