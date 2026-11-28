@@ -517,6 +517,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.79', datum: '2026-11-28',
+    nyheter: [
+      'Kravlistorna för granskningen av stadgarna är uppdaterade efter originalen: Idrottsnämndens regler för ekonomiskt stöd 2026 och Skatteverkets villkor för allmännyttig ideell förening.',
+      'Stockholms stad: nya krav på rösträtt från 12 år, att vårdnadshavare får företräda sina omyndiga barn, att föreningen aktivt motverkar diskriminering, medlemsavgift, firmateckning och revisorer valda på årsmötet.',
+      'Skatteverket: verksamhetskravet (minst 90 procent av kostnaderna) och fullföljdskravet (minst 75 procent av inkomsterna) med de exakta gränserna.'
+    ]
+  },
+  {
     version: '1.78', datum: '2026-11-28',
     nyheter: [
       'Ta fram nya stadgar i appen: ett utkast där varje paragraf kan ändras, läggas till eller tas bort, och där ändringarna mot gällande stadgar syns. Förslag från granskningen kan läggas in med ett klick.',
@@ -4614,26 +4622,32 @@ var VERSIONER = [
   // ---------- Stadgar ----------
   // Kravlistor att granska stadgarna mot. Sammanfattade från källorna; kontrollera alltid mot originalet, kraven ändras.
   var KRAVLISTOR = [
-    { id: 'stockholm', namn: 'Stockholms stad (idrottsförvaltningens föreningsstöd)', kontrollerad: '2026-11',
-      kallor: ['https://foreningsservice.stockholm/stod-till-foreningar-och-organisationer/generell-information/idrottsforvaltningens-foreningsstod/'],
-      not: 'Sammanfattning av stadens grundläggande villkor för föreningsstöd som rör stadgar och organisation. Läs stadens aktuella regler innan ni ändrar stadgarna.',
+    { id: 'stockholm', namn: 'Stockholms stad (idrottsnämndens föreningsstöd 2026)', kontrollerad: '2026-11-28',
+      kallor: ['https://foreningsservice.stockholm/globalassets/foretag-och-organisationer/foreningsservice/stod-till-foreningar-och-organisationer/idrottsforvaltningen/dokument/2026/idrottsnamndens-regler-for-ekonomiskt-stod-till-ideella-foreningar-2026.pdf',
+        'https://foreningsservice.stockholm/stod-till-foreningar-och-organisationer/generell-information/idrottsforvaltningens-foreningsstod/'],
+      not: 'Från Idrottsnämndens regler för ekonomiskt stöd till ideella föreningar 2026 (Dnr IDF 2025/1722): demokrativillkoren, de grundläggande villkoren och kraven på årliga handlingar som rör stadgar och organisation. Läs reglerna innan ni ändrar stadgarna.',
       krav: [
-        ['ideell', 'Ideell förening', 'Föreningen är en ideell förening utan vinstsyfte.'],
-        ['demokrati', 'Demokratiskt uppbyggd', 'Föreningen är uppbyggd och styrs enligt demokratiska principer: årsmötet är högsta beslutande organ, medlemmarna har rösträtt och styrelsen väljs av årsmötet.'],
-        ['demokrativillkor', 'Demokrati och värdegrund', 'Verksamheten följer demokratins idéer och stadens demokrativillkor, inklusive jämställdhet och icke-diskriminering.'],
-        ['barnkonventionen', 'Barnkonventionen', 'Föreningen arbetar utifrån FN:s konvention om barnets rättigheter.'],
-        ['sate', 'Säte i Stockholm', 'Föreningens säte enligt stadgarna är i Stockholm.'],
-        ['oppen', 'Öppen för alla', 'Föreningen är öppen för alla och ingen diskrimineras på grund av till exempel kön, sexuell läggning, etnisk tillhörighet, religion eller funktionsnedsättning.'],
-        ['malgrupp', 'Verksamhet för stadens målgrupper', 'Verksamheten riktar sig till barn och unga, vuxna med funktionsnedsättning eller personer över 65 år.']
+        ['ideell', 'Ideell förening', 'Föreningen ska vara en ideell förening.'],
+        ['demokrati', 'Demokratiskt uppbyggd', 'Föreningen ska vara uppbyggd och fungera enligt demokratiska principer och värderingar och står bakom den demokratiska rättsstatens principer, de mänskliga rättigheterna och jämställdhet mellan kvinnor och män.'],
+        ['oppen', 'Öppen för alla', 'Stadgarna ska visa att föreningen är öppen för alla, alltså att alla som instämmer i föreningens målsättningar har rätt till medlemskap. Ingen får diskrimineras på grund av kön, sexuell läggning, könsöverskridande identitet eller uttryck, etnisk tillhörighet, religion eller annan trosuppfattning, eller funktionsnedsättning.'],
+        ['motverka', 'Motverka diskriminering', 'Föreningen ska aktivt motverka all form av diskriminering, kränkande behandling och kriminell verksamhet.'],
+        ['rostratt12', 'Rösträtt från 12 år', 'Medlemmar som fyller 12 år under mötesåret ska vara röstberättigade vid föreningens årsmöte.'],
+        ['vardnadshavare', 'Vårdnadshavare', 'Vårdnadshavare ska ha rätt att företräda sina omyndiga barn.'],
+        ['barnkonventionen', 'Barnkonventionen', 'Föreningen ska arbeta efter barnkonventionen, och barn och unga ska kunna både delta och påverka i föreningsarbetet.'],
+        ['sate', 'Säte i Stockholm', 'Föreningen ska ha sitt säte enligt stadgarna och bedriva sin huvudsakliga verksamhet inom Stockholms stad.'],
+        ['medlemsavgift', 'Medlemsavgift', 'Medlemsavgift ska tas ut av alla aktiva medlemmar, och storleken ska framgå av årsmötesprotokollet eller motsvarande protokoll enligt stadgarna.'],
+        ['firma', 'Firmateckning', 'Det ska framgå hur föreningen tecknas, till exempel var för sig eller i förening, och firmatecknarna utses i årsmötesprotokoll eller protokoll från konstituerande styrelsemöte.'],
+        ['revision', 'Revisorer valda på årsmötet', 'Revisionsberättelsen ska vara undertecknad av revisorer som valts på årsmötet.'],
+        ['malgrupp', 'Verksamhet för stadens målgrupper', 'Föreningen ska bedriva verksamhet för barn och ungdomar, vuxna med funktionsnedsättning eller personer över 65 år i Stockholms stad, fortlöpande under året eller säsongen.']
       ] },
-    { id: 'skatteverket', namn: 'Skatteverket (allmännyttig ideell förening)', kontrollerad: '2026-11',
+    { id: 'skatteverket', namn: 'Skatteverket (allmännyttig ideell förening)', kontrollerad: '2026-11-28',
       kallor: ['https://skatteverket.se/foreningar/driva/ideellforening/villkorforattvaraenallmannyttigideellforening.4.70ac421612e2a997f85800029958.html'],
-      not: 'Skatteverkets fyra krav. Verksamhets- och fullföljdskraven bedöms av hur föreningen faktiskt arbetar och använder pengarna; stadgarna visar ändamålet och öppenheten.',
+      not: 'Skatteverkets fyra krav. Verksamhets- och fullföljdskraven bedöms av hur föreningen faktiskt använder pengarna; stadgarna visar ändamålet och öppenheten.',
       krav: [
-        ['andamal', 'Ändamålskravet', 'Stadgarna anger ett allmännyttigt ändamål, till exempel idrott eller kultur, och att föreningen inte har vinstsyfte.'],
-        ['verksamhet', 'Verksamhetskravet', 'Verksamheten tillgodoser uteslutande eller så gott som uteslutande (minst 90 procent) det allmännyttiga ändamålet.'],
-        ['fullfoljd', 'Fullföljdskravet', 'Föreningens inkomster används i skälig omfattning för det allmännyttiga ändamålet.'],
-        ['oppenhet', 'Öppenhetskravet', 'Föreningen är öppen för alla som vill bli medlemmar; eventuella villkor för medlemskap har saklig grund.']
+        ['andamal', 'Ändamålskravet', 'Föreningen ska bedriva en allmännyttig verksamhet utan vinstsyfte, till exempel idrott, kultur, omsorg om barn eller ungdom eller utbildning, eller lämna bidrag till allmännyttiga ändamål.'],
+        ['verksamhet', 'Verksamhetskravet', 'Minst 90 procent av kostnaderna för att uppfylla ändamålet ska höra till det allmännyttiga ändamålet.'],
+        ['fullfoljd', 'Fullföljdskravet', 'Minst 75 procent av inkomsterna ska användas till allmännyttiga ändamål.'],
+        ['oppenhet', 'Öppenhetskravet', 'Alla som delar föreningens målsättning och följer stadgarna får bli medlemmar. Vissa krav, som en minimiålder, går bra, men inte medlemskap bara efter rekommendation från en annan medlem eller uteslutning utan giltiga skäl.']
       ] },
     { id: 'grund', namn: 'God sed för en ideell förening (checklista)', kontrollerad: '2026-11', kallor: [],
       not: 'En allmän checklista över vad stadgar brukar innehålla. Inte ett myndighetskrav.',

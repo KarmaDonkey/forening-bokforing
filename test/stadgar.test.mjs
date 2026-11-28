@@ -118,3 +118,12 @@ test('granskningen ber om hela paragrafens nya lydelse', () => {
   const st = K.normaliseraStadgar(svarStruktur, { id: 'st1' });
   assert.match(K.granskningsUppdrag(st, K.kravlista('grund')).system, /hela paragrafens nya text/);
 });
+
+test('Stockholms kravlista följer reglerna för 2026', () => {
+  const l = K.kravlista('stockholm');
+  const id = l.krav.map((k) => k[0]);
+  for (const k of ['ideell', 'demokrati', 'oppen', 'rostratt12', 'vardnadshavare', 'barnkonventionen', 'sate', 'medlemsavgift', 'firma', 'revision']) assert.ok(id.includes(k), k);
+  assert.match(l.krav.find((k) => k[0] === 'rostratt12')[2], /fyller 12 år under mötesåret/);
+  assert.ok(l.kallor.some((u) => u.includes('2026')));
+  assert.match(K.kravlista('skatteverket').krav.find((k) => k[0] === 'fullfoljd')[2], /75 procent/);
+});
