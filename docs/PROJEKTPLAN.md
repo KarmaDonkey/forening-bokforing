@@ -191,6 +191,12 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Plätts logotyp, en gyllene plätt med en bock och ordet plätt, syns uppe till vänster i appens sidhuvud (från 1.64).
 - Appen heter Plätt (fliktitel, manifest, hemskärm, sidfot, Om appen, inbjudningar, protokolltext, SIE och revisionspaket). Datafilerna i OneDrive (Föreningsbokföring.json, appmappen och logotypfilen) behåller sina namn så att befintlig data hittas. Appikonen är plätten med bock på mörk bakgrund; fliken visar föreningens logotyp och Plätt när logotyp saknas. Kantraden på dokumenten har logotypen i stället för ordet Plätt (från 1.65).
 
+## Ny layout (från version 1.66)
+
+- Dator (bredare än 700 px): sidomeny till vänster med Plätts logotyp, föreningens namn, logotyp och räkenskapsår, huvuddelarna med ikoner och den valda delens sidor under den. Synkstatus och version längst ner i menyn. Den mörka sidfoten är borttagen.
+- Telefon: kompakt toppfält (plätten, föreningen, året), undermenyn som rullbar rad under toppfältet och huvudmenyn som flikrad längst ner.
+- Planerat: översikten med nyckeltal (1.67) och verifikationer med statusmärken och filter (1.68).
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
