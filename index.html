@@ -234,6 +234,20 @@
   .nyckeltal { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 10px 0; }
   .nyckeltal div { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; }
   .nyckeltal strong { display: block; font-size: 22px; }
+  .vantar { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 18px; }
+  .vantar h3 { margin: 0 0 2px; }
+  .vantar-kort { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px; padding: 14px 16px; box-shadow: var(--skugga); font: inherit; color: inherit; text-align: left; width: 100%; }
+  .vantar-kort.viktig { border-color: var(--guld); }
+  .vantar-kort.lank { cursor: pointer; }
+  .vantar-kort.lank:hover { background: var(--surface-2); }
+  .vantar-ikon { width: 40px; height: 40px; border-radius: 12px; background: var(--guld-ljus); color: var(--ink); display: flex; align-items: center; justify-content: center; flex: none; }
+  .vantar-ikon svg, .vantar-kort .pil { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  .vantar-kort .pil { flex: none; color: var(--ink-soft); }
+  .vantar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .vantar-text span { font-size: 13.5px; color: var(--ink-soft); }
+  .vantar-text em { font-style: normal; white-space: nowrap; }
+  .vantar-text em.sen { color: var(--over); font-weight: 600; }
+  .vantar-kort .btn { flex: none; }
   .nyckeltal-rad { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 12px 0; }
   .tal-kort { background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px; padding: 14px 16px; box-shadow: var(--skugga); display: flex; flex-direction: column; gap: 5px; min-width: 0; }
   .tal-etikett { font-size: 13px; color: var(--ink-soft); }
@@ -348,6 +362,8 @@
     #toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
     .nyckeltal-rad { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .sokfalt { flex: 1 1 100%; height: 44px; }
+    .vantar-kort:not(.lank) { flex-wrap: wrap; }
+    .vantar-kort:not(.lank) .btn { flex: 1 1 100%; min-height: 46px; }
     .tal-kort { padding: 12px; border-radius: 12px; }
     .tal-varde { font-size: 20px; }
     .tal-not { font-size: 12px; }
@@ -458,6 +474,13 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.69', datum: '2026-11-28',
+    nyheter: [
+      'Översikten börjar med "Väntar på dig" för den som är med i styrelsen: protokoll och årsrapporter som väntar på din underskrift (med en stor knapp), dina uppgifter med sista datum och nästa möte med tid och plats.',
+      'Protokoll som väntar på din egen underskrift visas inte längre en gång till i kortet Styrelsen.'
+    ]
+  },
   {
     version: '1.68', datum: '2026-11-28',
     nyheter: [
@@ -4421,6 +4444,41 @@ var VERSIONER = [
     return { klar: !kvar.length, kvar: kvar, signerade: r.signaturer.slice(), andrad: bokforingSumma != null && bokforingSumma !== r.bokforingSumma };
   }
 
+  // Det som väntar på en person i styrelsen: protokoll och årsrapporter att skriva under, egna uppgifter och nästa möte.
+  // jag: e-post. opt.namn: personens namn (uppgifternas ansvarig är fritext). opt.idag: dagens datum.
+  function vantarPaMig(styr, jag, opt) {
+    opt = opt || {};
+    jag = String(jag || '').toLowerCase();
+    var idag = opt.idag || '';
+    var ord = namnOrd(opt.namn || '');
+    var protokoll = (styr.moten || []).filter(function (m) {
+      if (m.status !== 'last' || !m.underskrift || m.underskrift.metod !== 'e') return false;
+      var u = m.underskrift;
+      return u.undertecknare.some(function (x) { return x.epost === jag; }) && !u.signaturer.some(function (x) { return x.epost === jag; });
+    }).map(function (m) {
+      return { id: m.id, typ: m.typ, datum: m.datum, signerade: m.underskrift.signaturer.length, antal: m.underskrift.undertecknare.length };
+    }).sort(function (a, b) { return a.datum < b.datum ? -1 : 1; });
+    var arsrapporter = (styr.rapporter || []).filter(function (r) {
+      return !r.ersatt && r.undertecknare.some(function (x) { return x.epost === jag; }) && !r.signaturer.some(function (x) { return x.epost === jag; });
+    }).map(function (r) { return { id: r.id, titel: r.titel, signerade: r.signaturer.length, antal: r.undertecknare.length }; });
+    // En uppgift är min om alla ord i ansvarig finns i mitt namn ("Anna" och "Anna E" räcker för Anna Exempelsson) eller ansvarig är min e-post.
+    var minUppgift = function (u) {
+      var a = String(u.ansvarig || '').trim();
+      if (!a) return false;
+      if (a.toLowerCase() === jag) return true;
+      var ao = namnOrd(a);
+      return ord.length > 0 && ao.length > 0 && ao.every(function (w) { return ord.some(function (n) { return n === w || (w.length === 1 && n.charAt(0) === w); }); });
+    };
+    var uppgifter = (styr.uppgifter || []).filter(function (u) { return !u.klar && minUppgift(u); }).map(function (u) {
+      return { id: u.id, text: u.text, datum: u.datum || '', sen: !!(u.datum && idag && u.datum < idag) };
+    }).sort(function (a, b) { return (a.datum || '9999') < (b.datum || '9999') ? -1 : 1; });
+    var kommande = (styr.moten || []).filter(function (m) { return m.status === 'utkast' && idag && m.datum >= idag; })
+      .sort(function (a, b) { return a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : (a.tid || '') < (b.tid || '') ? -1 : 1; });
+    var m0 = kommande[0];
+    return { protokoll: protokoll, arsrapporter: arsrapporter, uppgifter: uppgifter,
+      nastaMote: m0 ? { id: m0.id, typ: m0.typ, datum: m0.datum, tid: m0.tid || '', plats: m0.plats || '' } : null };
+  }
+
   // Alla beslut i alla protokoll, nyast först.
   function beslutslogg(styr) {
     var ut = [];
@@ -5261,6 +5319,7 @@ var VERSIONER = [
     papperArsrapport: papperArsrapport,
     taBortArsrapportUnderskrift: taBortArsrapportUnderskrift,
     arsrapportUnderskrifter: arsrapportUnderskrifter,
+    vantarPaMig: vantarPaMig,
     lasUppProtokoll: lasUppProtokoll,
     signera: signera,
     registreraPapper: registreraPapper,
@@ -10065,8 +10124,60 @@ var VERSIONER = [
     return '<div class="nyckeltal-rad">' + html + '</div>' + diagram;
   }
 
+  // "Väntar på dig": det som den inloggade i styrelsen ska göra, överst i översikten.
+  var KORTA_MANADER = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+  function kortDatum(d) {
+    if (!d) return '';
+    var t = Number(d.slice(8, 10)) + ' ' + KORTA_MANADER[Number(d.slice(5, 7)) - 1];
+    return d.slice(0, 4) === idag().slice(0, 4) ? t : t + ' ' + d.slice(0, 4);
+  }
+  function vantarPaDig() {
+    if (!styrBeh('styr')) return '';
+    var jag = mig();
+    // I övningsläget är ingen inloggad: visa det som väntar på den första som inte har skrivit under, så att det går att prova.
+    if (!jag && OVNING) {
+      var sd = styrData(), forsta = '';
+      (sd.moten || []).concat(sd.rapporter || []).some(function (x) {
+        var u = x.underskrift || x;
+        if (!u || !u.undertecknare || x.ersatt || (x.underskrift && (x.status !== 'last' || u.metod !== 'e'))) return false;
+        var k = u.undertecknare.find(function (y) { return !(u.signaturer || []).some(function (z) { return z.epost === y.epost; }); });
+        if (k) forsta = k.epost;
+        return !!k;
+      });
+      jag = forsta;
+    }
+    var v = K.vantarPaMig(styrData(), jag, { namn: odNu.roller ? K.visaPerson(odNu.roller, jag) : '', idag: idag() });
+    var ikon = function (d) { return '<span class="vantar-ikon" aria-hidden="true"><svg viewBox="0 0 24 24">' + d + '</svg></span>'; };
+    var PENNA = '<path d="M4 20h4L19 9l-4-4L4 16z"/>', KAL = '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>', LISTA = '<path d="m4 7 2 2 4-4M4 17l2 2 4-4M13 7h7M13 17h7"/>';
+    var kort = '';
+    v.protokoll.forEach(function (p) {
+      kort += '<div class="vantar-kort viktig">' + ikon(PENNA) + '<div class="vantar-text"><strong>Skriv under protokollet</strong><span>' +
+        esc(motesNamn(p) + ' ' + kortDatum(p.datum)) + ' · ' + p.signerade + ' av ' + p.antal + ' har skrivit under</span></div>' +
+        '<button class="btn" data-action="styr-oppna" data-id="' + esc(p.id) + '">Läs och skriv under</button></div>';
+    });
+    v.arsrapporter.forEach(function (r) {
+      kort += '<div class="vantar-kort viktig">' + ikon(PENNA) + '<div class="vantar-text"><strong>Skriv under ' + esc(r.titel.charAt(0).toLowerCase() + r.titel.slice(1)) + '</strong><span>' +
+        r.signerade + ' av ' + r.antal + ' har skrivit under</span></div>' +
+        '<button class="btn" data-vy="st-moten">Läs och skriv under</button></div>';
+    });
+    if (v.uppgifter.length) {
+      kort += '<div class="vantar-kort">' + ikon(LISTA) + '<div class="vantar-text"><strong>' + (v.uppgifter.length === 1 ? 'Din uppgift' : 'Dina uppgifter') + '</strong>' +
+        v.uppgifter.slice(0, 3).map(function (u) {
+          return '<span>' + esc(u.text) + (u.datum ? ' <em class="' + (u.sen ? 'sen' : '') + '">' + (u.sen ? 'skulle vara klar ' : 'senast ') + esc(kortDatum(u.datum)) + '</em>' : '') + '</span>';
+        }).join('') + (v.uppgifter.length > 3 ? '<span>och ' + (v.uppgifter.length - 3) + ' till</span>' : '') + '</div>' +
+        '<button class="btn btn-secondary" data-action="styr-vy" data-v="uppgifter">Uppgifter</button></div>';
+    }
+    if (v.nastaMote) {
+      var m = v.nastaMote;
+      kort += '<button type="button" class="vantar-kort lank" data-action="styr-oppna" data-id="' + esc(m.id) + '">' + ikon(KAL) + '<div class="vantar-text"><strong>Nästa möte ' + esc(kortDatum(m.datum)) +
+        (m.tid ? ' kl ' + esc(m.tid.replace(':', '.')) : '') + '</strong><span>' + esc(motesNamn(m)) + (m.plats ? ' · ' + esc(m.plats) : '') + '</span></div>' +
+        '<svg class="pil" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>';
+    }
+    return kort ? '<section class="vantar" aria-label="Väntar på dig"><h3>Väntar på dig</h3>' + kort + '</section>' : '';
+  }
+
   function vyOversikt(ar) {
-    var html = '<h2>Översikt</h2>' + oversiktNyckeltal(ar);
+    var html = '<h2>Översikt</h2>' + vantarPaDig() + oversiktNyckeltal(ar);
     var rad = function (antalTxt, knapp) { return '<li><span class="bock" aria-hidden="true">!</span><div><div>' + antalTxt + '</div>' + (knapp ? '<div class="row" style="margin-top:6px">' + knapp + '</div>' : '') + '</div></li>'; };
     // Revisorn
     if (odAnslutet() && odNu.roller && K.harRoll(odNu.roller, mig(), 'revisor') && !K.kanFaSkrivratt(odNu.roller, mig())) {
@@ -10563,7 +10674,8 @@ var VERSIONER = [
       var namn = 'Protokollet från ' + motesNamn(m).toLowerCase() + ' ' + m.datum;
       if (m.status === 'last' && m.underskrift.metod === 'e') {
         var vantar = m.underskrift.undertecknare.filter(function (u) { return !m.underskrift.signaturer.some(function (x) { return x.epost === u.epost; }); });
-        if (vantar.some(function (u) { return u.epost === jag; })) ut += rad(esc(namn) + ' väntar på din underskrift.', oppna(m, 'Läs och skriv under'));
+        // Det som väntar på mig själv visas under "Väntar på dig" överst i översikten.
+        if (vantar.some(function (u) { return u.epost === jag; })) { /* visas under Väntar på dig */ }
         else if (vantar.length) ut += rad(esc(namn) + ' väntar på ' + antal(vantar.length, 'underskrift', 'underskrifter') + '.', oppna(m, 'Visa'));
       }
       if (m.status === 'last' && m.underskrift.metod === 'papper') ut += rad(esc(namn) + ' väntar på det inskannade originalet.', oppna(m, 'Visa'));

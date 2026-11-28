@@ -198,6 +198,10 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Översikten börjar med nyckeltal (likvida medel med senaste kontoutdrag, årets resultat, betalat terminen med stapel, verifikationer utan underlag) och ett diagram över intäkter och kostnader de senaste sex månaderna. Beräkningen görs av `oversiktstal` i kärnan (från 1.67).
 - Verifikationer: filter (Alla, Saknar underlag, Rättade) och sökning i nummer, datum, text, konto, kontonamn och belopp, med `filtreraVerifikationer` och `verifikationsfilterAntal` i kärnan. Statusmärken under texten (från 1.68).
 
+## Väntar på dig (från version 1.69)
+
+- Överst i översikten för den som ser styrelsens material: protokoll och årsrapporter som väntar på personens underskrift, personens egna uppgifter (ansvarig matchas mot namnet, t.ex. "Anna" eller "Anna E") med sista datum, och nästa planerade möte. Beräkningen görs av `vantarPaMig` i kärnan. I övningsläget, där ingen är inloggad, visas det som väntar på den första som inte har skrivit under.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
