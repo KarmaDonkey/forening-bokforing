@@ -291,6 +291,9 @@
   .granskning-pill.saknas { background: #FCE3CF; color: #8A3D0B; }
   .granskning-pill.oklart { background: var(--surface-2); color: var(--ink-soft); }
   .forslag-lydelse { margin: 6px 0; padding: 8px 10px; background: var(--surface-2); border-radius: 8px; white-space: pre-line; }
+  .stadge-red { padding: 10px 0; border-top: 1px solid var(--hairline); }
+  .stadge-red.andrad { box-shadow: inset 3px 0 0 var(--guld); padding-left: 10px; }
+  .stadge-red textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; margin-top: 6px; line-height: 1.5; }
   .stadgetext p { margin: 10px 0; white-space: normal; }
   .om-slogan { font-size: 18px; font-weight: 600; margin-top: 0; }
   .ovning-banner .btn-secondary { background: #fff; color: #2B2F3A; border-color: rgba(43, 47, 58, 0.18); }
@@ -513,6 +516,15 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.78', datum: '2026-11-28',
+    nyheter: [
+      'Ta fram nya stadgar i appen: ett utkast där varje paragraf kan ändras, läggas till eller tas bort, och där ändringarna mot gällande stadgar syns. Förslag från granskningen kan läggas in med ett klick.',
+      'Ladda ner de nya stadgarna som Word-fil, och en jämförelse till årsmötet med nuvarande och föreslagen lydelse sida vid sida. Alla ändringar kan bli ett ärende till årsmötet.',
+      'Fråga stadgarna: ställ en fråga och få ett svar med hänvisning till paragrafen.',
+      'När årsmötet har beslutat kan utkastet göras till föreningens gällande stadgar.'
+    ]
+  },
   {
     version: '1.77', datum: '2026-11-28',
     nyheter: [
@@ -4678,7 +4690,8 @@ var VERSIONER = [
       system: GEMENSAMT + ' Du granskar föreningens stadgar mot kravlistan. Bedöm varje krav för sig, och bara mot det som står i stadgarna. ' +
         'status: uppfylls, delvis, saknas eller oklart (om kravet gäller hur föreningen arbetar och inte kan bedömas av stadgarna). ' +
         'paragraf: paragrafens nummer, citat: den mening ur stadgarna som bedömningen bygger på, ordagrant. kommentar: en kort förklaring. ' +
-        'forslag: vid delvis eller saknas en föreslagen ny eller ändrad lydelse som kan stå i stadgarna, annars tomt. krav: kravets id. Avsluta med en kort sammanfattning.' };
+        'forslag: vid delvis eller saknas den föreslagna lydelsen. Hör kravet till en befintlig paragraf (paragraf ifyllt): hela paragrafens nya text med ändringen inarbetad, så att den kan ersätta den nuvarande texten. ' +
+        'Annars texten till en ny paragraf. Annars tomt. krav: kravets id. Avsluta med en kort sammanfattning.' };
   }
   function normaliseraGranskning(svar, lista, st) {
     svar = svar || {};
@@ -4701,6 +4714,90 @@ var VERSIONER = [
     return 'Stadgeändring: ' + rad.rubrik + '.\n' +
       (p ? 'Nuvarande lydelse (§ ' + p.nr + (p.rubrik ? ' ' + p.rubrik : '') + '):\n' + p.text + '\n' : 'Nuvarande lydelse: saknas i stadgarna.\n') +
       'Föreslagen lydelse:\n' + rad.forslag + (st.andringsregel ? '\nEnligt stadgarna: ' + st.andringsregel : '');
+  }
+
+  // Utkast till nya stadgar: en kopia där varje paragraf minns vilken paragraf den kom från.
+  function nyttStadgeutkast(st) {
+    return { id: styrId('su'), utkast: true, baseradPa: st.id, titel: st.titel, andringsregel: st.andringsregel || '',
+      paragrafer: (st.paragrafer || []).map(function (p, i) { return { nr: p.nr, rubrik: p.rubrik, text: p.text, ursprung: i }; }) };
+  }
+  // Ändringarna i utkastet jämfört med de gällande stadgarna, i utkastets ordning, borttagna sist.
+  function stadgeandringar(st, utkast) {
+    var orig = st.paragrafer || [], ut = [], anvanda = {};
+    (utkast.paragrafer || []).forEach(function (p) {
+      var o = p.ursprung != null ? orig[p.ursprung] : null;
+      if (!o) { ut.push({ typ: 'ny', nr: p.nr, rubrik: p.rubrik, fore: '', efter: p.text }); return; }
+      anvanda[p.ursprung] = true;
+      if (o.text !== p.text || o.rubrik !== p.rubrik || o.nr !== p.nr) ut.push({ typ: 'andrad', nr: p.nr, forraNr: o.nr, rubrik: p.rubrik, foreRubrik: o.rubrik, fore: o.text, efter: p.text });
+    });
+    orig.forEach(function (o, i) { if (!anvanda[i]) ut.push({ typ: 'borttagen', nr: o.nr, rubrik: o.rubrik, fore: o.text, efter: '' }); });
+    return ut;
+  }
+  function stadgeandringarText(andringar, st) {
+    var rubrik = function (nr, r) { return '§ ' + nr + (r ? ' ' + r : ''); };
+    return 'Stadgeändring: förslag till nya stadgar (' + andringar.length + (andringar.length === 1 ? ' ändring' : ' ändringar') + ').\n\n' + andringar.map(function (a) {
+      if (a.typ === 'ny') return 'Ny paragraf ' + rubrik(a.nr, a.rubrik) + ':\n' + a.efter;
+      if (a.typ === 'borttagen') return 'Paragraf ' + rubrik(a.nr, a.rubrik) + ' tas bort. Nuvarande lydelse:\n' + a.fore;
+      return rubrik(a.forraNr, a.foreRubrik) + (a.forraNr !== a.nr || a.foreRubrik !== a.rubrik ? ' (blir ' + rubrik(a.nr, a.rubrik) + ')' : '') + '\nNuvarande lydelse:\n' + a.fore + '\nFöreslagen lydelse:\n' + a.efter;
+    }).join('\n\n') + (st && st.andringsregel ? '\n\nEnligt stadgarna: ' + st.andringsregel : '');
+  }
+
+  // ---------- Word (.docx) ----------
+  // Ett enkelt Word-dokument: rubrik, stycken och tabeller med direkt formatering. Delarna packas som zip av appen.
+  function xmlText(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function wordRad(text, opt) {
+    opt = opt || {};
+    var rader = String(text == null ? '' : text).split('\n');
+    var rpr = '<w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>' + (opt.fet ? '<w:b/>' : '') + '<w:sz w:val="' + (opt.storlek || 22) + '"/>' + (opt.farg ? '<w:color w:val="' + opt.farg + '"/>' : '') + '</w:rPr>';
+    return '<w:p><w:pPr><w:spacing w:before="' + (opt.fore || 0) + '" w:after="' + (opt.efter == null ? 120 : opt.efter) + '"/>' + (opt.centrerad ? '<w:jc w:val="center"/>' : '') + '</w:pPr>' +
+      rader.map(function (r, i) { return '<w:r>' + rpr + (i ? '<w:br/>' : '') + '<w:t xml:space="preserve">' + xmlText(r) + '</w:t></w:r>'; }).join('') + '</w:p>';
+  }
+  function wordTabell(rader, bredder) {
+    var kant = '<w:tblBorders>' + ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(function (k) { return '<w:' + k + ' w:val="single" w:sz="4" w:color="BBBBBB"/>'; }).join('') + '</w:tblBorders>';
+    return '<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>' + kant + '</w:tblPr><w:tblGrid>' + bredder.map(function (b) { return '<w:gridCol w:w="' + b + '"/>'; }).join('') + '</w:tblGrid>' +
+      rader.map(function (r, i) {
+        return '<w:tr>' + r.map(function (c, j) { return '<w:tc><w:tcPr><w:tcW w:w="' + bredder[j] + '" w:type="dxa"/></w:tcPr>' + wordRad(c, { fet: i === 0, storlek: 20, efter: 60 }) + '</w:tc>'; }).join('') + '</w:tr>';
+      }).join('') + '</w:tbl>';
+  }
+  function wordDokument(innehall, liggande) {
+    var sida = liggande ? '<w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>' : '<w:pgSz w:w="11906" w:h="16838"/>';
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + innehall +
+      '<w:sectPr>' + sida + '<w:pgMar w:top="1418" w:right="1418" w:bottom="1418" w:left="1418" w:header="709" w:footer="709" w:gutter="0"/></w:sectPr></w:body></w:document>';
+  }
+  var WORD_DELAR = {
+    '[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+    '_rels/.rels': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'
+  };
+  // De nya stadgarna som Word: titel och paragrafer.
+  function stadgarWordXml(st, undertext) {
+    return wordDokument(wordRad(st.titel, { fet: true, storlek: 36, efter: 120 }) + (undertext ? wordRad(undertext, { storlek: 20, farg: '666666', efter: 240 }) : '') +
+      (st.paragrafer || []).map(function (p) {
+        return wordRad('§ ' + p.nr + (p.rubrik ? ' ' + p.rubrik : ''), { fet: true, storlek: 24, fore: 240, efter: 80 }) + wordRad(p.text);
+      }).join(''));
+  }
+  // Jämförelse till årsmötet: nuvarande och föreslagen lydelse sida vid sida.
+  function jamforelseWordXml(andringar, st, rubrik) {
+    var namn = function (nr, r) { return '§ ' + nr + (r ? ' ' + r : ''); };
+    var rader = [['Paragraf', 'Nuvarande lydelse', 'Föreslagen lydelse']].concat(andringar.map(function (a) {
+      var p = a.typ === 'ny' ? namn(a.nr, a.rubrik) + ' (ny)' : a.typ === 'borttagen' ? namn(a.nr, a.rubrik) + ' (tas bort)' :
+        namn(a.forraNr, a.foreRubrik) + (a.forraNr !== a.nr || a.foreRubrik !== a.rubrik ? ' → ' + namn(a.nr, a.rubrik) : '');
+      return [p, a.fore || '–', a.efter || '–'];
+    }));
+    return wordDokument(wordRad(rubrik || 'Förslag till stadgeändring', { fet: true, storlek: 32, efter: 120 }) +
+      wordRad(st.titel + (st.andringsregel ? '. Enligt stadgarna: ' + st.andringsregel : ''), { storlek: 20, farg: '666666', efter: 240 }) +
+      wordTabell(rader, [2400, 5800, 5800]), true);
+  }
+
+  // Fråga stadgarna: svar med hänvisning till paragraf.
+  var FRAGA_SCHEMA = { type: 'object', additionalProperties: false, required: ['svar', 'paragrafer'], properties: { svar: { type: 'string' }, paragrafer: { type: 'array', items: { type: 'string' } } } };
+  function stadgeFragaUppdrag(st, fraga) {
+    return { schema: FRAGA_SCHEMA, maxTokens: 4000, text: 'Stadgarna:\n' + stadgarSomText(st) + '\n\nFråga: ' + utanPersonnummer(fraga),
+      system: GEMENSAMT + ' Svara på frågan utifrån föreningens stadgar, kort och tydligt. Hänvisa till paragrafen i texten (t.ex. "enligt § 7"). ' +
+        'Står det inte i stadgarna, säg det och föreslå vad man brukar göra, tydligt märkt som ett råd. paragrafer: numren på de paragrafer svaret bygger på.' };
   }
 
   // ---------- AI-texter för styrelsen ----------
@@ -5674,6 +5771,13 @@ var VERSIONER = [
     granskningsUppdrag: granskningsUppdrag,
     normaliseraGranskning: normaliseraGranskning,
     stadgearendeText: stadgearendeText,
+    nyttStadgeutkast: nyttStadgeutkast,
+    stadgeandringar: stadgeandringar,
+    stadgeandringarText: stadgeandringarText,
+    WORD_DELAR: WORD_DELAR,
+    stadgarWordXml: stadgarWordXml,
+    jamforelseWordXml: jamforelseWordXml,
+    stadgeFragaUppdrag: stadgeFragaUppdrag,
     AI_TJANSTVAL: AI_TJANSTVAL,
     aiTjanstFor: aiTjanstFor,
     aiTjanstNamn: aiTjanstNamn,
@@ -6234,7 +6338,61 @@ var VERSIONER = [
 
   // ---------- Stadgar ----------
   var stadgeVal = { lista: 'stockholm' };
-  function aktuellaStadgar() { var l = styrData().stadgar || []; return l.length ? l[l.length - 1] : null; }
+  function aktuellaStadgar() { var l = (styrData().stadgar || []).filter(function (x) { return !x.utkast; }); return l.length ? l[l.length - 1] : null; }
+  function stadgeUtkast() { return (styrData().stadgar || []).find(function (x) { return x.utkast; }) || null; }
+  function sparaUtkast(fn, ritaOm) {
+    var u = stadgeUtkast(); if (!u) return;
+    var k = JSON.parse(JSON.stringify(u)); fn(k);
+    andraStyr('styr', Object.assign({}, styrData(), { stadgar: styrData().stadgar.map(function (x) { return x.id === u.id ? k : x; }) }), ritaOm);
+  }
+  async function laddaNerWord(namn, documentXml) {
+    var JSZip = await laddaJsZip();
+    var zip = new JSZip();
+    Object.keys(K.WORD_DELAR).forEach(function (f) { zip.file(f, K.WORD_DELAR[f]); });
+    zip.file('word/document.xml', documentXml);
+    var blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    laddaNer(K.sakertNamn(namn), blob, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  }
+  var stadgeFraga = { fraga: '', svar: null };
+
+  function vyStadgeUtkast(st, u, skriv) {
+    var andr = K.stadgeandringar(st, u);
+    var TYP = { andrad: 'Ändrad', ny: 'Ny', borttagen: 'Tas bort' };
+    var dis = skriv ? '' : ' disabled';
+    var html = '<div class="card ai-kort"><h3 style="margin-top:0">Utkast till nya stadgar</h3>' +
+      '<p class="faint" style="margin-top:0">Ändra direkt i texten. Allt sparas automatiskt i styrelsens fil. Gällande stadgar ändras inte förrän årsmötet har beslutat och du gör utkastet gällande.</p>' +
+      '<label for="suTitel">Titel</label><input id="suTitel" data-su="titel" value="' + esc(u.titel) + '"' + dis + '>' +
+      u.paragrafer.map(function (p, i) {
+        var o = p.ursprung != null ? st.paragrafer[p.ursprung] : null;
+        var andrad = !o || o.text !== p.text || o.rubrik !== p.rubrik || o.nr !== p.nr;
+        return '<div class="stadge-red' + (andrad ? ' andrad' : '') + '"><div class="row" style="gap:6px;flex-wrap:nowrap">' +
+          '<span class="faint">§</span><input data-su="nr" data-si="' + i + '" value="' + esc(p.nr) + '" style="width:64px" aria-label="Paragrafens nummer"' + dis + '>' +
+          '<input data-su="rubrik" data-si="' + i + '" value="' + esc(p.rubrik) + '" placeholder="Rubrik" style="flex:1;min-width:0" aria-label="Rubrik"' + dis + '>' +
+          (skriv ? '<button class="btn btn-secondary btn-small" data-action="su-bort" data-si="' + i + '" aria-label="Ta bort paragrafen">×</button>' : '') + '</div>' +
+          '<textarea data-su="text" data-si="' + i + '" rows="' + Math.min(10, Math.max(2, Math.ceil(p.text.length / 80) + (p.text.split('\n').length - 1))) + '" aria-label="Text för paragraf ' + esc(p.nr) + '"' + dis + '>' + esc(p.text) + '</textarea>' +
+          (andrad ? '<div class="faint">' + (o ? 'Ändrad. Nuvarande lydelse: ' + esc(o.text.slice(0, 160)) + (o.text.length > 160 ? ' …' : '') : 'Ny paragraf.') + '</div>' : '') + '</div>';
+      }).join('') +
+      (skriv ? '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="su-ny">Lägg till paragraf</button></div>' : '') +
+      '<h3>Ändringar (' + andr.length + ')</h3>' + (andr.length ? '<ul>' + andr.map(function (a) { return '<li>' + TYP[a.typ] + ': § ' + esc(a.nr) + (a.rubrik ? ' ' + esc(a.rubrik) : '') + '</li>'; }).join('') + '</ul>' : '<p class="faint">Inga ändringar ännu.</p>') +
+      '<div class="row"><button class="btn btn-small" data-action="su-word">Ladda ner nya stadgar (Word)</button>' +
+      (andr.length ? '<button class="btn btn-secondary btn-small" data-action="su-jamforelse">Ladda ner jämförelse till årsmötet (Word)</button>' : '') +
+      (skriv && andr.length ? '<button class="btn btn-secondary btn-small" data-action="su-arende">Skapa ärende med alla ändringar</button>' : '') + '</div>' +
+      (skriv ? '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="su-gallande">Gör utkastet till gällande stadgar</button>' +
+        '<button class="btn btn-secondary btn-small" data-action="su-slang">Släng utkastet</button></div>' : '') + '</div>';
+    return html;
+  }
+
+  function vyStadgeFraga(st) {
+    if (!K.aiHjalpPa(store.forening)) return '';
+    var f = stadgeFraga;
+    return '<div class="card ai-kort"><h3 style="margin-top:0">✦ Fråga stadgarna</h3>' +
+      '<label for="stadgeFraga">Din fråga</label><div class="row" style="flex-wrap:nowrap"><input id="stadgeFraga" value="' + esc(f.fraga) + '" placeholder="T.ex. Hur långt innan årsmötet ska kallelsen skickas?" style="flex:1;min-width:0">' +
+      (aiKanAnvandas() ? '<button class="btn btn-small" data-action="stadgar-fraga"' + (aiUtkast.arbetar ? ' disabled' : '') + '>' + (aiUtkast.arbetar === 'fraga' ? '✦ …' : 'Fråga') + '</button>' : '') + '</div>' +
+      (aiKanAnvandas() ? '' : '<p>' + aiSaknasHtml() + '</p>') +
+      (f.svar ? '<div class="forslag-lydelse" style="margin-top:10px">' + esc(f.svar.svar) + (f.svar.paragrafer && f.svar.paragrafer.length ? '<div class="faint" style="margin-top:6px">Bygger på § ' + esc(f.svar.paragrafer.join(', § ')) + '</div>' : '') + '</div>' +
+        '<p class="faint">Svaret är ett stöd. Kontrollera alltid i stadgarna.</p>' : '') + '</div>';
+  }
+
 
   // Texten ur en Word-fil (word/document.xml), ett stycke per rad.
   async function wordTillText(fil) {
@@ -6283,6 +6441,10 @@ var VERSIONER = [
       }).join('') + '</div></details>' +
       (skriv ? '<div class="row" style="margin-top:10px">' + (aiKanAnvandas() ? '<button class="btn btn-secondary btn-small" data-action="stadgar-valj"' + (aiUtkast.arbetar ? ' disabled' : '') + '>' + (aiUtkast.arbetar === 'stadgar' ? '✦ AI läser …' : 'Läs in nya stadgar') + '</button>' : '') +
         '<button class="btn btn-secondary btn-small" data-action="stadgar-bort">Ta bort stadgarna</button></div>' : '') + '</div>';
+    var utkast = stadgeUtkast();
+    if (skriv && !utkast) html = html.replace('<button class="btn btn-secondary btn-small" data-action="stadgar-bort">', '<button class="btn btn-small" data-action="su-skapa">Ta fram nya stadgar</button><button class="btn btn-secondary btn-small" data-action="stadgar-bort">');
+    if (utkast) html += vyStadgeUtkast(st, utkast, skriv);
+    html += vyStadgeFraga(st);
     var lista = K.kravlista(stadgeVal.lista) || K.KRAVLISTOR[0];
     var g = (st.granskningar || {})[lista.id];
     html += '<div class="card ai-kort"><h3 style="margin-top:0">✦ Granska stadgarna</h3>' +
@@ -6301,7 +6463,8 @@ var VERSIONER = [
             '<td data-etikett="I stadgarna"><div>' + (r.paragraf ? '§ ' + esc(r.paragraf) : '') + (r.citat ? '<div class="faint">"' + esc(r.citat) + '"</div>' : '') +
               (r.citatOsakert ? '<div class="fel">Citatet hittades inte ordagrant i stadgarna. Kontrollera.</div>' : '') + '</div></td>' +
             '<td data-etikett="Kommentar"><div>' + esc(r.kommentar) + (r.forslag ? '<div class="forslag-lydelse"><span class="faint">Förslag till lydelse:</span><br>' + esc(r.forslag) + '</div>' +
-              (skriv ? (r.arende ? '<span class="ok">Ärende skapat</span> <button class="lank-text" data-vy="st-arenden">Till Ärenden</button>' : '<button class="btn btn-secondary btn-small" data-action="stadgar-arende" data-krav="' + esc(r.krav) + '">Skapa ärende till årsmötet</button>') : '') : '') + '</div></td></tr>';
+              (skriv ? (r.arende ? '<span class="ok">Ärende skapat</span> <button class="lank-text" data-vy="st-arenden">Till Ärenden</button>' : '<button class="btn btn-secondary btn-small" data-action="stadgar-arende" data-krav="' + esc(r.krav) + '">Skapa ärende till årsmötet</button>') +
+                ' <button class="btn btn-secondary btn-small" data-action="su-infoga" data-krav="' + esc(r.krav) + '">Lägg in i ' + (utkast ? 'utkastet' : 'nya stadgar') + '</button>' : '') : '') + '</div></td></tr>';
         }).join('') + '</tbody></table></div>';
     }
     return html + '</div>';
@@ -12803,6 +12966,11 @@ var VERSIONER = [
       return;
     }
     if (t.dataset && t.dataset.aitext && aiUtkast[t.dataset.aitext]) { aiUtkast[t.dataset.aitext].text = t.value; return; }
+    if (t.dataset && t.dataset.su) {
+      var f = t.dataset.su, i = Number(t.dataset.si), v = t.value;
+      try { sparaUtkast(function (k) { if (f === 'titel') k.titel = v; else k.paragrafer[i][f] = v; }, false); } catch (err) { visa(err.message, true); }
+      return;
+    }
     if (t.hasAttribute && t.hasAttribute('data-versok')) {
       verSok = t.value; var pos = t.selectionStart; render();
       var nytt = document.getElementById('verSok'); if (nytt) { nytt.focus(); try { nytt.setSelectionRange(pos, pos); } catch (e2) { /* search-fält i vissa webbläsare */ } }
@@ -12839,6 +13007,8 @@ var VERSIONER = [
   });
 
   document.addEventListener('change', function (e) {
+    // När man lämnar ett fält i utkastet till nya stadgar ritas listan över ändringar om.
+    if (e.target && e.target.dataset && e.target.dataset.su) { render(); return; }
     if (e.target.dataset.arende) { try { andraStyr('styr', K.andraArende(styrData(), e.target.dataset.arende, { status: e.target.value })); } catch (err) { visa(err.message, true); } return; }
     if (e.target.id === 'inlasKonto') { valtInlasKonto = e.target.value; return; }
     if (e.target.dataset.regel != null) {
@@ -13852,6 +14022,61 @@ var VERSIONER = [
       aiKorFor('kallelse', function () {
         return aiSvar(uppdrag).then(function (svar) { aiUtkast.kallelse = { text: svar.text || '', varning: K.siffrorUtanforFakta(svar.text, uppdrag.text) }; });
       });
+    },
+    'su-skapa': function () {
+      var st = aktuellaStadgar(); if (!st) return;
+      andraStyr('styr', Object.assign({}, styrData(), { stadgar: (styrData().stadgar || []).filter(function (x) { return !x.utkast; }).concat([K.nyttStadgeutkast(st)]) }));
+      visa('Ett utkast till nya stadgar är skapat. Ändra direkt i texten nedan.');
+    },
+    'su-ny': function () { sparaUtkast(function (k) { k.paragrafer.push({ nr: String(k.paragrafer.length + 1), rubrik: '', text: '', ursprung: null }); }); },
+    'su-bort': function (t) { if (!window.confirm('Ta bort paragrafen ur utkastet?')) return; sparaUtkast(function (k) { k.paragrafer.splice(Number(t.dataset.si), 1); }); },
+    'su-slang': function () {
+      if (!window.confirm('Släng utkastet till nya stadgar? Gällande stadgar påverkas inte.')) return;
+      andraStyr('styr', Object.assign({}, styrData(), { stadgar: (styrData().stadgar || []).filter(function (x) { return !x.utkast; }) }));
+      visa('Utkastet är slängt.');
+    },
+    'su-gallande': function () {
+      if (!window.confirm('Gör utkastet till föreningens gällande stadgar? Gör det först när årsmötet har beslutat om ändringarna enligt stadgarna. De nuvarande stadgarna ersätts i appen.')) return;
+      var u = stadgeUtkast(); if (!u) return;
+      var ny = { id: u.id.replace(/^su/, 'st'), titel: u.titel, andringsregel: u.andringsregel, paragrafer: u.paragrafer.map(function (p) { return { nr: p.nr, rubrik: p.rubrik, text: p.text }; }),
+        filnamn: 'antagna i appen', inlast: idag(), granskningar: {} };
+      andraStyr('styr', Object.assign({}, styrData(), { stadgar: [ny] }));
+      visa('De nya stadgarna gäller nu i appen. Spara gärna Word-filen tillsammans med årsmötesprotokollet.');
+    },
+    'su-word': function () {
+      var u = stadgeUtkast(); if (!u) return;
+      laddaNerWord(u.titel + '.docx', K.stadgarWordXml(u, 'Förslag till nya stadgar, ' + idag())).catch(function (err) { visa(err.message, true); });
+    },
+    'su-jamforelse': function () {
+      var u = stadgeUtkast(), st = aktuellaStadgar(); if (!u || !st) return;
+      laddaNerWord('Förslag till stadgeändring.docx', K.jamforelseWordXml(K.stadgeandringar(st, u), st)).catch(function (err) { visa(err.message, true); });
+    },
+    'su-arende': function () {
+      var u = stadgeUtkast(), st = aktuellaStadgar(); if (!u || !st) return;
+      try {
+        andraStyr('styr', K.laggTillArende(styrData(), { text: K.stadgeandringarText(K.stadgeandringar(st, u), st), typ: 'stadgar' }), false);
+        visa('Ett ärende med alla ändringar är skapat under Ärenden till årsmötet.');
+      } catch (err) { visa(err.message, true); }
+    },
+    'su-infoga': function (t) {
+      var st = aktuellaStadgar(), lista = K.kravlista(stadgeVal.lista);
+      var g = st && st.granskningar && st.granskningar[lista.id];
+      var rad = g && g.resultat.find(function (r) { return r.krav === t.dataset.krav; });
+      if (!rad || !rad.forslag) return;
+      if (!stadgeUtkast()) andraStyr('styr', Object.assign({}, styrData(), { stadgar: styrData().stadgar.concat([K.nyttStadgeutkast(st)]) }), false);
+      sparaUtkast(function (k) {
+        var p = rad.paragraf ? k.paragrafer.find(function (x) { return x.ursprung != null && st.paragrafer[x.ursprung] && st.paragrafer[x.ursprung].nr === rad.paragraf; }) : null;
+        // Förslaget är hela paragrafens nya lydelse och ersätter texten; den gamla syns som nuvarande lydelse.
+        if (p) p.text = rad.forslag;
+        else k.paragrafer.push({ nr: String(k.paragrafer.length + 1), rubrik: rad.rubrik, text: rad.forslag, ursprung: null });
+      }, false);
+      visa('Förslaget är inlagt i utkastet' + (rad.paragraf ? ' i § ' + rad.paragraf : ' som en ny paragraf') + '. Läs igenom och justera texten.');
+    },
+    'stadgar-fraga': function () {
+      var st = aktuellaStadgar(); var fraga = varde('stadgeFraga');
+      if (!st || !fraga) { visa('Skriv en fråga först.', true); return; }
+      stadgeFraga.fraga = fraga; stadgeFraga.svar = null;
+      aiKorFor('fraga', function () { return aiSvar(K.stadgeFragaUppdrag(st, fraga)).then(function (svar) { stadgeFraga.svar = svar; }); });
     },
     'stadgar-valj': function () {
       var input = document.createElement('input');
