@@ -13,7 +13,7 @@
 <link rel="icon" id="ikon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23373F51'/%3E%3Cpath d='M20 22h24M20 32h24M20 42h16' stroke='%23E5AE1F' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,600;8..144,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,600;8..144,700;8..144,800&display=swap" rel="stylesheet">
 <style>
   /* Färger och form från föreningens hemsida: ljust, skiffergrå text, kolgrå partier, guld från logotypen. */
   :root {
@@ -92,6 +92,11 @@
   }
   .wrap { flex: 1 0 auto; width: 100%; }
   .topp { position: relative; z-index: 40; background: var(--surface); padding-top: env(safe-area-inset-top); }
+  /* Plätts logotyp uppe till vänster: plätten med bock och ordet plätt. */
+  .platt-marke { position: absolute; left: 22px; top: 20px; display: inline-flex; align-items: center; gap: 7px; font: 800 20px/1 "Roboto Flex", system-ui, sans-serif; letter-spacing: -0.035em; color: var(--ink); }
+  .platt-marke svg { width: 26px; height: 26px; flex: none; }
+  .platt-marke circle { fill: var(--guld); }
+  .platt-marke path { fill: none; stroke: #2B2F3A; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
   header { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 16px 10px; text-align: center; }
   .logo-bricka { background: #fff; border-radius: 50%; padding: 6px; display: inline-flex; }
   .logo-bricka[hidden] { display: none; }
@@ -260,6 +265,10 @@
   @media (max-width: 700px) {
     header { padding: 12px 16px 6px; gap: 4px; }
     .narvaro { top: 10px; right: 10px; }
+    .platt-marke { left: 12px; top: 12px; font-size: 16px; gap: 5px; }
+    .platt-marke svg { width: 21px; height: 21px; }
+    /* Utan föreningens logotyp ligger namnet överst; då får Plätts logotyp en egen rad ovanför. */
+    header:has(#logoBricka[hidden]) { padding-top: 44px; }
     /* Utan logotyp ligger namnet överst; då får cirklarna en egen liten plats ovanför. */
     header:has(#logoBricka[hidden]):has(.narvaro:not(:empty)) { padding-top: 44px; }
     .narvaro .avatar { width: 26px; height: 26px; font-size: 10.5px; margin-left: -7px; }
@@ -346,6 +355,7 @@
 <body>
 <div class="topp">
   <header>
+    <span class="platt-marke" role="img" aria-label="Plätt"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29"></circle><path d="M21 33 L29 41 L44 24"></path></svg><span>plätt</span></span>
     <span class="logo-bricka" id="logoBricka" hidden><img id="logo" alt=""></span>
     <h1 id="rubrik">Föreningsbokföring</h1>
     <div class="row" id="arvaljare"></div>
@@ -359,7 +369,7 @@
 </div>
 <footer class="ej-utskrift"><button class="lank-knapp" data-vy="om" id="versionLank"></button></footer>
 <div id="utskrift"></div>
-<div id="platt-utskrift" class="platt-kant">Skapad med Plätt · Gör bokföring och styrelsearbete för ideella föreningar lätt</div>
+<div id="platt-utskrift" class="platt-kant">Skapad med Plätt · Gör bokföring och styrelsearbete lätt för ideella föreningar</div>
 
 <!--
   Kärnan: all bokföringslogik. Den har inga beroenden till sidan och testas
@@ -372,6 +382,13 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.64', datum: '2026-11-28',
+    nyheter: [
+      'Plätts logotyp (en gyllene plätt med en bock och ordet plätt) syns uppe till vänster i appen.',
+      'Raden i vänsterkanten på dokumenten lyder nu "Skapad med Plätt · Gör bokföring och styrelsearbete lätt för ideella föreningar".'
+    ]
+  },
   {
     version: '1.63', datum: '2026-11-26',
     nyheter: [
@@ -7079,7 +7096,7 @@ var VERSIONER = [
 
   // PDF:ens standardtypsnitt klarar svenska bokstäver men inte alla specialtecken.
   // Raden i vänsterkanten på alla dokument som appen skapar.
-  var PLATT_RAD = 'Skapad med Plätt · Gör bokföring och styrelsearbete för ideella föreningar lätt';
+  var PLATT_RAD = 'Skapad med Plätt · Gör bokföring och styrelsearbete lätt för ideella föreningar';
   function plattKant() { return '<div class="platt-kant">' + esc(PLATT_RAD) + '</div>'; }
   // Ritar raden vertikalt i vänstermarginalen på varje sida, nerifrån och upp.
   function ritaPlattKant(doc) {
