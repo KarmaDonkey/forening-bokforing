@@ -195,7 +195,8 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - Dator (bredare än 700 px): sidomeny till vänster med Plätts logotyp, föreningens namn, logotyp och räkenskapsår, huvuddelarna med ikoner och den valda delens sidor under den. Synkstatus och version längst ner i menyn. Den mörka sidfoten är borttagen.
 - Telefon: kompakt toppfält (plätten, föreningen, året), undermenyn som rullbar rad under toppfältet och huvudmenyn som flikrad längst ner.
-- Planerat: översikten med nyckeltal (1.67) och verifikationer med statusmärken och filter (1.68).
+- Översikten börjar med nyckeltal (likvida medel med senaste kontoutdrag, årets resultat, betalat terminen med stapel, verifikationer utan underlag) och ett diagram över intäkter och kostnader de senaste sex månaderna. Beräkningen görs av `oversiktstal` i kärnan (från 1.67).
+- Planerat: verifikationer med statusmärken och filter (1.68).
 
 ## Kommande
 
