@@ -577,6 +577,14 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.88-test.2', datum: '2026-11-28',
+    nyheter: [
+      'Stadgar: alla filer går att välja. Är det en äldre Word-fil (.doc) får du veta hur du sparar om den som .docx eller väljer PDF:en.',
+      'Medan stadgarna läses in står det i rutan vilken fil som läses, och blir det fel står felet kvar tills du försöker igen.',
+      'Filväljaren fungerar säkrare på iPhone överallt där du väljer filer.'
+    ]
+  },
+  {
     version: '1.88-test.1', datum: '2026-11-28',
     nyheter: [
       'Kortet "Nytt sedan du var här sist" i översikten: de största nyheterna sedan du senast tittade, anpassade efter din roll, med Visa och Uppfattat.',
@@ -5166,6 +5174,23 @@ var NYHETER = [
     if (i < rader.length) kropp += '…\n';
     return (amne ? '*' + amne + '*\n' : '') + kropp + (lank ? 'Läs mer i Plätt: ' + lank : '').trim();
   }
+  // ---------- Filtyp för stadgar ----------
+  // Avgörs efter valet, så att alla filer går att välja (iPhone grånar annars filer som inte passar).
+  function stadgeFiltyp(namn, mime) {
+    namn = String(namn || '').toLowerCase(); mime = String(mime || '').toLowerCase();
+    if (/\.docx$/.test(namn) || mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx';
+    if (/\.doc$/.test(namn) || mime === 'application/msword') return 'doc';
+    if (/\.pdf$/.test(namn) || mime === 'application/pdf') return 'pdf';
+    if (/\.(txt|md)$/.test(namn) || /^text\//.test(mime)) return 'text';
+    if (/\.(odt|rtf|pages)$/.test(namn)) return 'annan-text';
+    return 'okand';
+  }
+  var STADGEFILFEL = {
+    doc: 'Det här är en äldre Word-fil (.doc), som webbläsaren inte kan läsa. Öppna den i Word och spara som .docx (Arkiv, Spara som, Word-dokument), eller välj PDF-versionen.',
+    'annan-text': 'Den här filtypen kan inte läsas. Spara stadgarna som Word-dokument (.docx) eller PDF och välj den filen.',
+    okand: 'Välj stadgarna som Word-dokument (.docx), PDF eller textfil.'
+  };
+
   // ---------- Nytt sedan du var här sist ----------
   // Versioner jämförs som tal; 1.88 kommer efter 1.88-test.3.
   function versionsdelar(v) { var m = String(v || '').match(/^(\d+)\.(\d+)(?:-test\.(\d+))?$/); return m ? [Number(m[1]), Number(m[2]), m[3] ? Number(m[3]) : Infinity] : [0, 0, 0]; }
@@ -6277,6 +6302,8 @@ var NYHETER = [
     odAuktoritet: odAuktoritet,
     ROLLSTEG: ROLLSTEG,
     jamforVersion: jamforVersion,
+    stadgeFiltyp: stadgeFiltyp,
+    STADGEFILFEL: STADGEFILFEL,
     nyheterSedan: nyheterSedan,
     nyaRollsteg: nyaRollsteg,
     AVSANDARE_OMFANG: AVSANDARE_OMFANG,
@@ -7070,6 +7097,15 @@ var NYHETER = [
       '<div class="row"><button class="btn btn-small" data-action="rollbyte-start">Visa vad som är nytt</button><button class="btn btn-secondary btn-small" data-action="rollbyte-senare">Påminn mig senare</button>' +
       '<button class="btn btn-secondary btn-small" data-action="rollbyte-nej">Jag kan det redan</button></div></div>';
   }
+  // Filväljaren läggs i sidan medan den används; Safari på iPhone tappar annars ibland valet.
+  function klickaFil(input) {
+    Array.prototype.forEach.call(document.querySelectorAll('input.filvaljare'), function (x) { x.remove(); });
+    input.className = 'filvaljare'; input.hidden = true;
+    document.body.appendChild(input);
+    input.addEventListener('change', function () { setTimeout(function () { input.remove(); }, 0); });
+    input.click();
+  }
+
   // ---------- Nytt sedan du var här sist ----------
   var SEDD_VERSION = LS + 'sedd-version';
   // Den som använde Plätt innan nyhetskortet fanns får nyheterna sedan den nya layouten.
@@ -7405,11 +7441,11 @@ var NYHETER = [
 
   async function lasInStadgar(fil) {
     var namn = fil.name || 'stadgar';
-    var uppdrag;
-    if (/\.docx$/i.test(namn)) uppdrag = K.stadgeStrukturUppdrag(await wordTillText(fil));
-    else if (/\.pdf$/i.test(namn) || fil.type === 'application/pdf') uppdrag = K.stadgeStrukturUppdrag('', { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: await blobTillBase64(fil) } });
-    else if (/\.(txt|md)$/i.test(namn) || /^text\//.test(fil.type)) uppdrag = K.stadgeStrukturUppdrag(await fil.text());
-    else throw new Error('Välj stadgarna som Word (.docx), PDF eller textfil. Äldre Word-filer (.doc) behöver sparas om som .docx.');
+    var uppdrag, typ = K.stadgeFiltyp(namn, fil.type);
+    if (typ === 'docx') uppdrag = K.stadgeStrukturUppdrag(await wordTillText(fil));
+    else if (typ === 'pdf') uppdrag = K.stadgeStrukturUppdrag('', { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: await blobTillBase64(fil) } });
+    else if (typ === 'text') uppdrag = K.stadgeStrukturUppdrag(await fil.text());
+    else throw new Error(K.STADGEFILFEL[typ]);
     var svar = await aiSvar(uppdrag);
     var misstankt = K.misstankInstruktion(uppdrag.text) || K.misstankInstruktion(JSON.stringify(svar));
     var st = K.normaliseraStadgar(svar, { filnamn: namn, inlast: idag() });
@@ -7419,6 +7455,13 @@ var NYHETER = [
   }
 
   var GRANSKNINGSTATUS = { uppfylls: ['Uppfylls', 'ok'], delvis: ['Delvis', 'delvis'], saknas: ['Saknas', 'saknas'], oklart: ['Kan inte bedömas', 'oklart'] };
+  function stadgeInlasningHtml() {
+    var x = stadgeVal.inlasning;
+    if (!x) return '';
+    if (x.fel) return '<p class="fel" role="alert">Kunde inte läsa in ' + esc(x.fil) + ': ' + esc(x.fel) + '</p>';
+    if (aiUtkast.arbetar === 'stadgar') return '<p role="status">✦ Läser in <strong>' + esc(x.fil) + '</strong> … Det kan ta upp till en minut.</p>';
+    return '';
+  }
   function vyStadgar() {
     var skriv = styrBeh('styr') === 'write';
     var st = aktuellaStadgar();
@@ -7426,14 +7469,14 @@ var NYHETER = [
       'Granskningen är ett stöd, inte juridisk rådgivning.</p>';
     if (!st) {
       return html + '<div class="card ai-kort"><h3 style="margin-top:0">✦ Läs in stadgarna</h3><p style="margin-top:0">Välj stadgarna som Word-fil (.docx), PDF eller text. Word ger renast text, men PDF fungerar också. ' +
-        'AI delar upp stadgarna i paragrafer och återger texten ordagrant. Stadgarna sparas i styrelsens fil i OneDrive.</p>' +
+        'AI delar upp stadgarna i paragrafer och återger texten ordagrant. Stadgarna sparas i styrelsens fil i OneDrive.</p>' + stadgeInlasningHtml() +
         '<div class="row">' + (!skriv ? '<span class="faint">Du kan läsa styrelsens material men inte ändra det.</span>' : aiKanAnvandas()
           ? '<button class="btn" data-action="stadgar-valj"' + (aiUtkast.arbetar ? ' disabled' : '') + '>' + (aiUtkast.arbetar === 'stadgar' ? '✦ AI läser stadgarna …' : 'Välj fil med stadgarna') + '</button>'
           : aiSaknasHtml()) + '</div></div>';
     }
     html += '<div class="card"><h3 style="margin-top:0">' + esc(st.titel) + '</h3><p style="margin-top:0">' + antal(st.paragrafer.length, 'paragraf', 'paragrafer') +
       (st.inlast ? ' · inläst ' + esc(st.inlast) : '') + (st.filnamn ? ' från ' + esc(st.filnamn) : '') + '</p>' +
-      (st.andringsregel ? '<p><strong>Stadgeändring:</strong> ' + esc(st.andringsregel) + '</p>' : '') +
+      stadgeInlasningHtml() + (st.andringsregel ? '<p><strong>Stadgeändring:</strong> ' + esc(st.andringsregel) + '</p>' : '') +
       '<details><summary>Visa stadgarna</summary><div class="stadgetext">' + st.paragrafer.map(function (p) {
         return '<p><strong>§ ' + esc(p.nr) + (p.rubrik ? ' ' + esc(p.rubrik) : '') + '</strong><br>' + esc(p.text).replace(/\n/g, '<br>') + '</p>';
       }).join('') + '</div></details>' +
@@ -13135,7 +13178,7 @@ var NYHETER = [
         visa('Revisionspaketet är öppnat.');
       } catch (err) { visa(err.fel ? err.fel.join(' ') : 'Paketet kunde inte öppnas: ' + err.message, true); }
     };
-    input.click();
+    klickaFil(input);
   }
 
   // Delning av mappen Bokföring och underlag med revisorn, via Microsoft. Revisorn loggar in med sitt Microsoft-konto.
@@ -14458,7 +14501,7 @@ var NYHETER = [
       input.multiple = true;
       input.accept = 'application/pdf,image/*,.csv,.txt,.tsv,.skv,.xlsx,.xls';
       input.onchange = function () { lasInFiler(Array.from(input.files)); };
-      input.click();
+      klickaFil(input);
     },
     'rensa-logg': function () { logg = []; render(); },
     'visa-fil': function (t) { visaFil(t.dataset.id); },
@@ -14489,7 +14532,7 @@ var NYHETER = [
           visa('Din bild är sparad. De andra ser den nästa gång appen hämtar vem som är inne.');
         }, function (err) { visa(err.message, true); });
       };
-      input.click();
+      klickaFil(input);
     },
     'min-bild-bort': function () { sattMinBild(null); uppdateraNarvaro().catch(function () { /* nästa gång */ }); visa('Bilden är borttagen. Cirkeln visar dina initialer.'); },
     'styr-vy': function (t) { vy = 'st-' + t.dataset.v; oppetMote = null; render(); },
@@ -14592,7 +14635,7 @@ var NYHETER = [
         visa('Laddar upp…');
         laddaUppProtokoll(m, fil).then(function () { visa('Det undertecknade protokollet är sparat.'); }, function (err) { visa(err.message, true); });
       };
-      input.click();
+      klickaFil(input);
     },
     'styr-papper-visa': function () {
       var m = oppetMoteObj(), fil = m.underskrift.fil;
@@ -14640,7 +14683,7 @@ var NYHETER = [
         sparaIMotesmapp(t.dataset.mapp, K.motesfilnamn(t.dataset.datum, h[1], andelse), fil, false)
           .then(function (post) { visa(h[1] + ' är sparad som ' + post.name + '.'); }, function (err) { visa(err.message, true); });
       };
-      input.click();
+      klickaFil(input);
     },
     'styr-uppg-ny': function () {
       // @namn i texten eller ett namn ur listan kopplar uppgiften till personen.
@@ -14719,7 +14762,7 @@ var NYHETER = [
           render();
         }).catch(function (err) { visa('Filen kunde inte läsas: ' + err.message, true); });
       };
-      input.click();
+      klickaFil(input);
     },
     'hjalp': function (t) { hjalpOppen = t.dataset.nyckel; render(); },
     'stang-hjalp': function () { hjalpOppen = null; render(); },
@@ -14758,7 +14801,7 @@ var NYHETER = [
           visa('Övningsläget är öppnat med kopian från filen ' + fil.name + '.');
         }).catch(function (err) { visa(err.message, true); });
       };
-      input.click();
+      klickaFil(input);
     },
     'ovning-fran-od': function () {
       sattStatus('Letar efter kopior i OneDrive…');
@@ -14846,7 +14889,7 @@ var NYHETER = [
         excelForhand.laser = null;
         render();
       };
-      input.click();
+      klickaFil(input);
     },
     'excel-avbryt': function () { excelForhand = null; render(); },
     'excel-las-in': function () {
@@ -15331,9 +15374,15 @@ var NYHETER = [
     },
     'stadgar-valj': function () {
       var input = document.createElement('input');
-      input.type = 'file'; input.accept = '.docx,.pdf,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain';
-      input.onchange = function () { var f = input.files[0]; if (f) aiKorFor('stadgar', function () { return lasInStadgar(f); }); };
-      input.click();
+      input.type = 'file';
+      input.onchange = function () {
+        var f = input.files[0]; if (!f) return;
+        stadgeVal.inlasning = { fil: f.name || 'filen', fel: null };
+        aiUtkast.arbetar = 'stadgar'; render();
+        lasInStadgar(f).then(function () { stadgeVal.inlasning = null; aiUtkast.arbetar = null; render(); },
+          function (err) { stadgeVal.inlasning.fel = /\.doc|filtyp|Välj stadgarna/.test(err.message) ? err.message : claudeFel(err); aiUtkast.arbetar = null; render(); });
+      };
+      klickaFil(input);
     },
     'stadgar-bort': function () {
       if (!window.confirm('Ta bort de inlästa stadgarna och granskningarna från appen? Originalfilen påverkas inte.')) return;
@@ -15594,7 +15643,7 @@ var NYHETER = [
           visa(filnamn + ' är bifogad till verifikation ' + nr + '.');
         }).catch(function (err) { visa(err.message, true); });
       };
-      input.click();
+      klickaFil(input);
     },
     'aterstall': function (t) { delete inkorgVal[t.dataset.id]; render(); },
     'bokfor-underlag': function (t) {
@@ -15787,7 +15836,7 @@ var NYHETER = [
           return laddaLogo();
         }).then(function () { visa('Logotypen är sparad.'); });
       };
-      input.click();
+      klickaFil(input);
     },
     'od-spara-klient': function () {
       var m = varde('odKlient').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
@@ -15892,7 +15941,7 @@ var NYHETER = [
           visa('Medlemsregistret är inläst.');
         }).catch(function (err) { visa('Filen kunde inte läsas: ' + err.message, true); });
       };
-      input.click();
+      klickaFil(input);
     },
     'od-anvand-onedrive': function () {
       if (!window.confirm('Ersätta bokföringen i den här webbläsaren med versionen i OneDrive?')) return;
@@ -15957,7 +16006,7 @@ var NYHETER = [
           });
         }).catch(function (err) { visa(err.fel ? err.fel.join(' ') : 'Filen kunde inte läsas: ' + err.message, true); });
       };
-      input.click();
+      klickaFil(input);
     },
     'ta-bort-logo': function () {
       taBortFil('logotyp');
@@ -16004,7 +16053,7 @@ var NYHETER = [
           visa('Säkerhetskopian är inläst.');
         }).catch(function (err) { visa(err.message, true); });
       };
-      input.click();
+      klickaFil(input);
     }
   };
 
