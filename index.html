@@ -327,6 +327,13 @@
   .rundtur h3 { margin: 2px 0 4px; font-size: 16px; text-transform: none; letter-spacing: 0; color: var(--ink); }
   .rundtur p { margin: 0 0 10px; font-size: 14.5px; }
   .rundtur-steg { font-size: 12px; color: var(--ink-soft); }
+  .kommentarer { margin-top: 6px; }
+  .km-lista { display: flex; flex-direction: column; gap: 8px; }
+  .km { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; background: var(--surface-2); border-radius: 10px; font-size: 14px; }
+  .km-av { font-size: 12.5px; font-weight: 600; }
+  .km-ny { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
+  .km-ny textarea { flex: 1; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 10px; padding: 8px 10px; }
+  tr.kommentar-rad td { background: var(--bg); }
   .om-slogan { font-size: 18px; font-weight: 600; margin-top: 0; }
   .ovning-banner .btn-secondary { background: #fff; color: #2B2F3A; border-color: rgba(43, 47, 58, 0.18); }
   .ai-kort textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; line-height: 1.5; }
@@ -437,6 +444,7 @@
     .nyckeltal-rad { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .fraga-platt { bottom: calc(80px + env(safe-area-inset-bottom)); right: 14px; padding: 10px 14px; }
     .rundtur { bottom: calc(84px + env(safe-area-inset-bottom)); }
+    table.kortlista tr.kommentar-rad td { display: block; text-align: left; }
     .fraga-platt span { display: none; }
     .hjalp-chatt { left: 0; right: 0; bottom: 0; width: auto; height: 85vh; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); z-index: 48; }
     .sokfalt { flex: 1 1 100%; height: 44px; }
@@ -556,6 +564,15 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.84', datum: '2026-11-28',
+    nyheter: [
+      'Kommentarer på uppgifter, möten och ärenden, med @namn för att nämna någon. Nya kommentarer till dig syns under Väntar på dig.',
+      'Kopiera länk till WhatsApp: en kort text med en länk som öppnar appen precis vid uppgiften, mötet eller ärendet.',
+      'Ny flik Utskick under Styrelsen: mallar för Välkommen till styrelsen, Inför årsmötet och eget meddelande, med mottagare, förhandsgranskning och kort version till WhatsApp.',
+      'Påminnelse "Det här väntar på dig": ett mejl per person med nya kommentarer, underskrifter, uppgifter och nästa möte, bara till dem som har något. Systemadministratören skickar, och kan ge ordföranden och kassören samma möjlighet.'
+    ]
+  },
   {
     version: '1.83', datum: '2026-11-28',
     nyheter: [
@@ -4397,12 +4414,12 @@ var VERSIONER = [
   var STYRFORMAT = 'foreningsbokforing-styrelse';
   var UPPDRAGFORMAT = 'foreningsbokforing-uppdrag';
 
-  function tomStyrelse() { return { format: STYRFORMAT, moten: [], uppgifter: [], dokument: [], arenden: [], rapporter: [], stadgar: [], kontakter: [] }; }
+  function tomStyrelse() { return { format: STYRFORMAT, moten: [], uppgifter: [], dokument: [], arenden: [], rapporter: [], stadgar: [], kontakter: [], kommentarer: [], utskick: [] }; }
   function tomaUppdrag() { return { format: UPPDRAGFORMAT, uppdrag: [] }; }
   function normaliseraStyrelse(d) {
     var t = tomStyrelse();
     d = d && typeof d === 'object' ? d : {};
-    ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter', 'stadgar', 'kontakter'].forEach(function (k) { if (Array.isArray(d[k])) t[k] = d[k]; });
+    ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter', 'stadgar', 'kontakter', 'kommentarer', 'utskick'].forEach(function (k) { if (Array.isArray(d[k])) t[k] = d[k]; });
     return t;
   }
   function normaliseraUppdrag(d) { return { format: UPPDRAGFORMAT, uppdrag: d && Array.isArray(d.uppdrag) ? d.uppdrag : [] }; }
@@ -5016,6 +5033,79 @@ var VERSIONER = [
       return { namn: p.namn, epost: p.epost, infoga: '@' + (unikt ? String(p.namn).split(/\s+/)[0] : String(p.namn).split(/\s+/).slice(0, 2).join(' ')) + ' ' };
     }).slice(0, 8);
     return { start: fore.length - m[2].length - 1, slut: markor, fraga: m[2], forslag: forslag };
+  }
+
+  // ---------- Kommentarer, påminnelser och utskick ----------
+  var KOMMENTARTYPER = ['uppgift', 'mote', 'arende'];
+  // En kommentar på en uppgift, ett möte eller ett ärende. @namn i texten gör att personen får veta det.
+  function laggTillKommentar(styr, k, personer) {
+    if (KOMMENTARTYPER.indexOf(k.typ) < 0) throw BokforingsFel('Okänd typ för kommentar.');
+    var text = String(k.text || '').trim();
+    if (!text) throw BokforingsFel('Skriv en kommentar.');
+    var namnda = hittaOmnamnanden(text, personer).map(function (x) { return x.epost; }).filter(function (e, i, l) { return l.indexOf(e) === i; });
+    var x = { id: styrId('km'), typ: k.typ, mal: String(k.mal), text: utanPersonnummer(text), av: String(k.av || '').toLowerCase(), avNamn: k.avNamn || '', tid: k.tid || '', namnda: namnda };
+    return Object.assign({}, styr, { kommentarer: (styr.kommentarer || []).concat([x]) });
+  }
+  function kommentarerFor(styr, typ, mal) {
+    return (styr.kommentarer || []).filter(function (k) { return k.typ === typ && k.mal === String(mal); }).sort(function (a, b) { return a.tid < b.tid ? -1 : 1; });
+  }
+  // Kommentarer till en person sedan en tidpunkt: där hen nämns med @, eller på hens egna uppgifter. Egna kommentarer räknas inte.
+  function kommentarerTill(styr, epost, sedan) {
+    epost = String(epost || '').toLowerCase();
+    var mina = {}; (styr.uppgifter || []).forEach(function (u) { if (u.ansvarigEpost === epost) mina[u.id] = true; });
+    return (styr.kommentarer || []).filter(function (k) {
+      return k.av !== epost && (!sedan || k.tid > sedan) && ((k.namnda || []).indexOf(epost) >= 0 || (k.typ === 'uppgift' && mina[k.mal]));
+    }).sort(function (a, b) { return a.tid < b.tid ? -1 : 1; });
+  }
+  function djuplank(bas, typ, id) { return String(bas || '').replace(/#.*$/, '') + '#' + typ + '=' + encodeURIComponent(id); }
+  function tolkaDjuplank(hash) {
+    var m = String(hash || '').match(/^#?(uppgift|mote|arende)=([^&]+)$/);
+    return m ? { typ: m[1], id: decodeURIComponent(m[2]) } : null;
+  }
+  // Det som en påminnelse till en person ska innehålla. null om inget väntar.
+  function paminnelseFor(styr, person, sedan, idag) {
+    var v = vantarPaMig(styr, person.epost, { namn: person.namn, idag: idag });
+    var k = kommentarerTill(styr, person.epost, sedan);
+    if (!v.protokoll.length && !v.arsrapporter.length && !v.uppgifter.length && !k.length) return null;
+    return { person: person, kommentarer: k, protokoll: v.protokoll, arsrapporter: v.arsrapporter, uppgifter: v.uppgifter, nastaMote: v.nastaMote };
+  }
+  function paminnelseMejl(p, opt) {
+    opt = opt || {};
+    var lank = function (typ, id) { return opt.lank ? ' ' + djuplank(opt.lank, typ, id) : ''; };
+    var del = [];
+    if (p.kommentarer.length) del.push('Du har blivit nämnd eller fått kommentarer:\n' + p.kommentarer.map(function (k) { return '- ' + (k.avNamn || k.av) + ': ' + k.text + lank(k.typ, k.mal); }).join('\n'));
+    if (p.protokoll.length || p.arsrapporter.length) del.push('Väntar på din underskrift:\n' + p.protokoll.map(function (x) { return '- Protokoll ' + x.datum + lank('mote', x.id); })
+      .concat(p.arsrapporter.map(function (x) { return '- ' + x.titel; })).join('\n'));
+    if (p.uppgifter.length) del.push('Dina uppgifter:\n' + p.uppgifter.map(function (u) { return '- ' + u.text + (u.datum ? (u.sen ? ' (skulle vara klar ' : ' (senast ') + u.datum + ')' : '') + lank('uppgift', u.id); }).join('\n'));
+    if (p.nastaMote) del.push('Nästa möte: ' + p.nastaMote.datum + (p.nastaMote.tid ? ' kl ' + p.nastaMote.tid : '') + (p.nastaMote.plats ? ', ' + p.nastaMote.plats : '') + '.');
+    var fornamn = String(p.person.namn || '').split(/\s+/)[0];
+    return { till: p.person.epost, amne: 'Det här väntar på dig' + (opt.forening ? ' i ' + opt.forening : ''),
+      text: 'Hej' + (fornamn ? ' ' + fornamn : '') + '!\n\n' + del.join('\n\n') + '\n\nAllt finns i Plätt' + (opt.lank ? ': ' + String(opt.lank).replace(/#.*$/, '') : '') + '.' + (opt.fran ? '\n\nHälsningar\n' + opt.fran : '') };
+  }
+  // Mallar för utskick till styrelsen. fakta kommer från appen.
+  function utskickMall(typ, f) {
+    f = f || {};
+    var lank = f.lank ? '\n\nPlätt: ' + f.lank : '';
+    if (typ === 'valkommen') return { amne: 'Välkommen till styrelsen' + (f.forening ? ' i ' + f.forening : ''), text: 'Hej alla i styrelsen!\n\nVälkomna, både nya och gamla. Så här ser styrelsen ut' + (f.ar ? ' för ' + f.ar : '') + ':\n' +
+      (f.personer || []).map(function (p) { return '- ' + p.namn + (p.roller ? ', ' + p.roller : '') + (p.mandat ? ' (till ' + p.mandat + ')' : ''); }).join('\n') +
+      '\n\nVi använder appen Plätt för protokoll, uppgifter, ekonomi och årsmöte. Logga in med ditt Microsoft-konto. Under Väntar på dig ser du det som är ditt, och knappen Fråga Plätt svarar på frågor om appen och styrelsearbetet.' +
+      (f.nastaMote ? '\n\nNästa möte: ' + f.nastaMote + '.' : '') + lank + (f.fran ? '\n\nHälsningar\n' + f.fran : '') };
+    if (typ === 'arsmote') return { amne: 'Dags att förbereda årsmötet' + (f.datum ? ' ' + f.datum : ''), text: 'Hej alla i styrelsen!\n\nNu är det dags att förbereda årsmötet' + (f.datum ? ' den ' + f.datum : '') + '. Det här behöver göras:\n' +
+      ((f.frister || []).length ? (f.frister || []).map(function (x) { return '- ' + x.datum + ': ' + x.text; }).join('\n') : '- Bestäm datum för årsmötet.') +
+      ((f.uppgifter || []).length ? '\n\nUppgifter som är fördelade:\n' + f.uppgifter.map(function (u) { return '- ' + u.text + (u.ansvarig ? ' (' + u.ansvarig + ')' : '') + (u.datum ? ', senast ' + u.datum : ''); }).join('\n') : '') +
+      '\n\nVi förbereder allt i Plätt under Styrelsen, Årsmötet.' + lank + (f.fran ? '\n\nHälsningar\n' + f.fran : '') };
+    return { amne: '', text: 'Hej alla i styrelsen!\n\n' + lank.trim() + (f.fran ? '\n\nHälsningar\n' + f.fran : '') };
+  }
+  // Kort version till WhatsApp: ämnet, de första raderna och länken.
+  function whatsappText(amne, text, lank) {
+    var rader = String(text || '').split('\n').filter(function (r) { return r.trim() && !/^(hej|hälsningar)/i.test(r.trim()) && r.indexOf('Plätt: ') !== 0; });
+    var kropp = '', i = 0;
+    while (i < rader.length && (kropp + rader[i]).length < 500) { kropp += rader[i] + '\n'; i++; }
+    if (i < rader.length) kropp += '…\n';
+    return (amne ? '*' + amne + '*\n' : '') + kropp + (lank ? 'Läs mer i Plätt: ' + lank : '').trim();
+  }
+  function mailtoMangaLank(mottagare, amne, text) {
+    return 'mailto:?bcc=' + mottagare.map(encodeURIComponent).join(',') + '&subject=' + encodeURIComponent(amne) + '&body=' + encodeURIComponent(text);
   }
 
   // ---------- Fråga Plätt (hjälp i appen) ----------
@@ -6031,6 +6121,16 @@ var VERSIONER = [
     granskningsUppdrag: granskningsUppdrag,
     normaliseraGranskning: normaliseraGranskning,
     stadgearendeText: stadgearendeText,
+    laggTillKommentar: laggTillKommentar,
+    kommentarerFor: kommentarerFor,
+    kommentarerTill: kommentarerTill,
+    djuplank: djuplank,
+    tolkaDjuplank: tolkaDjuplank,
+    paminnelseFor: paminnelseFor,
+    paminnelseMejl: paminnelseMejl,
+    utskickMall: utskickMall,
+    whatsappText: whatsappText,
+    mailtoMangaLank: mailtoMangaLank,
     atForslag: atForslag,
     hjalpKunskap: hjalpKunskap,
     hjalpUppdrag: hjalpUppdrag,
@@ -6833,6 +6933,116 @@ var VERSIONER = [
     return html;
   }
 
+  // ---------- Kommentarer och länkar ----------
+  var kommentarOppen = null;
+  var KM_SEDD = 'forening-bokforing:kommentarer-sedda';
+  function kommentarerSedda() { try { return localStorage.getItem(KM_SEDD) || ''; } catch (e) { return ''; } }
+  function appLank() { return location.origin + location.pathname; }
+  function kommentarTrad(typ, id) {
+    var lista = K.kommentarerFor(styrData(), typ, id), skriv = styrBeh('styr') === 'write';
+    var tid = function (t) { return t ? t.slice(0, 16).replace('T', ' ') : ''; };
+    var markera = function (t) { return esc(t).replace(/@([A-Za-zÀ-ÖØ-öø-ÿ][\wÀ-ÖØ-öø-ÿ-]*)/g, '<strong>@$1</strong>'); };
+    var fid = 'km_' + typ + '_' + String(id).replace(/[^\w-]/g, '');
+    return '<div class="kommentarer" id="obj-' + typ + '-' + esc(id) + '"><div class="km-lista">' + (lista.length ? lista.map(function (k) {
+        return '<div class="km"><span class="km-av">' + esc(k.avNamn || k.av || 'Någon') + ' <span class="faint">' + esc(tid(k.tid)) + '</span></span><span>' + markera(k.text) + '</span></div>';
+      }).join('') : '<p class="faint" style="margin:0">Inga kommentarer ännu.</p>') + '</div>' +
+      (skriv ? '<div class="km-ny"><textarea id="' + fid + '" data-at rows="2" placeholder="Skriv en kommentar – @namn för att nämna någon" aria-label="Ny kommentar"></textarea>' +
+        '<button class="btn btn-small" data-action="kommentar-ny" data-typ="' + typ + '" data-mal="' + esc(id) + '" data-falt="' + fid + '">Skicka</button></div>' : '') +
+      '<div class="row" style="margin-top:6px"><button class="lank-text" data-action="wa-lank" data-typ="' + typ + '" data-mal="' + esc(id) + '">Kopiera länk till WhatsApp</button></div></div>';
+  }
+  function waTextFor(typ, id) {
+    var s = styrData(), lank = K.djuplank(appLank(), typ, id), rubrik = '';
+    if (typ === 'uppgift') { var u = s.uppgifter.find(function (x) { return x.id === id; }); rubrik = u ? 'Uppgift: ' + u.text + (u.ansvarig ? ' (' + u.ansvarig + (u.datum ? ', senast ' + u.datum : '') + ')' : '') : 'Uppgift'; }
+    if (typ === 'mote') { var m = s.moten.find(function (x) { return x.id === id; }); rubrik = m ? motesNamn(m) + ' ' + m.datum : 'Möte'; }
+    if (typ === 'arende') { var a = s.arenden.find(function (x) { return x.id === id; }); rubrik = a ? 'Ärende: ' + a.text.split('\n')[0].slice(0, 90) : 'Ärende'; }
+    return rubrik + '\n' + lank;
+  }
+  function kopiera(text, klar) {
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('')))
+      .then(function () { visa(klar || 'Kopierat.'); }, function () { window.prompt('Kopiera texten:', text); });
+  }
+  function oppnaDjuplank(d) {
+    if (!d) return;
+    if (d.typ === 'uppgift') { vy = 'st-uppgifter'; uppgFilter = 'alla'; kommentarOppen = 'uppgift:' + d.id; }
+    if (d.typ === 'mote') { vy = 'st-moten'; oppetMote = d.id; }
+    if (d.typ === 'arende') { vy = 'st-arenden'; kommentarOppen = 'arende:' + d.id; }
+    meddelande = null; render();
+    setTimeout(function () { var el = document.getElementById('obj-' + d.typ + '-' + d.id); if (el) el.scrollIntoView({ block: 'center' }); }, 50);
+  }
+
+  // ---------- Utskick och påminnelser ----------
+  var utskickVal = { mall: 'valkommen', amne: null, text: null, mottagare: null, skickar: false };
+  function minaRoller() { var p = odNu.roller && mig() ? odNu.roller.personer.find(function (y) { return y.epost === mig(); }) : null; return p ? p.roller : []; }
+  function kanPaminna() {
+    var r = minaRoller();
+    if (OVNING) return true;
+    return r.indexOf('admin') >= 0 || (!!store.forening.paminnelseAven && (r.indexOf('ordforande') >= 0 || r.indexOf('kassor') >= 0));
+  }
+  function senastePaminnelse() { var l = (styrData().utskick || []).filter(function (u) { return u.typ === 'paminnelse'; }); return l.length ? l[l.length - 1] : null; }
+  function loggaUtskick(typ, antal) {
+    try { andraStyr('styr', Object.assign({}, styrData(), { utskick: (styrData().utskick || []).concat([{ id: 'us' + Date.now().toString(36), typ: typ, tid: new Date().toISOString(), av: mig(), antal: antal }]) }), false); } catch (e) { /* bara läsrätt */ }
+  }
+  async function skickaGrafMejl(m) {
+    await graf('/me/sendMail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(K.grafMejl(m)), tillat: [202] });
+  }
+  function kanSkickaDirekt() { return mejlDirekt() && odAnslutet(); }
+  function mallFakta(mall) {
+    var fran = odNu.roller && mig() ? K.visaPerson(odNu.roller, mig()) : '';
+    var f = { forening: store.forening.namn, lank: appLank(), fran: fran };
+    if (mall === 'valkommen') {
+      f.personer = styrPersoner().map(function (p) { return { namn: p.namn, roller: p.roller.map(rollnamn).join(', ') }; });
+      var nm = K.vantarPaMig(styrData(), '', { idag: idag() }).nastaMote; if (nm) f.nastaMote = nm.datum + (nm.tid ? ' kl ' + nm.tid : '');
+    }
+    if (mall === 'arsmote') {
+      var a = aktivt() ? arsmoteData(aktivt()) : {};
+      f.datum = a.motesdatum || '';
+      f.frister = nastaFrister();
+      f.uppgifter = styrData().uppgifter.filter(function (u) { return !u.klar && (!f.datum || !u.datum || u.datum <= f.datum); }).slice(0, 12);
+    }
+    return f;
+  }
+  function vyUtskick() {
+    var skriv = styrBeh('styr') === 'write';
+    var personer = styrPersonerMedEpost();
+    var html = '<p class="faint" style="margin-top:0">Mejl till styrelsen när det behövs, aldrig automatiskt. Använd gärna WhatsApp-gruppen för att påminna, och mejlen för den samlade informationen.' +
+      (kanSkickaDirekt() ? ' Mejlen skickas direkt från din e-post.' : ' Mejlen öppnas i ditt mejlprogram; slå på "Skicka mejl direkt från appen" på Min sida för att skicka med ett klick.') + '</p>';
+    // Påminnelser
+    if (kanPaminna()) {
+      var sp = senastePaminnelse(), sedan = sp ? sp.tid : '';
+      var lista = personer.map(function (p) { return { p: p, x: K.paminnelseFor(styrData(), p, sedan, idag()) }; });
+      var med = lista.filter(function (r) { return r.x; });
+      html += '<div class="card"><h3 style="margin-top:0">Påminnelse: det här väntar på dig</h3><p style="margin-top:0">Ett mejl per person med det som väntar på just hen: nya kommentarer och omnämnanden' +
+        (sp ? ' sedan förra påminnelsen' : '') + ', underskrifter, uppgifter och nästa möte. Den som inte har något får inget mejl.</p>' +
+        (sp ? '<p class="faint">Senast skickad ' + esc(sp.tid.slice(0, 16).replace('T', ' ')) + (sp.av ? ' av ' + esc(odNu.roller ? K.visaPerson(odNu.roller, sp.av) : sp.av) : '') + ' till ' + sp.antal + ' personer.</p>' : '') +
+        (!personer.length ? '<p class="faint">Det finns inga personer med e-post i rollerna ännu. Lägg till styrelsen under År och arkiv, Roller.</p>' :
+        '<div class="scroll"><table class="kortlista"><thead><tr><th>Person</th><th>Väntar</th><th></th></tr></thead><tbody>' + lista.map(function (r) {
+          var x = r.x;
+          var delar = x ? [x.kommentarer.length ? antal(x.kommentarer.length, 'kommentar', 'kommentarer') : '', (x.protokoll.length + x.arsrapporter.length) ? antal(x.protokoll.length + x.arsrapporter.length, 'underskrift', 'underskrifter') : '',
+            x.uppgifter.length ? antal(x.uppgifter.length, 'uppgift', 'uppgifter') : ''].filter(Boolean).join(', ') : '';
+          return '<tr><td data-etikett="Person">' + esc(r.p.namn) + '</td><td data-etikett="Väntar">' + (x ? esc(delar) : '<span class="faint">Inget, får inget mejl</span>') + '</td><td>' +
+            (x && !kanSkickaDirekt() ? '<button class="btn btn-secondary btn-small" data-action="paminn-en" data-epost="' + esc(r.p.epost) + '">Öppna mejl</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        (kanSkickaDirekt() && med.length ? '<div class="row" style="margin-top:8px"><button class="btn" data-action="paminn-alla"' + (utskickVal.skickar ? ' disabled' : '') + '>' + (utskickVal.skickar ? 'Skickar …' : 'Skicka till ' + antal(med.length, 'person', 'personer')) + '</button></div>' : '') +
+        (!kanSkickaDirekt() && med.length ? '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="paminn-logga">Markera som skickade</button></div>' : '')) +
+        (minaRoller().indexOf('admin') >= 0 ? '<label class="vaxel" style="margin-top:10px"><input type="checkbox" data-paminnelseaven' + (store.forening.paminnelseAven ? ' checked' : '') + '> <span>Ordföranden och kassören får också skicka påminnelser</span></label>' : '') + '</div>';
+    }
+    // Mallar
+    if (utskickVal.amne == null) { var mm = K.utskickMall(utskickVal.mall, mallFakta(utskickVal.mall)); utskickVal.amne = mm.amne; utskickVal.text = mm.text; }
+    if (!utskickVal.mottagare) { utskickVal.mottagare = {}; personer.forEach(function (p) { utskickVal.mottagare[p.epost] = true; }); }
+    var valda = personer.filter(function (p) { return utskickVal.mottagare[p.epost]; });
+    html += '<div class="card"><h3 style="margin-top:0">Utskick till styrelsen</h3><label for="usMall">Mall</label><select id="usMall" data-usmall style="width:auto;max-width:100%">' +
+      [['valkommen', 'Välkommen till styrelsen'], ['arsmote', 'Inför årsmötet'], ['fritt', 'Eget meddelande']].map(function (x) { return '<option value="' + x[0] + '"' + (utskickVal.mall === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select>' +
+      '<label>Mottagare</label><div class="row" style="gap:6px 14px">' + (personer.length ? personer.map(function (p) {
+        return '<label style="display:inline-flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" style="width:auto" data-usmottagare="' + esc(p.epost) + '"' + (utskickVal.mottagare[p.epost] ? ' checked' : '') + '> ' + esc(p.namn) + '</label>';
+      }).join('') : '<span class="faint">Inga personer med e-post i rollerna ännu.</span>') + '</div>' +
+      '<label for="usAmne">Ämne</label><input id="usAmne" data-us="amne" value="' + esc(utskickVal.amne) + '">' +
+      '<label for="usText">Text</label><textarea id="usText" data-us="text" rows="14" class="kontakt-anteckning">' + esc(utskickVal.text) + '</textarea>' +
+      '<div class="row" style="margin-top:8px">' + (skriv && valda.length ? '<button class="btn" data-action="utskick-skicka"' + (utskickVal.skickar ? ' disabled' : '') + '>' + (kanSkickaDirekt() ? 'Skicka till ' + antal(valda.length, 'person', 'personer') : 'Öppna i mejlprogrammet') + '</button>' : '') +
+      '<button class="btn btn-secondary btn-small" data-action="utskick-wa">Kopiera kort version till WhatsApp</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="utskick-aterstall">Börja om från mallen</button></div></div>';
+    return html;
+  }
+
   // ---------- Kontakter (styrelsens adressbok) ----------
   var kontaktVal = { sok: '', grupp: '', redigera: null };
   function vyKontakter() {
@@ -7578,7 +7788,7 @@ var VERSIONER = [
   // Förtroendeuppdragen ligger i en egen fil i mappen, så att den kan delas med valberedningen utan resten.
 
   var STYRFILER = {
-    styr: { fil: STYRFIL, tom: K.tomStyrelse, norm: K.normaliseraStyrelse, nycklar: ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter', 'stadgar', 'kontakter'] },
+    styr: { fil: STYRFIL, tom: K.tomStyrelse, norm: K.normaliseraStyrelse, nycklar: ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter', 'stadgar', 'kontakter', 'kommentarer', 'utskick'] },
     upp: { fil: UPPDRAGFIL, tom: K.tomaUppdrag, norm: K.normaliseraUppdrag, nycklar: ['uppdrag'] }
   };
 
@@ -9624,6 +9834,7 @@ var VERSIONER = [
     ['st-arenden', 'Ärenden'],
     ['st-stadgar', 'Stadgar'],
     ['st-kontakter', 'Kontakter'],
+    ['st-utskick', 'Utskick'],
     ['arsmote', 'Årsmötet'],
     ['staden', 'Stockholms stad'],
     ['arkiv', 'År och arkiv'],
@@ -9636,7 +9847,7 @@ var VERSIONER = [
     ['oversikt', 'Översikt', ['oversikt']],
     ['bokforing', 'Bokföring', ['inlasning', 'verifikationer', 'ny', 'dokument', 'huvudbok', 'rapporter', 'bokslut', 'kontoplan']],
     ['medlemmar', 'Medlemsregister', ['m-statistik', 'm-koppla', 'm-lista', 'm-betalare', 'm-avgifter', 'm-personuppgifter']],
-    ['styrelsen', 'Styrelsen', ['st-moten', 'st-beslut', 'st-uppgifter', 'st-uppdrag', 'st-arenden', 'st-stadgar', 'st-kontakter', 'arsmote', 'staden']],
+    ['styrelsen', 'Styrelsen', ['st-moten', 'st-beslut', 'st-uppgifter', 'st-uppdrag', 'st-arenden', 'st-stadgar', 'st-kontakter', 'st-utskick', 'arsmote', 'staden']],
     ['installningar', 'Inställningar', ['arkiv', 'min', 'om']]
   ];
   var senastIGrupp = {};
@@ -9713,7 +9924,7 @@ var VERSIONER = [
     var html = {
       oversikt: vyOversikt,
       arsmote: function (a) { return vyArsmoteSida(a); },
-      'st-moten': vyStyrelsen, 'st-beslut': vyStyrelsen, 'st-uppgifter': vyStyrelsen, 'st-uppdrag': vyStyrelsen, 'st-arenden': vyStyrelsen, 'st-stadgar': vyStyrelsen, 'st-kontakter': vyStyrelsen,
+      'st-moten': vyStyrelsen, 'st-beslut': vyStyrelsen, 'st-uppgifter': vyStyrelsen, 'st-uppdrag': vyStyrelsen, 'st-arenden': vyStyrelsen, 'st-stadgar': vyStyrelsen, 'st-kontakter': vyStyrelsen, 'st-utskick': vyStyrelsen,
       staden: function (a) { return vyStaden(a); },
       inlasning: vyInlasning,
       verifikationer: vyVerifikationer,
@@ -11531,6 +11742,12 @@ var VERSIONER = [
     var ikon = function (d) { return '<span class="vantar-ikon" aria-hidden="true"><svg viewBox="0 0 24 24">' + d + '</svg></span>'; };
     var PENNA = '<path d="M4 20h4L19 9l-4-4L4 16z"/>', KAL = '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>', LISTA = '<path d="m4 7 2 2 4-4M4 17l2 2 4-4M13 7h7M13 17h7"/>';
     var kort = '';
+    var nya = jag ? K.kommentarerTill(styrData(), jag, kommentarerSedda()) : [];
+    if (nya.length) {
+      kort += '<div class="vantar-kort viktig">' + ikon('<path d="M4 5h16v11H8l-4 4z"/>') + '<div class="vantar-text"><strong>' + antal(nya.length, 'ny kommentar', 'nya kommentarer') + ' till dig</strong>' +
+        nya.slice(-3).map(function (k) { return '<span><button class="lank-text" data-action="djuplank" data-typ="' + k.typ + '" data-mal="' + esc(k.mal) + '">' + esc(k.avNamn || k.av) + ': ' + esc(k.text.slice(0, 90)) + '</button></span>'; }).join('') + '</div>' +
+        '<button class="btn btn-secondary" data-action="kommentarer-lasta">Markera som lästa</button></div>';
+    }
     v.protokoll.forEach(function (p) {
       kort += '<div class="vantar-kort viktig">' + ikon(PENNA) + '<div class="vantar-text"><strong>Skriv under protokollet</strong><span>' +
         esc(motesNamn(p) + ' ' + kortDatum(p.datum)) + ' · ' + p.signerade + ' av ' + p.antal + ' har skrivit under</span></div>' +
@@ -11607,7 +11824,7 @@ var VERSIONER = [
 
   // ---------- Styrelsen ----------
 
-  var STYRFLIKAR = [['moten', 'Möten och protokoll'], ['beslut', 'Beslut'], ['uppgifter', 'Uppgifter'], ['uppdrag', 'Förtroendeuppdrag'], ['arenden', 'Ärenden till årsmötet'], ['stadgar', 'Stadgar'], ['kontakter', 'Kontakter']];
+  var STYRFLIKAR = [['moten', 'Möten och protokoll'], ['beslut', 'Beslut'], ['uppgifter', 'Uppgifter'], ['uppdrag', 'Förtroendeuppdrag'], ['arenden', 'Ärenden till årsmötet'], ['stadgar', 'Stadgar'], ['kontakter', 'Kontakter'], ['utskick', 'Utskick']];
   var UPPDRAGSROLLER = ['Ordförande', 'Vice ordförande', 'Kassör', 'Sekreterare', 'Ledamot', 'Suppleant', 'Revisor', 'Revisorssuppleant', 'Valberedning'];
   var ARENDETYPER = [['stadgar', 'Stadgeändring'], ['forslag', 'Styrelsens förslag'], ['motion', 'Motion']];
   var ARENDESTATUS = [['forslag', 'Förslag'], ['arsmote', 'Till årsmötet'], ['antaget', 'Antaget'], ['avslaget', 'Avslaget']];
@@ -11723,7 +11940,7 @@ var VERSIONER = [
     if (bs === 'read') html += '<p class="faint">Du kan läsa styrelsens material men inte ändra det.</p>';
     else if (!bs) html += '<p class="faint">Du ser förtroendeuppdragen. Resten av styrelsens material är inte delat med dig.</p>';
     if (odNu.styrFel) html += '<p class="fel">' + esc(odNu.styrFel) + '</p>';
-    html += '<div class="arsmote-form">' + { moten: vyMoten, beslut: vyBeslut, uppgifter: vyUppgifter, uppdrag: vyUppdrag, arenden: vyArenden, stadgar: vyStadgar, kontakter: vyKontakter }[styrVy](ar) + '</div>';
+    html += '<div class="arsmote-form">' + { moten: vyMoten, beslut: vyBeslut, uppgifter: vyUppgifter, uppdrag: vyUppdrag, arenden: vyArenden, stadgar: vyStadgar, kontakter: vyKontakter, utskick: vyUtskick }[styrVy](ar) + '</div>';
     if (odAnslutet() && od.styrMapp) html += '<p class="faint" style="font-size:.85em;margin-top:14px">Sparas i mappen ' + esc(od.styrMapp.namn) + ' i OneDrive. Alla i styrelsen kan ändra samtidigt; ändrar två personer samma sak visas det.</p>';
     return html;
   }
@@ -11748,7 +11965,7 @@ var VERSIONER = [
   function vyMoten(ar) {
     var s = styrData(), skriv = styrBeh('styr') === 'write';
     var m0 = oppetMoteObj();
-    if (m0) return vyMote(ar, m0);
+    if (m0) return vyMote(ar, m0) + '<div class="card"><h3 style="margin-top:0">Kommentarer</h3>' + kommentarTrad('mote', m0.id) + '</div>';
     oppetMote = null;
     var html = arsrapporterAttSkrivaUnder();
     if (skriv) {
@@ -11977,8 +12194,10 @@ var VERSIONER = [
       return '<tr' + (u.klar ? ' class="faint"' : '') + '><td><input type="checkbox" style="width:auto" data-action="styr-uppg-klar" data-id="' + esc(u.id) + '"' + (u.klar ? ' checked' : '') + (skriv ? '' : ' disabled') + ' aria-label="Klar"></td>' +
         '<td data-etikett="Uppgift">' + (u.klar ? '<s>' + esc(u.text) + '</s>' : esc(u.text)) + '</td><td data-etikett="Ansvarig">' + esc(u.ansvarig) + '</td>' +
         '<td data-etikett="Senast">' + esc(u.datum) + (sen ? ' <span class="tag varning">försenad</span>' : nara ? ' <span class="tag">snart</span>' : '') + '</td>' +
-        '<td style="white-space:nowrap">' + (skriv && !u.klar && u.ansvarigEpost && u.ansvarigEpost !== jag ? '<button class="btn btn-secondary btn-small" data-action="uppg-meddela" data-id="' + esc(u.id) + '">Meddela</button> ' : '') +
-          (skriv ? '<button class="btn btn-secondary btn-small" data-action="styr-uppg-bort" data-id="' + esc(u.id) + '">Ta bort</button>' : '') + '</td></tr>';
+        '<td style="white-space:nowrap">' + '<button class="btn btn-secondary btn-small" data-action="kommentar-visa" data-typ="uppgift" data-id="' + esc(u.id) + '" aria-label="Kommentarer">💬 ' + K.kommentarerFor(s, 'uppgift', u.id).length + '</button> ' +
+          (skriv && !u.klar && u.ansvarigEpost && u.ansvarigEpost !== jag ? '<button class="btn btn-secondary btn-small" data-action="uppg-meddela" data-id="' + esc(u.id) + '">Meddela</button> ' : '') +
+          (skriv ? '<button class="btn btn-secondary btn-small" data-action="styr-uppg-bort" data-id="' + esc(u.id) + '">Ta bort</button>' : '') + '</td></tr>' +
+        (kommentarOppen === 'uppgift:' + u.id ? '<tr class="kommentar-rad"><td colspan="5">' + kommentarTrad('uppgift', u.id) + '</td></tr>' : '');
     }).join('') + '</tbody></table></div>';
   }
 
@@ -12051,7 +12270,9 @@ var VERSIONER = [
     return html + s.arenden.map(function (a) {
       return '<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><span class="tag">' + esc((ARENDETYPER.find(function (t) { return t[0] === a.typ; }) || ['', 'Ärende'])[1]) + '</span>' +
         '<select data-arende="' + esc(a.id) + '" style="width:auto" aria-label="Status"' + (skriv ? '' : ' disabled') + '>' + ARENDESTATUS.map(function (x) { return '<option value="' + x[0] + '"' + (a.status === x[0] ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('') + '</select></div>' +
-        '<p style="white-space:pre-wrap;margin-bottom:0">' + esc(a.text) + '</p></div>';
+        '<p style="white-space:pre-wrap;margin-bottom:0">' + esc(a.text) + '</p>' +
+        '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="kommentar-visa" data-typ="arende" data-id="' + esc(a.id) + '">💬 ' + K.kommentarerFor(s, 'arende', a.id).length + ' kommentarer</button></div>' +
+        (kommentarOppen === 'arende:' + a.id ? kommentarTrad('arende', a.id) : '') + '</div>';
     }).join('');
   }
 
@@ -13524,7 +13745,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'till-ai-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'rundtur-start', 'rundtur-fram', 'rundtur-bak', 'rundtur-slut', 'valkommen-senare', 'valkommen-nej', 'hjalp-chatt', 'hjalp-chatt-stang', 'hjalp-skicka', 'hjalp-exempel', 'hjalp-bilaga-bort', 'hjalp-medlem', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'till-ai-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'wa-lank', 'djuplank', 'kommentarer-lasta', 'kommentar-visa', 'utskick-wa', 'rundtur-start', 'rundtur-fram', 'rundtur-bak', 'rundtur-slut', 'valkommen-senare', 'valkommen-nej', 'hjalp-chatt', 'hjalp-chatt-stang', 'hjalp-skicka', 'hjalp-exempel', 'hjalp-bilaga-bort', 'hjalp-medlem', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport],[data-grupp]');
@@ -13563,6 +13784,7 @@ var VERSIONER = [
       return;
     }
     if (t.dataset && t.dataset.aitext && aiUtkast[t.dataset.aitext]) { aiUtkast[t.dataset.aitext].text = t.value; return; }
+    if (t.dataset && t.dataset.us) { utskickVal[t.dataset.us] = t.value; return; }
     if (t.dataset && t.dataset.su) {
       var f = t.dataset.su, i = Number(t.dataset.si), v = t.value;
       try { sparaUtkast(function (k) { if (f === 'titel') k.titel = v; else k.paragrafer[i][f] = v; }, false); } catch (err) { visa(err.message, true); }
@@ -13746,6 +13968,9 @@ var VERSIONER = [
       if (odNu.visaArsmote || ['motesdatum', 'dagordning', 'rostalder', 'bidragnot'].indexOf(t.dataset.arsmote) >= 0) { odNu.arsmoteVersion = (odNu.arsmoteVersion || 0) + 1; render(); }
     }
     if (t.hasAttribute('data-stadgelista')) { stadgeVal.lista = t.value; render(); return; }
+    if (t.hasAttribute('data-usmall')) { utskickVal.mall = t.value; utskickVal.amne = null; render(); return; }
+    if (t.hasAttribute('data-usmottagare')) { utskickVal.mottagare[t.dataset.usmottagare] = t.checked; render(); return; }
+    if (t.hasAttribute('data-paminnelseaven')) { store.forening.paminnelseAven = !!t.checked; spara(); render(); return; }
     if (t.hasAttribute('data-mejldirekt')) {
       if (t.checked) {
         if (!odAnslutet()) { visa('Logga in med Microsoft först.', true); render(); return; }
@@ -14729,6 +14954,47 @@ var VERSIONER = [
     'hjalp-exempel': function (t) { hjalpSkicka(t.textContent); },
     'hjalp-bilaga-bort': function () { chatt.bilaga = null; ritaChatt(); },
     'hjalp-medlem': function (t) { chatt.bilaga = medlemsbilaga(t.dataset.id); chatt.oppen = true; ritaChatt(); var f = document.getElementById('hcFraga'); if (f) { f.value = 'Den här medlemmen ser konstig ut. Stämmer betalningarna?'; f.focus(); } },
+    'kommentar-ny': function (t) {
+      var text = varde(t.dataset.falt);
+      if (!text) { visa('Skriv en kommentar först.', true); return; }
+      try {
+        andraStyr('styr', K.laggTillKommentar(styrData(), { typ: t.dataset.typ, mal: t.dataset.mal, text: text, av: mig(), avNamn: odNu.roller && mig() ? K.visaPerson(odNu.roller, mig()) : '', tid: new Date().toISOString() }, styrPersonerMedEpost()));
+      } catch (err) { visa(err.message, true); }
+    },
+    'kommentar-visa': function (t) { var k = t.dataset.typ + ':' + t.dataset.id; kommentarOppen = kommentarOppen === k ? null : k; render(); },
+    'wa-lank': function (t) { kopiera(waTextFor(t.dataset.typ, t.dataset.mal), 'Länken är kopierad. Klistra in den i WhatsApp-gruppen.'); },
+    'djuplank': function (t) { oppnaDjuplank({ typ: t.dataset.typ, id: t.dataset.mal }); },
+    'kommentarer-lasta': function () { try { localStorage.setItem(KM_SEDD, new Date().toISOString()); } catch (e) { /* tomt */ } render(); },
+    'paminn-en': function (t) {
+      var p = styrPersonerMedEpost().find(function (x) { return x.epost === t.dataset.epost; }); if (!p) return;
+      var sp = senastePaminnelse(), x = K.paminnelseFor(styrData(), p, sp ? sp.tid : '', idag()); if (!x) return;
+      location.href = K.mailtoLank(K.paminnelseMejl(x, { forening: store.forening.namn, lank: appLank(), fran: odNu.roller && mig() ? K.visaPerson(odNu.roller, mig()) : '' }));
+    },
+    'paminn-logga': function () { loggaUtskick('paminnelse', styrPersonerMedEpost().filter(function (p) { return K.paminnelseFor(styrData(), p, (senastePaminnelse() || {}).tid || '', idag()); }).length); visa('Påminnelserna är markerade som skickade.'); },
+    'paminn-alla': function () {
+      var sp = senastePaminnelse(), fran = odNu.roller && mig() ? K.visaPerson(odNu.roller, mig()) : '';
+      var mejl = styrPersonerMedEpost().map(function (p) { return K.paminnelseFor(styrData(), p, sp ? sp.tid : '', idag()); }).filter(Boolean)
+        .map(function (x) { return K.paminnelseMejl(x, { forening: store.forening.namn, lank: appLank(), fran: fran }); });
+      utskickVal.skickar = true; render();
+      var ok = 0, fel = [];
+      mejl.reduce(function (p, m) { return p.then(function () { return skickaGrafMejl(m).then(function () { ok++; }, function (err) { fel.push(m.till + ': ' + err.message); }); }); }, Promise.resolve())
+        .then(function () {
+          utskickVal.skickar = false;
+          if (ok) loggaUtskick('paminnelse', ok);
+          visa(ok + ' påminnelser skickade.' + (fel.length ? ' Kunde inte skicka till: ' + fel.join('; ') : ''), !!fel.length);
+        });
+    },
+    'utskick-skicka': function () {
+      var mottagare = styrPersonerMedEpost().filter(function (p) { return utskickVal.mottagare[p.epost]; }).map(function (p) { return p.epost; });
+      if (!mottagare.length || !utskickVal.amne) { visa('Välj mottagare och skriv ett ämne.', true); return; }
+      if (!kanSkickaDirekt()) { loggaUtskick(utskickVal.mall, mottagare.length); location.href = K.mailtoMangaLank(mottagare, utskickVal.amne, utskickVal.text); return; }
+      utskickVal.skickar = true; render();
+      var ok = 0, fel = [];
+      mottagare.reduce(function (p, till) { return p.then(function () { return skickaGrafMejl({ till: till, amne: utskickVal.amne, text: utskickVal.text }).then(function () { ok++; }, function (err) { fel.push(till + ': ' + err.message); }); }); }, Promise.resolve())
+        .then(function () { utskickVal.skickar = false; if (ok) loggaUtskick(utskickVal.mall, ok); visa('Utskicket är skickat till ' + antal(ok, 'person', 'personer') + '.' + (fel.length ? ' Kunde inte skicka till: ' + fel.join('; ') : ''), !!fel.length); });
+    },
+    'utskick-wa': function () { kopiera(K.whatsappText(utskickVal.amne, utskickVal.text, appLank()), 'Den korta versionen är kopierad. Klistra in den i WhatsApp-gruppen.'); },
+    'utskick-aterstall': function () { utskickVal.amne = null; render(); },
     'kontakt-ny': function () { kontaktVal.redigera = { id: null }; render(); },
     'kontakt-andra': function (t) { kontaktVal.redigera = { id: t.dataset.id }; render(); window.scrollTo(0, 0); },
     'kontakt-avbryt': function () { kontaktVal.redigera = null; render(); },
@@ -15424,6 +15690,12 @@ var VERSIONER = [
   LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
   if (lasLage()) vy = 'rapporter';
   render();
+  // En länk som pekar på en uppgift, ett möte eller ett ärende (t.ex. från WhatsApp eller ett påminnelsemejl).
+  (function () {
+    var d = K.tolkaDjuplank(location.hash);
+    if (d) { oppnaDjuplank(d); try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* tomt */ } }
+    window.addEventListener('hashchange', function () { var d2 = K.tolkaDjuplank(location.hash); if (d2) oppnaDjuplank(d2); });
+  })();
   laddaLogo().then(render);
 
   // Inloggning, och därefter senaste versionen från OneDrive.
