@@ -175,6 +175,20 @@
   .faint { color: var(--ink-faint); font-size: 13px; }
   .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px solid var(--hairline); color: var(--ink-soft); margin-left: 6px; }
   .tag.varning { color: var(--over); border-color: var(--over); }
+  .status-rad { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+  .status-pill { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 600; padding: 1px 9px; border-radius: 999px; background: var(--surface-2); color: var(--ink-soft); white-space: nowrap; }
+  .status-pill.varning { background: #FCE3CF; color: #8A3D0B; }
+  .verktygsrad { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin: 4px 0 10px; }
+  .chip { height: 34px; padding: 0 14px; border: 1px solid var(--hairline); border-radius: 999px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+  .chip span { font-weight: 500; color: var(--ink-soft); }
+  .chip span.chip-varning { color: #B4540F; }
+  .chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .chip[aria-pressed="true"] span { color: inherit; opacity: .75; }
+  .sokfalt { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 12px; height: 38px; flex: 0 1 320px; min-width: min(100%, 260px); background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; color: var(--ink-soft); }
+  .sokfalt svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+  .sokfalt input { border: 0; padding: 0; background: transparent; outline: 0; min-width: 0; flex: 1; }
+  .sokfalt:focus-within { outline: 2px solid var(--guld); outline-offset: 1px; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .ok { color: var(--good); }
   .fel { color: var(--over); }
   #toast { position: fixed; left: 16px; right: 16px; bottom: 16px; margin: 0 auto; width: fit-content; max-width: 560px; transform: translateY(20px); z-index: 100;
@@ -333,6 +347,7 @@
     body:has(#nav:not(:empty)) .innehall { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
     #toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
     .nyckeltal-rad { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .sokfalt { flex: 1 1 100%; height: 44px; }
     .tal-kort { padding: 12px; border-radius: 12px; }
     .tal-varde { font-size: 20px; }
     .tal-not { font-size: 12px; }
@@ -443,6 +458,13 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.68', datum: '2026-11-28',
+    nyheter: [
+      'Verifikationer: filterknappar för Alla, Saknar underlag och Rättade, med antal, och en sökruta som söker i text, nummer, datum, konto, kontonamn och belopp (t.ex. "hyra" eller "1 250,50").',
+      'Status visas som tydliga märken under texten: Saknar underlag, Rättad av och Rättar.'
+    ]
+  },
   {
     version: '1.67', datum: '2026-11-28',
     nyheter: [
@@ -2528,6 +2550,41 @@ var VERSIONER = [
   function grundbokOrdning(verifikationer, omvand) {
     var l = (verifikationer || []).slice().sort(function (a, b) { return a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : a.nr - b.nr; });
     return omvand ? l.reverse() : l;
+  }
+
+  // Filter och sökning i verifikationslistan.
+  // filter: 'alla', 'utan' (saknar underlag) eller 'rattade' (rättade verifikationer och deras rättelser).
+  // sok: ord som alla ska finnas i nummer, datum, text, konto eller kontonamn; ett tal kan också vara ett belopp ("800", "1 250,50").
+  function verifikationsgrupper(ar) {
+    var utan = {}, ratt = {};
+    kontroller(ar).forEach(function (w) { if (w.typ === 'saknarUnderlag') utan[w.nr] = true; });
+    (ar.verifikationer || []).forEach(function (v) { if (v.rattar != null) { ratt[v.nr] = true; ratt[v.rattar] = true; } });
+    return { utan: utan, rattade: ratt };
+  }
+  function verifikationsfilterAntal(ar) {
+    var g = verifikationsgrupper(ar);
+    return { alla: (ar.verifikationer || []).length, utan: Object.keys(g.utan).length, rattade: Object.keys(g.rattade).length };
+  }
+  function sokText(t) { return String(t == null ? '' : t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+  function verifikationMatchar(ar, v, ord) {
+    var hostack = sokText([v.nr, v.datum, v.text].concat(v.rader.map(function (r) { return r.konto + ' ' + kontonamn(ar, r.konto) + ' ' + (r.text || ''); })).join(' '));
+    if (hostack.indexOf(ord) >= 0) return true;
+    if (/^-?[\d\s]+([.,]\d{1,2})?$/.test(ord)) {
+      var ore = Math.round(Math.abs(Number(ord.replace(/\s/g, '').replace(',', '.'))) * 100);
+      var summa = v.rader.reduce(function (sum, r) { return r.belopp > 0 ? sum + r.belopp : sum; }, 0);
+      return ore === summa || v.rader.some(function (r) { return Math.abs(r.belopp) === ore; });
+    }
+    return false;
+  }
+  function filtreraVerifikationer(ar, lista, opt) {
+    opt = opt || {};
+    var g = verifikationsgrupper(ar);
+    var ord = sokText(opt.sok).replace(/(\d) (?=\d)/g, '$1').split(/\s+/).filter(Boolean);
+    return (lista || []).filter(function (v) {
+      if (opt.filter === 'utan' && !g.utan[v.nr]) return false;
+      if (opt.filter === 'rattade' && !g.rattade[v.nr]) return false;
+      return ord.every(function (o) { return verifikationMatchar(ar, v, o); });
+    });
   }
 
   function utlaggStatus(ar, id) {
@@ -5052,6 +5109,8 @@ var VERSIONER = [
     fritidskortForslag: fritidskortForslag,
     grundbokSidor: grundbokSidor,
     grundbokOrdning: grundbokOrdning,
+    filtreraVerifikationer: filtreraVerifikationer,
+    verifikationsfilterAntal: verifikationsfilterAntal,
     grundbokSummor: grundbokSummor,
     arsrapportInnehall: arsrapportInnehall,
     arsrapportStatus: arsrapportStatus,
@@ -5326,6 +5385,7 @@ var VERSIONER = [
   var paketStatus = null;
   var oppenVer = null;
   var verSenastForst = false;
+  var verFilter = 'alla', verSok = '';
   var valtKonto = '1930';
   var meddelande = null;
   var utkast = nyttUtkast();
@@ -8458,12 +8518,24 @@ var VERSIONER = [
     var varningar = K.kontroller(ar);
     var utanUnderlag = {};
     varningar.forEach(function (w) { if (w.typ === 'saknarUnderlag') utanUnderlag[w.nr] = true; });
-    var lista = K.grundbokOrdning(ar.verifikationer, verSenastForst);
+    var antalF = K.verifikationsfilterAntal(ar);
+    if ((verFilter === 'utan' && !antalF.utan) || (verFilter === 'rattade' && !antalF.rattade)) verFilter = 'alla';
+    var lista = K.filtreraVerifikationer(ar, K.grundbokOrdning(ar.verifikationer, verSenastForst), { filter: verFilter, sok: verSok });
     var html = '<div class="row" style="justify-content:space-between"><h2>Verifikationer ' + esc(K.arNamn(ar)) + '</h2>' +
       '<div class="row"><button class="btn btn-secondary btn-small" data-action="ver-ordning">' + (verSenastForst ? 'Äldsta först' : 'Senaste först') + '</button>' +
       '<button class="btn" data-vy="ny">Ny verifikation</button></div></div>';
     if (ar.lastTom) html += '<p class="faint">Låst till och med ' + esc(ar.lastTom) + '.</p>';
-    if (!lista.length) return html + '<p class="muted">Inga verifikationer ännu.</p>';
+    if (!antalF.alla) return html + '<p class="muted">Inga verifikationer ännu.</p>';
+    var chip = function (f, namn, n, klass) {
+      return '<button type="button" class="chip" data-action="ver-filter" data-filter="' + f + '" aria-pressed="' + (verFilter === f) + '">' + namn + ' <span class="' + (klass || '') + '">' + n + '</span></button>';
+    };
+    html += '<div class="verktygsrad"><div class="row">' + chip('alla', 'Alla', antalF.alla) +
+      (antalF.utan ? chip('utan', 'Saknar underlag', antalF.utan, 'chip-varning') : '') +
+      (antalF.rattade ? chip('rattade', 'Rättade', antalF.rattade) : '') + '</div>' +
+      '<label class="sokfalt"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+      '<span class="visually-hidden">Sök bland verifikationerna</span><input type="search" id="verSok" data-versok value="' + esc(verSok) + '" placeholder="Sök text, konto eller belopp" autocomplete="off"></label></div>';
+    if (lista.length < antalF.alla) html += '<p class="faint" style="margin:4px 0 8px">Visar ' + lista.length + ' av ' + antalF.alla + '.</p>';
+    if (!lista.length) return html + '<p class="muted">Inga verifikationer matchar.</p>';
     var sida = function (poster, kol) {
       return '<td class="gb-sida">' + poster.map(function (p) { return '<div>' + esc(p.konto) + ' <span class="faint">' + esc(K.kontonamn(ar, p.konto)) + '</span></div>'; }).join('') + '</td>' +
         '<td class="num gb-sida">' + poster.map(function (p) { return '<div>' + kr(p.belopp) + '</div>'; }).join('') + '</td>';
@@ -8472,10 +8544,11 @@ var VERSIONER = [
       '<th class="gb-sida">Debet</th><th class="num gb-sida">Belopp</th><th class="gb-sida">Kredit</th><th class="num gb-sida">Belopp</th><th class="num gb-summa">Belopp</th></tr></thead><tbody>';
     lista.forEach(function (v) {
       var taggar = '';
-      if (v.rattar != null) taggar += '<span class="tag">rättar ' + v.rattar + '</span>';
+      if (v.rattar != null) taggar += '<span class="status-pill gra">Rättar ' + v.rattar + '</span>';
       var rattning = K.rattadAv(ar, v.nr);
-      if (rattning) taggar += '<span class="tag">rättad av ' + rattning.nr + '</span>';
-      if (utanUnderlag[v.nr]) taggar += '<span class="tag varning">underlag saknas</span>';
+      if (rattning) taggar += '<span class="status-pill gra">Rättad av ' + rattning.nr + '</span>';
+      if (utanUnderlag[v.nr]) taggar += '<span class="status-pill varning">Saknar underlag</span>';
+      if (taggar) taggar = '<span class="status-rad">' + taggar + '</span>';
       var sidor = K.grundbokSidor(v);
       html += '<tr class="klickbar" data-ver="' + v.nr + '"><td class="nowrap">' + esc(v.datum) + '</td><td>' + v.nr + '</td><td>' + esc(v.text) + taggar + '</td>' +
         sida(sidor.debet) + sida(sidor.kredit) + '<td class="num gb-summa">' + kr(verSumma(v)) + '</td></tr>';
@@ -11942,7 +12015,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport],[data-grupp]');
@@ -11978,6 +12051,11 @@ var VERSIONER = [
       }
       var el = document.getElementById('utSumma');
       if (el) el.innerHTML = utlaggSummaText(aktivt());
+      return;
+    }
+    if (t.hasAttribute && t.hasAttribute('data-versok')) {
+      verSok = t.value; var pos = t.selectionStart; render();
+      var nytt = document.getElementById('verSok'); if (nytt) { nytt.focus(); try { nytt.setSelectionRange(pos, pos); } catch (e2) { /* search-fält i vissa webbläsare */ } }
       return;
     }
     if (t.dataset.u) { utkast[t.dataset.u] = t.value; uppdateraUtkastStatus(); }
@@ -12967,6 +13045,7 @@ var VERSIONER = [
       if (!fonster) laddaNer(t.dataset.id.split('|').pop(), c.blob, 'application/pdf');
     },
     'ver-ordning': function () { verSenastForst = !verSenastForst; render(); },
+    'ver-filter': function (t) { verFilter = t.dataset.filter; render(); },
     'rensa-egna-betalare': function () {
       var egna = K.egnaBetalare(reg());
       if (!egna.length) return;
