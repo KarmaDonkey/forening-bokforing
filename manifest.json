@@ -1,12 +1,12 @@
 {
-  "name": "Föreningsbokföring",
-  "short_name": "Bokföring",
+  "name": "Plätt",
+  "short_name": "Plätt",
   "lang": "sv",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#F4F4F4",
-  "theme_color": "#373F51",
+  "theme_color": "#2B2F3A",
   "icons": [
     {
       "src": "ikon-192.png",
@@ -24,5 +24,6 @@
       "type": "image/png",
       "purpose": "maskable"
     }
-  ]
+  ],
+  "description": "Bokföring och styrelsearbete för ideella föreningar"
 }
