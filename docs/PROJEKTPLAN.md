@@ -206,6 +206,7 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 
 - Inställningen `forening.aiHjalp` gäller hela föreningen (på om den saknas, `aiHjalpPa` i kärnan) och kan bara ändras med skrivrätt. Avstängd tolkas inga PDF:er eller bilder; API-nyckeln är fortfarande personlig.
 - Underlag som tolkats av Claude får `tolkadAvAi` och märket "✦ Tolkat av AI, kontrollera"; konton som Claude föreslagit visas som "✦ AI-förslag". Sidomenyn visar om AI-hjälpen är på.
+- Appikonen (från 1.71): `ikon-192.png` och `ikon-512.png` har rundade hörn med genomskinliga hörn (Windows, macOS, webbläsare); `ikon-maskable-512.png` (Android) och `ikon-apple-180.png` (iPhone) är fyrkantiga eftersom systemet rundar dem.
 - Närvaron (du själv med namn och roll och de andra som har appen öppen) ligger längst ner i sidomenyn på dator och i toppfältet på telefon.
 
 ## Kommande
