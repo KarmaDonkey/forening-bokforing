@@ -303,6 +303,24 @@
   .kontakt-text span, .kontakt-lankar a { font-size: 13.5px; overflow-wrap: anywhere; }
   .kontakt-lankar { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
   .kontakt-anteckning { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; }
+  .fraga-platt { position: fixed; right: 20px; bottom: 20px; z-index: 46; display: inline-flex; align-items: center; gap: 6px; padding: 11px 18px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-text); font: inherit; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.18); cursor: pointer; }
+  .fraga-platt[hidden], .hjalp-chatt[hidden], .at-lista[hidden] { display: none; }
+  .hjalp-chatt { position: fixed; right: 20px; bottom: 20px; z-index: 47; width: min(400px, calc(100vw - 40px)); height: min(560px, calc(100vh - 40px)); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,.25); overflow: hidden; }
+  .hc-huvud { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--hairline); }
+  .hc-meddelanden { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .hc-plats ul { padding-left: 18px; margin: 6px 0; }
+  .hc-medd { padding: 9px 12px; border-radius: 12px; max-width: 90%; font-size: 14.5px; line-height: 1.5; }
+  .hc-medd.du { align-self: flex-end; background: var(--guld-ljus); }
+  .hc-medd.platt { align-self: flex-start; background: var(--surface-2); }
+  .hc-medd .btn { margin-top: 8px; }
+  .hc-bilaga { margin: 0 14px; padding: 8px 10px; border-radius: 8px; background: var(--guld-ljus); font-size: 13px; }
+  .hc-fraga { display: flex; gap: 8px; padding: 10px 14px 4px; align-items: flex-end; }
+  .hc-fraga textarea { flex: 1; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 10px; padding: 8px 10px; resize: none; }
+  .hc-not { margin: 4px 14px 10px; font-size: 12px; }
+  .at-lista { position: fixed; z-index: 60; width: 260px; background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.18); padding: 4px; }
+  .at-val { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px; background: none; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+  .at-val span { font-size: 12px; color: var(--ink-soft); }
+  .at-val.vald, .at-val:hover { background: var(--guld-ljus); }
   .om-slogan { font-size: 18px; font-weight: 600; margin-top: 0; }
   .ovning-banner .btn-secondary { background: #fff; color: #2B2F3A; border-color: rgba(43, 47, 58, 0.18); }
   .ai-kort textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; line-height: 1.5; }
@@ -411,6 +429,9 @@
     body:has(#nav:not(:empty)) .innehall { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
     #toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
     .nyckeltal-rad { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .fraga-platt { bottom: calc(80px + env(safe-area-inset-bottom)); right: 14px; padding: 10px 14px; }
+    .fraga-platt span { display: none; }
+    .hjalp-chatt { left: 0; right: 0; bottom: 0; width: auto; height: 85vh; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); z-index: 48; }
     .sokfalt { flex: 1 1 100%; height: 44px; }
     #claude-installning { scroll-margin-top: 64px; }
     .vantar-kort:not(.lank) { flex-wrap: wrap; }
@@ -510,6 +531,9 @@
 </div>
 </div>
 </div>
+<button type="button" id="fragaPlatt" class="fraga-platt ej-utskrift" data-action="hjalp-chatt" hidden aria-label="Fråga Plätt">✦ <span>Fråga Plätt</span></button>
+<section id="hjalpChatt" class="hjalp-chatt ej-utskrift" hidden aria-label="Fråga Plätt"></section>
+<div id="atLista" class="at-lista" role="listbox" hidden></div>
 <div id="utskrift"></div>
 <div id="platt-utskrift" class="platt-kant" role="img" aria-label="Skapad med Plätt"></div>
 
@@ -524,6 +548,14 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.82', datum: '2026-11-28',
+    nyheter: [
+      'Fråga Plätt: en hjälpknapp i hörnet där du kan fråga om appen, bokföringen eller föreningen, till exempel "Vi ska ha årsmöte, vad behöver jag tänka på?". Svaret bygger på appens hjälptexter och funktioner och på läget i er förening, och har ofta en knapp som tar dig rätt.',
+      'Vid en medlem finns "Fråga Plätt om den här", som skickar med kategori och betalningar (inte namn) så att du kan fråga om något ser konstigt ut.',
+      'När du skriver @ i en uppgift, ett protokoll eller i anteckningarna till AI visas en lista med styrelsens personer att välja bland.'
+    ]
+  },
   {
     version: '1.81', datum: '2026-11-28',
     nyheter: [
@@ -4955,6 +4987,51 @@ var VERSIONER = [
     return { message: { subject: m.amne, body: { contentType: 'Text', content: m.text }, toRecipients: [{ emailAddress: { address: m.till } }] }, saveToSentItems: true };
   }
 
+  // Listan när man skriver @: vilket ord som skrivs just nu och vilka personer som passar. infoga = det som ersätter "@ord".
+  function atForslag(text, markor, personer) {
+    var fore = String(text || '').slice(0, markor);
+    var m = fore.match(/(^|[\s(])@([\wÀ-ÖØ-öø-ÿ-]*)$/);
+    if (!m) return null;
+    var fraga = namnOrd(m[2]).join(' ');
+    var fornamn = function (p) { return namnOrd(p.namn)[0] || ''; };
+    var forslag = (personer || []).filter(function (p) {
+      return !fraga || namnOrd(p.namn).some(function (o) { return o.indexOf(fraga) === 0; }) || p.epost.indexOf(fraga) === 0;
+    }).map(function (p) {
+      var unikt = (personer || []).filter(function (x) { return fornamn(x) === fornamn(p); }).length === 1;
+      return { namn: p.namn, epost: p.epost, infoga: '@' + (unikt ? String(p.namn).split(/\s+/)[0] : String(p.namn).split(/\s+/).slice(0, 2).join(' ')) + ' ' };
+    }).slice(0, 8);
+    return { start: fore.length - m[2].length - 1, slut: markor, fraga: m[2], forslag: forslag };
+  }
+
+  // ---------- Fråga Plätt (hjälp i appen) ----------
+  // Kunskapen: appens hjälptexter, vyerna och versionslistan (vad som finns och när det kom).
+  function hjalpKunskap(versioner, hjalp, vyer) {
+    var h = Object.keys(hjalp || {}).map(function (k) {
+      var x = hjalp[k];
+      return '### ' + x.rubrik + '\n' + [x.vad, x.varfor].concat(x.lista || []).concat(x.gor ? [x.gor] : []).join('\n');
+    }).join('\n\n');
+    var v = (vyer || []).map(function (x) { return '- ' + x.id + ': ' + x.namn + (x.grupp ? ' (under ' + x.grupp + ')' : ''); }).join('\n');
+    var n = (versioner || []).map(function (x) { return x.version + ': ' + x.nyheter.join(' '); }).join('\n');
+    return '## Sidor i appen (id: namn)\n' + v + '\n\n## Hjälptexter\n' + h + '\n\n## Funktioner, version för version\n' + n;
+  }
+  var HJALPSVAR_SCHEMA = { type: 'object', additionalProperties: false, required: ['svar', 'vy', 'knapptext'], properties: {
+    svar: { type: 'string' }, vy: { type: 'string' }, knapptext: { type: 'string' } } };
+  function hjalpUppdrag(fraga, historik, kunskap, lage) {
+    var tidigare = (historik || []).slice(-6).map(function (x) { return (x.fran === 'du' ? 'Användaren: ' : 'Plätt: ') + x.text; }).join('\n');
+    return { schema: HJALPSVAR_SCHEMA, maxTokens: 3000,
+      system: 'Du är Plätts hjälp, inne i appen Plätt för bokföring och styrelsearbete i små svenska ideella föreningar. Användarna är ofta ovana. ' +
+        'Svara kort, vänligt och konkret på svenska, gärna i numrerade steg, och säg var i appen saker finns (t.ex. "Bokföring, Läs in"). ' +
+        'Bygg på kunskapen om appen och läget i föreningen nedan. Hitta inte på funktioner som inte finns där; säg i så fall att appen inte gör det och vad man kan göra i stället. ' +
+        'Frågor om bokföring, stadgar och föreningsliv får du besvara med allmän kunskap om svenska ideella föreningar, men säg när något bör kontrolleras med revisor, förbund eller kommun. ' +
+        'Du kan inte ändra något i appen. vy: id för den sida som passar bäst att gå till (från listan), annars tomt. knapptext: kort text för knappen dit, t.ex. "Öppna Läs in", annars tomt.\n\n' + kunskap,
+      text: (lage ? '## Läget just nu\n' + utanPersonnummer(lage) + '\n\n' : '') + (tidigare ? '## Samtalet hittills\n' + tidigare + '\n\n' : '') + '## Fråga\n' + utanPersonnummer(fraga) };
+  }
+  function normaliseraHjalpsvar(svar, vyIds) {
+    svar = svar || {};
+    var vy = typeof svar.vy === 'string' && (vyIds || []).indexOf(svar.vy) >= 0 ? svar.vy : '';
+    return { svar: typeof svar.svar === 'string' && svar.svar.trim() ? svar.svar.trim() : 'Jag fick inget svar. Försök igen.', vy: vy, knapptext: vy ? (String(svar.knapptext || '').trim() || 'Gå dit') : '' };
+  }
+
   // ---------- AI-texter för styrelsen ----------
   // Varje uppdrag är { system, text, schema } och fungerar med vilken AI-tjänst som helst. Svaren är alltid utkast som granskas.
 
@@ -5929,6 +6006,10 @@ var VERSIONER = [
     granskningsUppdrag: granskningsUppdrag,
     normaliseraGranskning: normaliseraGranskning,
     stadgearendeText: stadgearendeText,
+    atForslag: atForslag,
+    hjalpKunskap: hjalpKunskap,
+    hjalpUppdrag: hjalpUppdrag,
+    normaliseraHjalpsvar: normaliseraHjalpsvar,
     hittaOmnamnanden: hittaOmnamnanden,
     uppgiftFranText: uppgiftFranText,
     datumIText: datumIText,
@@ -6492,7 +6573,7 @@ var VERSIONER = [
     if (!u || !u.utkast) {
       html += '<p class="faint" style="margin-top:0">Klistra in dina stödanteckningar från mötet. AI fyller i paragraferna och föreslår beslut och uppgifter. Du granskar utkastet innan något sparas. ' +
         'Anteckningarna skickas till AI-tjänsten; personnummer tas bort först.</p>' +
-        '<textarea id="aiAnteckningar" rows="5" placeholder="T.ex. Kassören redovisade. Beslut: höja terminsavgiften till 1 400 kr från HT. Anna kollar ny lokal till 1 dec.">' + esc(u ? u.anteckningar : '') + '</textarea>' +
+        '<textarea id="aiAnteckningar" data-at rows="5" placeholder="T.ex. Kassören redovisade. Beslut: höja terminsavgiften till 1 400 kr från HT. Anna kollar ny lokal till 1 dec.">' + esc(u ? u.anteckningar : '') + '</textarea>' +
         '<div class="row" style="margin-top:8px">' + (aiKanAnvandas()
           ? '<button class="btn" data-action="ai-protokoll"' + (aiUtkast.arbetar ? ' disabled' : '') + '>' + (aiUtkast.arbetar === 'protokoll' ? '✦ AI skriver …' : '✦ Skriv utkast') + '</button>'
           : aiSaknasHtml()) + '</div>';
@@ -6525,6 +6606,130 @@ var VERSIONER = [
     location.href = K.mailtoLank(m);
   }
   function styrPersonerMedEpost() { return styrPersoner().filter(function (p) { return p.epost; }); }
+
+  // ---------- Fråga Plätt ----------
+  var chatt = { oppen: false, historik: [], bilaga: null, arbetar: false };
+  var hjalpKunskapCache = null;
+  function hjalpKunskapen() {
+    if (!hjalpKunskapCache) {
+      var grupper = {}; GRUPPER.forEach(function (g) { g[2].forEach(function (v) { grupper[v] = g[1]; }); });
+      hjalpKunskapCache = K.hjalpKunskap(VERSIONER, HJALP, VYER.map(function (v) { return { id: v[0], namn: v[1], grupp: grupper[v[0]] || '' }; }));
+    }
+    return hjalpKunskapCache;
+  }
+  // Läget i föreningen, utan personuppgifter.
+  function hjalpLage() {
+    var ar = aktivt(), rader = [];
+    var vyNamn = (VYER.find(function (v) { return v[0] === vy; }) || [vy, vy])[1];
+    rader.push('Användaren är på sidan: ' + vyNamn + ' (' + vy + ').');
+    if (store.forening.namn) rader.push('Förening: ' + store.forening.namn + (store.forening.forbund ? ', medlem i ' + store.forening.forbund : '') + '.');
+    if (ar) {
+      var utan = K.kontroller(ar).filter(function (k) { return k.typ === 'saknarUnderlag'; }).length;
+      rader.push('Räkenskapsår ' + K.arNamn(ar) + ' (' + ar.start + ' till ' + ar.slut + ')' + (ar.lastTom ? ', låst till och med ' + ar.lastTom : '') + '. ' +
+        ar.verifikationer.length + ' verifikationer, ' + utan + ' saknar underlag, ' + K.oppnaBankrader(ar).length + ' banktransaktioner att bokföra.');
+      var am = arsmoteData(ar);
+      if (am.motesdatum) rader.push('Årsmöte: ' + am.motesdatum + '.');
+    }
+    var fr = nastaFrister();
+    if (fr.length) rader.push('Nästa frister: ' + fr.map(function (f) { return f.datum + ' ' + f.text; }).join(' | '));
+    if (odNu.roller && mig()) { var p = odNu.roller.personer.find(function (y) { return y.epost === mig(); }); if (p) rader.push('Användarens roller: ' + p.roller.map(rollnamn).join(', ') + '.'); }
+    var st = styrBeh('styr') ? aktuellaStadgar() : null;
+    if (st) rader.push('Föreningens stadgar finns inlästa (' + st.titel + '):\n' + K.stadgarSomText(st).slice(0, 12000));
+    rader.push('Användarens kontoplan (urval): ' + (ar ? ar.kontoplan.slice(0, 400).map(function (k) { return k.nr + ' ' + k.namn; }).join('; ') : ''));
+    return rader.join('\n');
+  }
+  function ritaChatt() {
+    var knapp = document.getElementById('fragaPlatt'), el = document.getElementById('hjalpChatt');
+    if (!knapp || !el) return;
+    knapp.hidden = !Object.keys(store.ar || {}).length || !K.aiHjalpPa(store.forening) || chatt.oppen;
+    el.hidden = !chatt.oppen;
+    if (!chatt.oppen) return;
+    var html = '<div class="hc-huvud"><strong>✦ Fråga Plätt</strong><button class="btn btn-secondary btn-small" data-action="hjalp-chatt-stang" aria-label="Stäng">×</button></div><div class="hc-meddelanden" id="hcMeddelanden">';
+    if (!chatt.historik.length) html += '<div class="hc-plats"><p>Fråga om appen, bokföringen eller föreningen. Till exempel:</p><ul>' +
+      ['Vi ska ha årsmöte, vad behöver jag tänka på?', 'Hur skriver jag ut ett kvitto till en medlem?', 'Hur bokför jag en faktura för lokalhyra?'].map(function (q) {
+        return '<li><button class="lank-text" data-action="hjalp-exempel">' + esc(q) + '</button></li>'; }).join('') + '</ul></div>';
+    chatt.historik.forEach(function (m) {
+      html += '<div class="hc-medd ' + (m.fran === 'du' ? 'du' : 'platt') + '">' + esc(m.text).replace(/\n/g, '<br>') +
+        (m.vy ? '<div><button class="btn btn-small" data-vy="' + esc(m.vy) + '">' + esc(m.knapptext) + '</button></div>' : '') + '</div>';
+    });
+    if (chatt.arbetar) html += '<div class="hc-medd platt faint">✦ Plätt tänker …</div>';
+    html += '</div>';
+    if (chatt.bilaga) html += '<div class="hc-bilaga">Uppgifter om en medlem skickas med nästa fråga (kategori och betalningar, inte namn). <button class="lank-text" data-action="hjalp-bilaga-bort">Ta bort</button></div>';
+    html += aiKanAnvandas()
+      ? '<div class="hc-fraga"><textarea id="hcFraga" rows="2" placeholder="Skriv din fråga" aria-label="Din fråga"></textarea><button class="btn btn-small" data-action="hjalp-skicka"' + (chatt.arbetar ? ' disabled' : '') + '>Skicka</button></div>' +
+        '<p class="faint hc-not">Svaren kommer från AI och kan vara fel. Inga ändringar görs i appen.</p>'
+      : '<p class="hc-not">' + aiSaknasHtml() + '</p>';
+    el.innerHTML = html;
+    var lista = document.getElementById('hcMeddelanden'); if (lista) lista.scrollTop = lista.scrollHeight;
+  }
+  function hjalpSkicka(fraga) {
+    fraga = String(fraga || '').trim();
+    if (!fraga || chatt.arbetar) return;
+    var bilaga = chatt.bilaga;
+    chatt.historik.push({ fran: 'du', text: fraga });
+    chatt.arbetar = true; chatt.bilaga = null; ritaChatt();
+    var uppdrag = K.hjalpUppdrag(fraga, chatt.historik.slice(0, -1), hjalpKunskapen(), hjalpLage() + (bilaga ? '\n\nMedlemmen frågan gäller:\n' + bilaga : ''));
+    aiSvar(uppdrag).then(function (svar) {
+      var s0 = K.normaliseraHjalpsvar(svar, VYER.map(function (v) { return v[0]; }));
+      chatt.historik.push({ fran: 'platt', text: s0.svar, vy: s0.vy, knapptext: s0.knapptext });
+    }, function (err) { chatt.historik.push({ fran: 'platt', text: 'Det gick inte att få svar: ' + claudeFel(err) }); })
+      .then(function () { chatt.arbetar = false; ritaChatt(); var f = document.getElementById('hcFraga'); if (f) f.focus(); });
+  }
+  // Det AI behöver veta om en medlem: kategori, betalare och betalningar. Namn skickas inte.
+  function medlemsbilaga(id) {
+    var r = reg(), m = r.medlemmar.find(function (x) { return x.id === id; });
+    if (!m) return '';
+    var bet = K.giltigaBetalningar(r, store.ar).filter(function (b) { return b.poster.some(function (p) { return p.medlem === id; }); }).sort(function (a, b) { return a.datum < b.datum ? -1 : 1; });
+    var kat = (K.KATEGORIER.find(function (k) { return k[0] === m.kategori; }) || [m.kategori, m.kategori])[1];
+    return 'Kategori: ' + kat + '. Antal betalare kopplade: ' + r.betalare.filter(function (b) { return b.medlemmar.indexOf(id) >= 0; }).length + '. ' +
+      (m.avford ? 'Avförd. ' : '') + 'Betalningar:\n' + (bet.length ? bet.map(function (b) {
+        return '- ' + b.datum + ' ' + (b.termin || '') + ': ' + b.poster.filter(function (p) { return p.medlem === id; }).map(function (p) { return p.typ + ' ' + kr(p.belopp) + ' kr'; }).join(', ') +
+          (b.nyckel === K.FRITIDSKORT.nyckel ? ' (Fritidskortet)' : '');
+      }).join('\n') : 'inga');
+  }
+
+  // ---------- Listan vid @ ----------
+  var atLage = null;
+  function stangAt() { atLage = null; var l = document.getElementById('atLista'); if (l) l.hidden = true; }
+  function visaAt(el) {
+    var personer = styrPersonerMedEpost();
+    var f = personer.length ? K.atForslag(el.value, el.selectionStart, personer) : null;
+    var l = document.getElementById('atLista');
+    if (!f || !f.forslag.length || !l) { stangAt(); return; }
+    atLage = { el: el, f: f, valt: Math.min(atLage && atLage.el === el ? atLage.valt : 0, f.forslag.length - 1) };
+    var r = el.getBoundingClientRect();
+    l.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 268)) + 'px';
+    l.style.top = Math.min(r.bottom + 4, window.innerHeight - 40 * f.forslag.length - 12) + 'px';
+    l.innerHTML = f.forslag.map(function (p, i) {
+      return '<button type="button" role="option" class="at-val' + (i === atLage.valt ? ' vald' : '') + '" aria-selected="' + (i === atLage.valt) + '" data-at-i="' + i + '"><strong>' + esc(p.namn) + '</strong><span>' + esc(p.epost) + '</span></button>';
+    }).join('');
+    l.hidden = false;
+  }
+  function valjAt(i) {
+    if (!atLage) return;
+    var el = atLage.el, f = atLage.f, p = f.forslag[i];
+    if (!p) return;
+    var v = el.value;
+    el.value = v.slice(0, f.start) + p.infoga + v.slice(f.slut);
+    var pos = f.start + p.infoga.length;
+    el.focus(); el.setSelectionRange(pos, pos);
+    stangAt();
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.target && e.target.id === 'hcFraga' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); hjalpSkicka(e.target.value); return; }
+    if (!atLage || e.target !== atLage.el) return;
+    var n = atLage.f.forslag.length;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); atLage.valt = (atLage.valt + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; visaAt(atLage.el); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); valjAt(atLage.valt); }
+    else if (e.key === 'Escape') { e.preventDefault(); stangAt(); }
+  });
+  document.addEventListener('mousedown', function (e) {
+    var b = e.target.closest && e.target.closest('[data-at-i]');
+    if (b) { e.preventDefault(); valjAt(Number(b.dataset.atI)); return; }
+    if (atLage && e.target !== atLage.el) stangAt();
+  });
+  document.addEventListener('input', function (e) { if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-at')) visaAt(e.target); });
 
   // ---------- Min sida ----------
   function vyMin() {
@@ -9379,6 +9584,7 @@ var VERSIONER = [
     if (logoUrl) document.getElementById('logo').src = logoUrl;
     sattIkon();
     document.getElementById('versionLank').textContent = 'Plätt version ' + VERSIONER[0].version;
+    ritaChatt();
     var aiEl = document.getElementById('aiStatus');
     aiEl.hidden = !store.ar || !Object.keys(store.ar).length;
     aiEl.textContent = K.aiHjalpPa(store.forening) ? '✦ AI-hjälp: ' + K.aiTjanstNamn(K.aiTjanstFor(store.forening)) + (aiKonfigurerad() ? '' : ', inte inställd') : '✦ AI-hjälp av';
@@ -11589,7 +11795,7 @@ var VERSIONER = [
         (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-par-upp" data-si="' + i + '" aria-label="Flytta upp"' + (i ? '' : ' disabled') + '>Upp</button>' +
           '<button class="btn btn-secondary btn-small" data-action="styr-par-ner" data-si="' + i + '" aria-label="Flytta ner"' + (i < m.paragrafer.length - 1 ? '' : ' disabled') + '>Ner</button>' +
           '<button class="btn btn-secondary btn-small" data-action="styr-par-bort" data-si="' + i + '">Ta bort</button>' : '') + '</div>' +
-        '<textarea data-pf="text" data-si="' + i + '" rows="3" aria-label="Text för paragraf ' + (i + 1) + '"' + dis + '>' + esc(p.text) + '</textarea></div>';
+        '<textarea data-pf="text" data-at data-si="' + i + '" rows="3" aria-label="Text för paragraf ' + (i + 1) + '"' + dis + '>' + esc(p.text) + '</textarea></div>';
     }).join('') + (redigera ? '<button class="btn btn-secondary btn-small" data-action="styr-par-ny">Lägg till paragraf</button>' : '') + '</div>';
     // Beslut
     var verOpt = function (val) {
@@ -11671,7 +11877,7 @@ var VERSIONER = [
     if (skriv) {
       var am = arsmoteData(ar);
       html += '<div class="card"><h3 style="margin-top:0">Ny uppgift</h3><div class="row">' +
-        '<input id="nyUppgText" placeholder="Vad ska göras – skriv @namn för att tilldela" style="flex:2;min-width:200px" aria-label="Vad ska göras">' +
+        '<input id="nyUppgText" data-at placeholder="Vad ska göras – skriv @namn för att tilldela" style="flex:2;min-width:200px" aria-label="Vad ska göras">' +
         '<input id="nyUppgAnsvarig" list="styrNamnLista" placeholder="Ansvarig" style="max-width:180px" aria-label="Ansvarig">' +
         '<input id="nyUppgDatum" type="date" style="width:auto" aria-label="Senast">' +
         '<button class="btn btn-small" data-action="styr-uppg-ny">Lägg till</button></div>' +
@@ -12757,7 +12963,8 @@ var VERSIONER = [
     var betalningar = K.giltigaBetalningar(r, store.ar).filter(function (b) { return b.poster.some(function (p) { return p.medlem === m.id; }); })
       .sort(function (a, b) { return a.datum < b.datum ? 1 : -1; });
     var html = '<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">' + esc(K.visaNamn(m)) + '</h2>' +
-      '<button class="btn btn-secondary btn-small" data-action="medl-vy" data-mvy="lista">Tillbaka till listan</button></div>' +
+      '<div class="row">' + (K.aiHjalpPa(store.forening) ? '<button class="btn btn-secondary btn-small" data-action="hjalp-medlem" data-id="' + id + '">✦ Fråga Plätt om den här</button>' : '') +
+      '<button class="btn btn-secondary btn-small" data-action="medl-vy" data-mvy="lista">Tillbaka till listan</button></div></div>' +
       '<div class="grid2"><div><label>Namn</label><input data-medl="namn" data-id="' + id + '" value="' + esc(m.namn) + '"></div>' +
       '<div><label>Apelido</label><input data-medl="apelido" data-id="' + id + '" value="' + esc(m.apelido || '') + '" placeholder="Capoeiranamn"></div>' +
       '<div><label>Kategori</label><select data-medl="kategori" data-id="' + id + '">' + K.KATEGORIER.map(function (k) { return '<option value="' + k[0] + '"' + (k[0] === m.kategori ? ' selected' : '') + '>' + esc(k[1]) + '</option>'; }).join('') + '</select></div></div>' +
@@ -13240,7 +13447,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'till-ai-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'till-ai-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'hjalp-chatt', 'hjalp-chatt-stang', 'hjalp-skicka', 'hjalp-exempel', 'hjalp-bilaga-bort', 'hjalp-medlem', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport],[data-grupp]');
@@ -14433,6 +14640,12 @@ var VERSIONER = [
       stadgeFraga.fraga = fraga; stadgeFraga.svar = null;
       aiKorFor('fraga', function () { return aiSvar(K.stadgeFragaUppdrag(st, fraga)).then(function (svar) { stadgeFraga.svar = svar; }); });
     },
+    'hjalp-chatt': function () { chatt.oppen = true; ritaChatt(); var f = document.getElementById('hcFraga'); if (f) f.focus(); },
+    'hjalp-chatt-stang': function () { chatt.oppen = false; ritaChatt(); },
+    'hjalp-skicka': function () { var f = document.getElementById('hcFraga'); if (f) hjalpSkicka(f.value); },
+    'hjalp-exempel': function (t) { hjalpSkicka(t.textContent); },
+    'hjalp-bilaga-bort': function () { chatt.bilaga = null; ritaChatt(); },
+    'hjalp-medlem': function (t) { chatt.bilaga = medlemsbilaga(t.dataset.id); chatt.oppen = true; ritaChatt(); var f = document.getElementById('hcFraga'); if (f) { f.value = 'Den här medlemmen ser konstig ut. Stämmer betalningarna?'; f.focus(); } },
     'kontakt-ny': function () { kontaktVal.redigera = { id: null }; render(); },
     'kontakt-andra': function (t) { kontaktVal.redigera = { id: t.dataset.id }; render(); window.scrollTo(0, 0); },
     'kontakt-avbryt': function () { kontaktVal.redigera = null; render(); },
