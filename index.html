@@ -570,6 +570,12 @@
 <script id="versioner">
 var VERSIONER = [
   {
+    version: '1.86', datum: '2026-11-28',
+    nyheter: [
+      'Har du fått en ny roll, till exempel kassör eller sekreterare, visas ett kort i översikten med en kort genomgång av det som är nytt för dig. Steg du redan kan från en tidigare roll hoppas över.'
+    ]
+  },
+  {
     version: '1.85', datum: '2026-11-28',
     nyheter: [
       'Föreningar med Microsoft 365 kan logga in med sina jobb- eller skolkonton i stället för privata Microsoft-konton. Välj "Logga in med föreningens konto" vid inloggningen. Appregistreringen behöver tillåta den sortens konton (se guiden under Inställningar, OneDrive).',
@@ -5118,6 +5124,52 @@ var VERSIONER = [
     if (i < rader.length) kropp += '…\n';
     return (amne ? '*' + amne + '*\n' : '') + kropp + (lank ? 'Läs mer i Plätt: ' + lank : '').trim();
   }
+  // ---------- Ny roll: vad är nytt för mig? ----------
+  // Steg per roll: [vy, rubrik, text]. Vid en ny roll visas bara stegen för vyer som de tidigare rollerna inte redan hade.
+  var ROLLSTEG = {
+    kassor: [['inlasning', 'Läs in', 'Som kassör bokför du det som händer på kontot. Släpp kontoutdrag, fakturor och kvitton här, så föreslår appen hur de ska bokföras och du godkänner.'],
+      ['verifikationer', 'Verifikationer', 'Allt som är bokfört. Filtrera fram det som saknar underlag, och rätta en verifikation med en ny som rättar den gamla.'],
+      ['m-koppla', 'Att koppla', 'Inbetalningar från medlemmar kopplas till rätt medlem och termin, så att du ser vilka som har betalat.'],
+      ['dokument', 'Fakturor och kvitton', 'Skriv fakturor och kvitton, till exempel kvitto på terminsavgiften till en medlem.'],
+      ['rapporter', 'Rapporter', 'Resultat- och balansräkning när styrelsen vill veta hur det går, och underlaget till revisorn.'],
+      ['bokslut', 'Bokslut', 'Vid årets slut stämmer du av, gör bokslut och tar fram årsrapporten inför årsmötet.']],
+    bokforare: [['inlasning', 'Läs in', 'Släpp kontoutdrag, fakturor och kvitton här, så föreslår appen hur de ska bokföras och du godkänner.'],
+      ['verifikationer', 'Verifikationer', 'Allt som är bokfört, med filter för det som saknar underlag och en sökruta för text, konto och belopp.'],
+      ['dokument', 'Fakturor och kvitton', 'Skriv fakturor och kvitton som PDF.'],
+      ['rapporter', 'Rapporter', 'Resultat- och balansräkning, grundbok och huvudbok.']],
+    ordforande: [['st-moten', 'Möten och protokoll', 'Som ordförande leder du mötena. Lägg upp dagordningen här, och skriv under protokollen när de är klara.'],
+      ['st-uppgifter', 'Uppgifter', 'Fördela uppgifter med @namn och håll koll på vad som är försenat.'],
+      ['st-utskick', 'Utskick', 'Välkomstmejl till nya i styrelsen och utskick inför årsmötet. Om administratören har slagit på det kan du också skicka påminnelser.'],
+      ['arsmote', 'Årsmötet', 'Frister och handlingar inför årsmötet, med utkast till verksamhetsberättelse och kallelse.'],
+      ['st-stadgar', 'Stadgar', 'Föreningens stadgar, granskning mot kraven och förslag till ändringar.']],
+    viceordforande: [['st-moten', 'Möten och protokoll', 'Som vice ordförande kan du behöva leda mötena. Dagordning och protokoll finns här.'],
+      ['arsmote', 'Årsmötet', 'Frister och handlingar inför årsmötet.']],
+    sekreterare: [['st-moten', 'Möten och protokoll', 'Som sekreterare skriver du protokollen, gärna från dina stödanteckningar med AI, och skickar dem för underskrift.'],
+      ['st-beslut', 'Beslut', 'Alla beslut från protokollen samlas här, så att styrelsen hittar vad som gäller.'],
+      ['st-uppgifter', 'Uppgifter', 'Uppgifter med @namn i protokollet blir uppgifter här, med ansvarig och datum.'],
+      ['st-kontakter', 'Kontakter', 'Styrelsens adressbok: förbund, kommun, lokaler och andra kontakter.']],
+    ledamot: [['st-moten', 'Möten och protokoll', 'Här finns dagordningar och protokoll. När ett protokoll ska skrivas under syns det under Väntar på dig.'],
+      ['st-uppgifter', 'Uppgifter', 'Uppgifter du får med @namn syns här och under Väntar på dig.'],
+      ['st-arenden', 'Ärenden', 'Saker som styrelsen ska ta upp. Kommentera med @namn för att fråga någon.']],
+    suppleant: [['st-moten', 'Möten och protokoll', 'Som suppleant går du in när en ledamot inte kan. Dagordningar och protokoll finns här.'],
+      ['st-arenden', 'Ärenden', 'Saker som styrelsen ska ta upp.']],
+    revisor: [['rapporter', 'Rapporter', 'Som revisor granskar du räkenskaperna: resultat- och balansräkning, grundbok och huvudbok.'],
+      ['verifikationer', 'Verifikationer', 'Varje verifikation med sitt underlag. Filtrera fram det som saknar underlag.']],
+    valberedning: [['st-uppdrag', 'Förtroendeuppdrag', 'Som valberedning ser du vilka uppdrag som går ut vid årsmötet och vilka som behöver nya namn.']],
+    admin: [['arkiv', 'År och arkiv', 'Som systemadministratör lägger du till personer, ger dem roller och bestämmer vem som har skrivrätt.'],
+      ['st-utskick', 'Utskick', 'Härifrån skickar du påminnelsen "Det här väntar på dig" till styrelsen.']]
+  };
+  // gamla och nya: roll-id:n. Ger de nya rollerna och stegen för dem, utan steg som de gamla rollerna redan hade.
+  function nyaRollsteg(gamla, nya) {
+    gamla = gamla || []; nya = nya || [];
+    var tillkomna = nya.filter(function (r) { return gamla.indexOf(r) < 0 && ROLLSTEG[r]; });
+    var kanda = {};
+    gamla.forEach(function (r) { (ROLLSTEG[r] || []).forEach(function (x) { kanda[x[0]] = true; }); });
+    var steg = [];
+    tillkomna.forEach(function (r) { ROLLSTEG[r].forEach(function (x) { if (!kanda[x[0]]) { kanda[x[0]] = true; steg.push(x); } }); });
+    return { roller: tillkomna, steg: steg };
+  }
+
   // ---------- Inloggning med föreningskonton ----------
   // Privata Microsoft-konton (Outlook.com, Hotmail) loggar in via 'consumers'. Föreningar med Microsoft 365
   // har jobb- eller skolkonton och loggar in via 'organizations'. Föreningens avsändaradress kan vara vilken som helst.
@@ -6167,6 +6219,8 @@ var VERSIONER = [
     whatsappText: whatsappText,
     mailtoMangaLank: mailtoMangaLank,
     odAuktoritet: odAuktoritet,
+    ROLLSTEG: ROLLSTEG,
+    nyaRollsteg: nyaRollsteg,
     AVSANDARE_OMFANG: AVSANDARE_OMFANG,
     inloggningsfelText: inloggningsfelText,
     atForslag: atForslag,
@@ -6923,13 +6977,42 @@ var VERSIONER = [
       '<div class="row"><button class="btn btn-small" data-action="rundtur-start">Visa mig</button><button class="btn btn-secondary btn-small" data-action="valkommen-senare">Påminn mig senare</button>' +
       '<button class="btn btn-secondary btn-small" data-action="valkommen-nej">Nej tack</button></div></div>';
   }
+  // ---------- Ny roll ----------
+  // Rollerna man hade senast sparas per person på enheten. Får man en ny roll visas ett kort med det som är nytt.
+  var SEDDA_ROLLER = 'forening-bokforing:sedda-roller';
+  function seddaRoller() { try { return JSON.parse(localStorage.getItem(SEDDA_ROLLER) || '{}') || {}; } catch (e) { return {}; } }
+  function sparaSeddaRoller(x) { try { var a = seddaRoller(); if (x) a[mig()] = x; else delete a[mig()]; localStorage.setItem(SEDDA_ROLLER, JSON.stringify(a)); } catch (e) { /* tomt */ } }
+  function rollbyteLage() {
+    if (!odAnslutet() || !odNu.roller || !mig()) return null;
+    var nu = minaRoller(), lagrat = seddaRoller()[mig()];
+    // Första gången: läget sparas tyst, så att ingen får kort för roller hen redan har.
+    if (!lagrat) { sparaSeddaRoller({ roller: nu.slice() }); return null; }
+    var r = K.nyaRollsteg(lagrat.roller, nu);
+    if (!r.steg.length) {
+      if (lagrat.roller.join() !== nu.join()) sparaSeddaRoller({ roller: nu.slice() });
+      return null;
+    }
+    if (lagrat.senare && lagrat.senare > idag()) return null;
+    return r;
+  }
+  function rollbyteKort() {
+    if (rundtur || visaValkommen()) return '';
+    var r = rollbyteLage();
+    if (!r) return '';
+    var namn = r.roller.map(function (x) { return rollnamn(x).toLowerCase(); });
+    var lista = namn.length > 1 ? namn.slice(0, -1).join(', ') + ' och ' + namn[namn.length - 1] : namn[0];
+    return '<div class="card valkommen"><h3 style="margin-top:0">Du är nu ' + esc(lista) + '</h3><p style="margin-top:0">Vill du se vad som är nytt för dig? ' +
+      antal(r.steg.length, 'steg', 'steg') + ', ungefär en minut.</p>' +
+      '<div class="row"><button class="btn btn-small" data-action="rollbyte-start">Visa vad som är nytt</button><button class="btn btn-secondary btn-small" data-action="rollbyte-senare">Påminn mig senare</button>' +
+      '<button class="btn btn-secondary btn-small" data-action="rollbyte-nej">Jag kan det redan</button></div></div>';
+  }
   function ritaRundtur() {
     var el = document.getElementById('rundtur');
     if (!el) return;
     el.hidden = !rundtur;
     if (!rundtur) return;
     var steg = rundtur.steg, i = rundtur.i, x = steg[i];
-    el.innerHTML = '<div class="rundtur-steg">Steg ' + (i + 1) + ' av ' + steg.length + '</div><h3>' + esc(x[1]) + '</h3><p>' + esc(x[2]) + '</p>' +
+    el.innerHTML = '<div class="rundtur-steg">' + (rundtur.rollbyte ? 'Nytt för dig · ' : '') + 'Steg ' + (i + 1) + ' av ' + steg.length + '</div><h3>' + esc(x[1]) + '</h3><p>' + esc(x[2]) + '</p>' +
       '<div class="row"><button class="btn btn-secondary btn-small" data-action="rundtur-bak"' + (i ? '' : ' disabled') + '>Föregående</button>' +
       (i < steg.length - 1 ? '<button class="btn btn-small" data-action="rundtur-fram">Nästa</button>' : '<button class="btn btn-small" data-action="rundtur-slut">Klart</button>') +
       '<button class="lank-text" data-action="rundtur-slut" style="margin-left:auto">Avsluta</button></div>';
@@ -11894,7 +11977,7 @@ var VERSIONER = [
   }
 
   function vyOversikt(ar) {
-    var html = '<h2>Översikt</h2>' + valkommenKort() + vantarPaDig() + oversiktNyckeltal(ar);
+    var html = '<h2>Översikt</h2>' + valkommenKort() + rollbyteKort() + vantarPaDig() + oversiktNyckeltal(ar);
     var rad = function (antalTxt, knapp) { return '<li><span class="bock" aria-hidden="true">!</span><div><div>' + antalTxt + '</div>' + (knapp ? '<div class="row" style="margin-top:6px">' + knapp + '</div>' : '') + '</div></li>'; };
     // Revisorn
     if (odAnslutet() && odNu.roller && K.harRoll(odNu.roller, mig(), 'revisor') && !K.kanFaSkrivratt(odNu.roller, mig())) {
@@ -13864,7 +13947,7 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'till-ai-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'wa-lank', 'djuplank', 'kommentarer-lasta', 'kommentar-visa', 'utskick-wa', 'kommentar-ny', 'paminn-en', 'paminn-logga', 'paminn-alla', 'utskick-skicka', 'utskick-aterstall', 'avs-logga-in', 'avs-glom', 'rundtur-start', 'rundtur-fram', 'rundtur-bak', 'rundtur-slut', 'valkommen-senare', 'valkommen-nej', 'hjalp-chatt', 'hjalp-chatt-stang', 'hjalp-skicka', 'hjalp-exempel', 'hjalp-bilaga-bort', 'hjalp-medlem', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'till-ai-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'wa-lank', 'djuplank', 'kommentarer-lasta', 'kommentar-visa', 'utskick-wa', 'kommentar-ny', 'paminn-en', 'paminn-logga', 'paminn-alla', 'utskick-skicka', 'utskick-aterstall', 'avs-logga-in', 'avs-glom', 'rundtur-start', 'rollbyte-start', 'rollbyte-senare', 'rollbyte-nej', 'rundtur-fram', 'rundtur-bak', 'rundtur-slut', 'valkommen-senare', 'valkommen-nej', 'hjalp-chatt', 'hjalp-chatt-stang', 'hjalp-skicka', 'hjalp-exempel', 'hjalp-bilaga-bort', 'hjalp-medlem', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport],[data-grupp]');
@@ -15072,7 +15155,13 @@ var VERSIONER = [
     'rundtur-start': function () { rundtur = { steg: rundturSteg(), i: 0 }; gaTillRundtur(0); },
     'rundtur-fram': function () { if (rundtur) gaTillRundtur(Math.min(rundtur.i + 1, rundtur.steg.length - 1)); },
     'rundtur-bak': function () { if (rundtur) gaTillRundtur(Math.max(rundtur.i - 1, 0)); },
-    'rundtur-slut': function () { rundtur = null; sattValkommen({ status: 'klar' }); render(); },
+    'rundtur-slut': function () {
+      if (rundtur && rundtur.rollbyte) sparaSeddaRoller({ roller: minaRoller().slice() }); else sattValkommen({ status: 'klar' });
+      rundtur = null; render();
+    },
+    'rollbyte-start': function () { var r = rollbyteLage(); if (!r) return; rundtur = { steg: r.steg, i: 0, rollbyte: true }; gaTillRundtur(0); },
+    'rollbyte-senare': function () { var l = seddaRoller()[mig()]; if (l) sparaSeddaRoller(Object.assign({}, l, { senare: K.laggTillDagar(idag(), 3) })); visa('Kortet visas igen om tre dagar.'); },
+    'rollbyte-nej': function () { sparaSeddaRoller({ roller: minaRoller().slice() }); visa('Okej! Fråga Plätt om du undrar något om din nya roll.'); },
     'valkommen-senare': function () { sattValkommen({ status: 'senare', till: K.laggTillDagar(idag(), 3) }); visa('Välkomstgenomgången visas igen om tre dagar. Du kan också starta den från Min sida.'); },
     'valkommen-nej': function () { sattValkommen({ status: 'klar' }); visa('Okej! Genomgången finns kvar på Min sida om du vill se den senare.'); },
     'hjalp-chatt': function () { chatt.oppen = true; ritaChatt(); var f = document.getElementById('hcFraga'); if (f) f.focus(); },
