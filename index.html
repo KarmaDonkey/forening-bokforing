@@ -220,6 +220,23 @@
   .nyckeltal { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 10px 0; }
   .nyckeltal div { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; }
   .nyckeltal strong { display: block; font-size: 22px; }
+  .nyckeltal-rad { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 12px 0; }
+  .tal-kort { background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px; padding: 14px 16px; box-shadow: var(--skugga); display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .tal-etikett { font-size: 13px; color: var(--ink-soft); }
+  .tal-varde { font-size: 25px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+  .tal-varde small { font-size: 14px; font-weight: 500; color: var(--ink-soft); letter-spacing: 0; }
+  .tal-not { font-size: 12.5px; color: var(--ink-soft); }
+  .tal-not .lank-text { font-size: 12.5px; }
+  .tal-stapel { display: block; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+  .tal-stapel span { display: block; height: 100%; background: var(--guld); border-radius: 3px; }
+  .manadsdiagram { display: flex; align-items: flex-end; gap: 10px; padding-top: 6px; }
+  .manadsdiagram .manad { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+  .manadsdiagram .staplar { display: flex; align-items: flex-end; gap: 3px; height: 110px; }
+  .manadsdiagram .staplar span { width: 20px; border-radius: 4px 4px 0 0; }
+  .intakt { background: var(--guld); }
+  .kostnad { background: #8B93A7; }
+  .diagramforklaring { display: flex; gap: 16px; margin-top: 10px; font-size: 12.5px; color: var(--ink-soft); }
+  .diagramforklaring i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
   .logg { margin: 8px 0; padding-left: 18px; font-size: 14px; }
   a { color: var(--lank); }
   .lank-knapp { background: none; border: 0; color: var(--ink-faint); font: inherit; cursor: pointer; text-decoration: underline; padding: 0; text-align: left; }
@@ -315,6 +332,12 @@
     #nav .kort { display: inline; }
     body:has(#nav:not(:empty)) .innehall { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
     #toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+    .nyckeltal-rad { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .tal-kort { padding: 12px; border-radius: 12px; }
+    .tal-varde { font-size: 20px; }
+    .tal-not { font-size: 12px; }
+    .manadsdiagram { gap: 4px; }
+    .manadsdiagram .staplar span { width: 12px; }
     .wrap { padding-top: 10px; }
     /* 16 px förhindrar att iPhone zoomar in när man trycker i ett fält. */
     input, select, textarea, .arsmote-form textarea, .listpost textarea, .dok-form textarea { font-size: 16px; }
@@ -420,6 +443,13 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.67', datum: '2026-11-28',
+    nyheter: [
+      'Översikten börjar med nyckeltal: pengar på kontot (och när kontoutdraget senast lästes in), årets resultat med intäkter och kostnader, hur många som betalat terminen och hur många verifikationer som saknar underlag.',
+      'Ett stapeldiagram visar intäkter och kostnader de senaste sex månaderna.'
+    ]
+  },
   {
     version: '1.66', datum: '2026-11-28',
     nyheter: [
@@ -1450,6 +1480,43 @@ var VERSIONER = [
   // Årets resultat: positivt = överskott. 8990–8999 (bokföring av resultatet) räknas inte.
   function aretsResultat(ar, opt) {
     return -summaIntervall(saldon(ar, opt), 3000, 8989);
+  }
+
+  // Nyckeltal till översikten: likvida medel (1900–1999), årets intäkter och kostnader och samma sak per månad.
+  // Intäkter är konto 3000–3999 (positivt belopp), kostnader 4000–8989. opt.tom: räkna t.o.m. det datumet.
+  function oversiktstal(ar, opt) {
+    opt = opt || {};
+    var tom = opt.tom && opt.tom < ar.slut ? opt.tom : ar.slut;
+    var s = saldon(ar, { tom: tom });
+    var bank = {};
+    (ar.bankrader || []).forEach(function (r) { bank[r.konto] = true; });
+    var konton = Object.keys(Object.assign({}, s, bank));
+    var likvida = konton.filter(function (k) { var n = Number(k); return n >= 1900 && n <= 1999 && (s[k] || bank[k]); })
+      .sort().map(function (k) { return { nr: k, namn: kontonamn(ar, k), saldo: s[k] || 0 }; });
+    var manader = [];
+    var m = ar.start.slice(0, 7);
+    while (m <= tom.slice(0, 7)) {
+      manader.push({ manad: m, intakter: 0, kostnader: 0 });
+      var a = Number(m.slice(0, 4)), mm = Number(m.slice(5, 7)) + 1;
+      if (mm > 12) { a++; mm = 1; }
+      m = a + '-' + String(mm).padStart(2, '0');
+    }
+    var intakter = 0, kostnader = 0;
+    ar.verifikationer.forEach(function (v) {
+      if (v.datum < ar.start || v.datum > tom) return;
+      var post = manader.find(function (x) { return x.manad === v.datum.slice(0, 7); });
+      v.rader.forEach(function (r) {
+        var n = Number(r.konto);
+        if (n >= 3000 && n <= 3999) { intakter -= r.belopp; if (post) post.intakter -= r.belopp; }
+        else if (n >= 4000 && n <= 8989) { kostnader += r.belopp; if (post) post.kostnader += r.belopp; }
+      });
+    });
+    return {
+      likvida: likvida,
+      likvidaSumma: likvida.reduce(function (sum, x) { return sum + x.saldo; }, 0),
+      intakter: intakter, kostnader: kostnader, resultat: intakter - kostnader,
+      perManad: manader
+    };
   }
 
   function namnFranNagot(nr, ar, annat) {
@@ -4950,6 +5017,7 @@ var VERSIONER = [
     grundbok: grundbok,
     huvudbok: huvudbok,
     aretsResultat: aretsResultat,
+    oversiktstal: oversiktstal,
     resultatrakning: resultatrakning,
     balansrakning: balansrakning,
     nastaAr: nastaAr,
@@ -9886,8 +9954,46 @@ var VERSIONER = [
     return ut.sort(function (a, b) { return a.datum < b.datum ? -1 : 1; }).slice(0, 4);
   }
 
+  // Nyckeltal överst i översikten: pengar, årets resultat, medlemmar som betalat och verifikationer utan underlag.
+  function oversiktNyckeltal(ar) {
+    var t = K.oversiktstal(ar, { tom: idag() });
+    // Hela kronor räcker i nyckeltalen.
+    var krHel = function (ore) { return kr(Math.round(ore / 100) * 100).replace(/,00$/, ''); };
+    var kort = function (etikett, varde, not, extra) {
+      return '<div class="tal-kort"><span class="tal-etikett">' + etikett + '</span><span class="tal-varde">' + varde + '</span>' + (extra || '') + (not ? '<span class="tal-not">' + not + '</span>' : '') + '</div>';
+    };
+    var senast = (ar.bankrader || []).reduce(function (m, r) { return r.datum > m ? r.datum : m; }, '');
+    var html = kort(t.likvida.length > 1 ? 'Pengar på konton och kassa' : esc(t.likvida[0] ? t.likvida[0].namn : 'Pengar på kontot'), krHel(t.likvidaSumma) + ' kr',
+      senast ? 'Kontoutdrag inläst t.o.m. ' + esc(senast) : '');
+    html += kort('Årets resultat', (t.resultat > 0 ? '+' : '') + krHel(t.resultat) + ' kr', 'Intäkter ' + krHel(t.intakter) + ' kr · kostnader ' + krHel(t.kostnader) + ' kr');
+    var regSynligt = !lasLage() || (odNu.regLas && K.registerHarData(reg()));
+    if (regSynligt && K.registerHarData(reg())) {
+      var termin = K.terminForDatum(idag() >= ar.start && idag() <= ar.slut ? idag() : ar.slut);
+      var st = K.terminsstatistik(reg(), termin, store.ar);
+      var forvant = st.totalt.antal + st.slutat.length;
+      var andel = forvant ? Math.round(100 * st.totalt.antal / forvant) : 0;
+      html += kort('Har betalat ' + esc(termin), st.totalt.antal + (forvant ? ' <small>av ' + forvant + '</small>' : ''),
+        (st.slutat.length ? antal(st.slutat.length, 'betalade', 'betalade') + ' förra terminen men inte nu · ' : '') + '<button class="lank-text" data-action="medl-vy" data-mvy="statistik">Statistik</button>',
+        forvant ? '<span class="tal-stapel" aria-hidden="true"><span style="width:' + andel + '%"></span></span>' : '');
+    }
+    var utan = K.kontroller(ar).filter(function (k) { return k.typ === 'saknarUnderlag'; }).length;
+    html += kort('Saknar underlag', utan ? utan + ' <small>' + (utan === 1 ? 'verifikation' : 'verifikationer') + '</small>' : '0',
+      utan ? '<button class="lank-text" data-vy="verifikationer">Visa verifikationerna</button>' : 'Alla verifikationer har underlag');
+    var manader = t.perManad.slice(-6);
+    var max = Math.max(1, Math.max.apply(null, manader.map(function (x) { return Math.max(x.intakter, x.kostnader); })));
+    var hojd = function (b) { return Math.max(b > 0 ? 3 : 0, Math.round(110 * Math.max(0, b) / max)); };
+    var MAN = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+    var diagram = manader.length ? '<div class="card manadskort"><h3 style="margin-top:0">Intäkter och kostnader per månad</h3>' +
+      '<div class="manadsdiagram" role="img" aria-label="' + esc(manader.map(function (x) { return MAN[Number(x.manad.slice(5, 7)) - 1] + ': intäkter ' + kr(x.intakter) + ' kr, kostnader ' + kr(x.kostnader) + ' kr'; }).join('; ')) + '">' +
+      manader.map(function (x) {
+        return '<div class="manad"><div class="staplar"><span class="intakt" style="height:' + hojd(x.intakter) + 'px" title="Intäkter ' + kr(x.intakter) + ' kr"></span>' +
+          '<span class="kostnad" style="height:' + hojd(x.kostnader) + 'px" title="Kostnader ' + kr(x.kostnader) + ' kr"></span></div><span>' + MAN[Number(x.manad.slice(5, 7)) - 1] + '</span></div>';
+      }).join('') + '</div><div class="diagramforklaring"><span><i class="intakt"></i>Intäkter</span><span><i class="kostnad"></i>Kostnader</span></div></div>' : '';
+    return '<div class="nyckeltal-rad">' + html + '</div>' + diagram;
+  }
+
   function vyOversikt(ar) {
-    var html = '<h2>Översikt</h2>';
+    var html = '<h2>Översikt</h2>' + oversiktNyckeltal(ar);
     var rad = function (antalTxt, knapp) { return '<li><span class="bock" aria-hidden="true">!</span><div><div>' + antalTxt + '</div>' + (knapp ? '<div class="row" style="margin-top:6px">' + knapp + '</div>' : '') + '</div></li>'; };
     // Revisorn
     if (odAnslutet() && odNu.roller && K.harRoll(odNu.roller, mig(), 'revisor') && !K.kanFaSkrivratt(odNu.roller, mig())) {
@@ -9924,16 +10030,6 @@ var VERSIONER = [
       var sp = styrPaminnelser(rad);
       html += '<div class="card"><h3 style="margin-top:0">Styrelsen</h3>' + (sp ? '<ul class="checklista varningar">' + sp + '</ul>' : '<p class="ok" style="margin:0">Inget som väntar på dig.</p>') +
         '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-vy="st-moten">Styrelsen</button></div></div>';
-    }
-    // Medlemmar
-    var regSynligt = !lasLage() || (odNu.regLas && K.registerHarData(reg()));
-    if (regSynligt && K.registerHarData(reg())) {
-      var termin = K.terminForDatum(idag() >= ar.start && idag() <= ar.slut ? idag() : ar.slut);
-      var st = K.terminsstatistik(reg(), termin, store.ar);
-      html += '<div class="card"><h3 style="margin-top:0">Medlemmar ' + esc(termin) + '</h3><p style="margin:0"><strong>' + st.totalt.antal + '</strong> har betalat' +
-        (st.totalt.antal ? ' (' + K.KATEGORIER.filter(function (k) { return st.perKategori[k[0]].antal; }).map(function (k) { return st.perKategori[k[0]].antal + ' ' + K.KATEGORI_KORT[k[0]].toLowerCase(); }).join(', ') + ')' : '') + '.' +
-        (st.slutat.length ? ' ' + antal(st.slutat.length, 'betalade', 'betalade') + ' förra terminen men inte nu.' : '') + '</p>' +
-        '<div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" data-action="medl-vy" data-mvy="statistik">Statistik</button></div></div>';
     }
     // På gång
     var frister = nastaFrister();
