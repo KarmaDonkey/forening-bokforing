@@ -295,6 +295,13 @@
   .stadge-red.andrad { box-shadow: inset 3px 0 0 var(--guld); padding-left: 10px; }
   .stadge-red textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; margin-top: 6px; line-height: 1.5; }
   .stadgetext p { margin: 10px 0; white-space: normal; }
+  .kontaktlista { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+  .kontakt-kort { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin: 0; }
+  .kontakt-kort.forbund { border-color: var(--guld); margin-bottom: 12px; }
+  .kontakt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .kontakt-text span, .kontakt-lankar a { font-size: 13.5px; overflow-wrap: anywhere; }
+  .kontakt-lankar { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+  .kontakt-anteckning { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; }
   .om-slogan { font-size: 18px; font-weight: 600; margin-top: 0; }
   .ovning-banner .btn-secondary { background: #fff; color: #2B2F3A; border-color: rgba(43, 47, 58, 0.18); }
   .ai-kort textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; line-height: 1.5; }
@@ -516,6 +523,14 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.80', datum: '2026-11-28',
+    nyheter: [
+      'Ny flik Kontakter under Styrelsen: styrelsens adressbok med grupper (förbund, kommun och stad, lokal, bank, försäkring, revisor, leverantörer), sökning och ett tryck för att ringa eller mejla. Kontakterna sparas i styrelsens fil.',
+      'Under Inställningar, Föreningen, finns nu Förbund och register: specialförbund, föreningsnummer, länk till förbundets sida och id i Idrottsarenan (som ersatt IdrottOnline). Förbundet visas överst bland kontakterna, och efter årsmötet påminner appen om att registrera styrelse och firmatecknare hos förbundet.',
+      'Stadgarna kan granskas mot RF:s krav för föreningar i ett specialförbund, enligt RF:s stadgar efter RF-stämman 2025.'
+    ]
+  },
   {
     version: '1.79', datum: '2026-11-28',
     nyheter: [
@@ -4326,12 +4341,12 @@ var VERSIONER = [
   var STYRFORMAT = 'foreningsbokforing-styrelse';
   var UPPDRAGFORMAT = 'foreningsbokforing-uppdrag';
 
-  function tomStyrelse() { return { format: STYRFORMAT, moten: [], uppgifter: [], dokument: [], arenden: [], rapporter: [], stadgar: [] }; }
+  function tomStyrelse() { return { format: STYRFORMAT, moten: [], uppgifter: [], dokument: [], arenden: [], rapporter: [], stadgar: [], kontakter: [] }; }
   function tomaUppdrag() { return { format: UPPDRAGFORMAT, uppdrag: [] }; }
   function normaliseraStyrelse(d) {
     var t = tomStyrelse();
     d = d && typeof d === 'object' ? d : {};
-    ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter', 'stadgar'].forEach(function (k) { if (Array.isArray(d[k])) t[k] = d[k]; });
+    ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter', 'stadgar', 'kontakter'].forEach(function (k) { if (Array.isArray(d[k])) t[k] = d[k]; });
     return t;
   }
   function normaliseraUppdrag(d) { return { format: UPPDRAGFORMAT, uppdrag: d && Array.isArray(d.uppdrag) ? d.uppdrag : [] }; }
@@ -4649,6 +4664,21 @@ var VERSIONER = [
         ['fullfoljd', 'Fullföljdskravet', 'Minst 75 procent av inkomsterna ska användas till allmännyttiga ändamål.'],
         ['oppenhet', 'Öppenhetskravet', 'Alla som delar föreningens målsättning och följer stadgarna får bli medlemmar. Vissa krav, som en minimiålder, går bra, men inte medlemskap bara efter rekommendation från en annan medlem eller uteslutning utan giltiga skäl.']
       ] },
+    { id: 'rf', namn: 'RF (förening i ett specialförbund)', kontrollerad: '2026-11-28',
+      kallor: ['https://www.rf.se/download/18.4ef35ff91998a78d4bd63a8c/1759330730586/RFs%20stadgar.pdf'],
+      not: 'Från RF:s stadgar i lydelse efter RF-stämman 2025, 8 kap. Föreningarna. Stadgarna ska enligt RF upprättas på grundval av RF:s stadgemall för idrottsföreningar, som ert specialförbund kan ge er.',
+      krav: [
+        ['stadgemall', 'Grundade på RF:s stadgemall', 'Stadgarna ska vara upprättade på grundval av RF:s stadgemall för idrottsföreningar (8 kap. 1 §).'],
+        ['fysiska', 'Ideell förening med fysiska personer', 'Ideell förening med hemort i Sverige som består av enbart fysiska personer; endast fysisk person kan bli medlem (8 kap. 1 och 6 §§).'],
+        ['folja', 'Följer RF och förbundet', 'Föreningen följer RF:s stadgar, inklusive idrottens värdegrund, och specialförbundets stadgar, tävlingsregler, övriga idrottsregler och beslut (8 kap. 1 och 5 §§).'],
+        ['ansokan', 'Nekat medlemskap', 'Ansökan om medlemskap får nekas endast om sökanden inte uppfyller stadgarna eller kan antas motarbeta föreningens verksamhet eller ändamål eller skada dess intressen (8 kap. 6 §).'],
+        ['uttrade', 'Utträde och obetald avgift', 'Medlem har rätt att utträda efter anmälan, och medlemskapet får upphöra om medlemsavgiften inte betalats två år i följd (8 kap. 6 §).'],
+        ['uteslutning', 'Uteslutning och varning', 'Grunderna för uteslutning och varning, tidsbegränsad uteslutning högst sex månader, beslut av styrelsen efter skriftligt underlag och minst 14 dagar att yttra sig, skälen och hur beslutet överklagas, och att beslutet skickas inom tre dagar (8 kap. 6 §).'],
+        ['medlemsratt', 'Medlemmarnas rättigheter och skyldigheter', 'Medlemmar har rätt att delta i sammankomster och få information, och ska följa stadgarna och beslut (8 kap. 7 §).'],
+        ['arsmote', 'Årsmöte och ansvarsfrihet', 'Föreningen håller årsmöte och beslutar där, efter revision, om ansvarsfrihet för styrelsens förvaltning (8 kap. 5 §).'],
+        ['rakenskaper', 'Räkenskaper och protokoll', 'Föreningen för räkenskaper, upprättar verksamhetsberättelse med resultat- och balansräkning, för protokoll vid årsmöten, föreningsmöten och styrelsesammanträden och för medlemsförteckning (8 kap. 5 §).'],
+        ['trygg', 'Trygg idrott', 'Utdrag ur belastningsregistret begärs för den som har direkt och regelbunden kontakt med barn, och föreningen vidtar åtgärder vid kränkningar och missförhållanden (8 kap. 5 a §).']
+      ] },
     { id: 'grund', namn: 'God sed för en ideell förening (checklista)', kontrollerad: '2026-11', kallor: [],
       not: 'En allmän checklista över vad stadgar brukar innehålla. Inte ett myndighetskrav.',
       krav: [
@@ -4812,6 +4842,41 @@ var VERSIONER = [
     return { schema: FRAGA_SCHEMA, maxTokens: 4000, text: 'Stadgarna:\n' + stadgarSomText(st) + '\n\nFråga: ' + utanPersonnummer(fraga),
       system: GEMENSAMT + ' Svara på frågan utifrån föreningens stadgar, kort och tydligt. Hänvisa till paragrafen i texten (t.ex. "enligt § 7"). ' +
         'Står det inte i stadgarna, säg det och föreslå vad man brukar göra, tydligt märkt som ett råd. paragrafer: numren på de paragrafer svaret bygger på.' };
+  }
+
+  // ---------- Styrelsens adressbok ----------
+  var KONTAKTGRUPPER = [['forbund', 'Förbund'], ['kommun', 'Kommun och stad'], ['lokal', 'Lokal'], ['bank', 'Bank och betalning'], ['forsakring', 'Försäkring'],
+    ['revisor', 'Revisor'], ['leverantor', 'Leverantörer'], ['ovrigt', 'Övrigt']];
+  function normKontakt(k) {
+    var str = function (x) { return String(x == null ? '' : x).trim(); };
+    var grupp = KONTAKTGRUPPER.some(function (g) { return g[0] === k.grupp; }) ? k.grupp : 'ovrigt';
+    var webb = str(k.webb);
+    if (webb && !/^https?:\/\//i.test(webb)) webb = 'https://' + webb;
+    return { namn: str(k.namn), organisation: str(k.organisation), roll: str(k.roll), telefon: str(k.telefon), epost: str(k.epost).toLowerCase(), webb: webb, anteckning: str(k.anteckning), grupp: grupp };
+  }
+  function laggTillStyrKontakt(styr, k) {
+    var n = normKontakt(k || {});
+    if (!n.namn && !n.organisation) throw BokforingsFel('Skriv ett namn eller en organisation.');
+    if (n.epost && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(n.epost)) throw BokforingsFel('E-postadressen ser inte rätt ut.');
+    return Object.assign({}, styr, { kontakter: (styr.kontakter || []).concat([Object.assign({ id: styrId('ko') }, n)]) });
+  }
+  function andraStyrKontakt(styr, id, k) {
+    var n = normKontakt(k || {});
+    if (!n.namn && !n.organisation) throw BokforingsFel('Skriv ett namn eller en organisation.');
+    if (n.epost && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(n.epost)) throw BokforingsFel('E-postadressen ser inte rätt ut.');
+    return Object.assign({}, styr, { kontakter: (styr.kontakter || []).map(function (x) { return x.id === id ? Object.assign({ id: id }, n) : x; }) });
+  }
+  function taBortStyrKontakt(styr, id) { return Object.assign({}, styr, { kontakter: (styr.kontakter || []).filter(function (x) { return x.id !== id; }) }); }
+  // Sökning utan hänsyn till prickar och stora bokstäver; alla ord ska finnas. Sorteras på grupp och sedan namn.
+  function sokStyrKontakter(lista, sok, grupp) {
+    var t = function (x) { return String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); };
+    var ord = t(sok).split(/\s+/).filter(Boolean);
+    var ordning = function (g) { var i = KONTAKTGRUPPER.findIndex(function (x) { return x[0] === g; }); return i < 0 ? 99 : i; };
+    return (lista || []).filter(function (k) {
+      if (grupp && k.grupp !== grupp) return false;
+      var h = t([k.namn, k.organisation, k.roll, k.telefon, k.epost, k.anteckning].join(' '));
+      return ord.every(function (o) { return h.indexOf(o) >= 0; });
+    }).sort(function (a, b) { return ordning(a.grupp) - ordning(b.grupp) || t(a.organisation || a.namn).localeCompare(t(b.organisation || b.namn), 'sv'); });
   }
 
   // ---------- AI-texter för styrelsen ----------
@@ -5785,6 +5850,11 @@ var VERSIONER = [
     granskningsUppdrag: granskningsUppdrag,
     normaliseraGranskning: normaliseraGranskning,
     stadgearendeText: stadgearendeText,
+    KONTAKTGRUPPER: KONTAKTGRUPPER,
+    laggTillStyrKontakt: laggTillStyrKontakt,
+    andraStyrKontakt: andraStyrKontakt,
+    taBortStyrKontakt: taBortStyrKontakt,
+    sokStyrKontakter: sokStyrKontakter,
     nyttStadgeutkast: nyttStadgeutkast,
     stadgeandringar: stadgeandringar,
     stadgeandringarText: stadgeandringarText,
@@ -6348,6 +6418,57 @@ var VERSIONER = [
         '<div class="row" style="margin-top:10px"><button class="btn" data-action="ai-protokoll-anvand">Använd utkastet</button><button class="btn btn-secondary" data-action="ai-protokoll-slang">Släng</button></div>';
     }
     return html + '</div>';
+  }
+
+  // ---------- Kontakter (styrelsens adressbok) ----------
+  var kontaktVal = { sok: '', grupp: '', redigera: null };
+  function vyKontakter() {
+    var skriv = styrBeh('styr') === 'write';
+    var f = store.forening || {};
+    var lista = styrData().kontakter || [];
+    var html = '<p class="faint" style="margin-top:0">Viktiga kontakter för styrelsen. De sparas i styrelsens fil i OneDrive och syns bara för dem som ser styrelsens material. Lägg bara in kontaktuppgifter som behövs för föreningens arbete.</p>';
+    if (f.forbund || f.forbundsnr || f.idrottsarenan) {
+      html += '<div class="card kontakt-kort forbund"><div class="kontakt-text"><strong>' + esc(f.forbund || 'Förbund') + '</strong>' +
+        (f.forbundsnr ? '<span>Föreningsnummer i förbundet: ' + esc(f.forbundsnr) + '</span>' : '') + (f.idrottsarenan ? '<span>Idrottsarenan: ' + esc(f.idrottsarenan) + '</span>' : '') +
+        (f.forbundslank ? '<a href="' + esc(/^https?:\/\//.test(f.forbundslank) ? f.forbundslank : 'https://' + f.forbundslank) + '" target="_blank" rel="noopener">Förbundets sida för föreningar</a>' : '') +
+        '</div><button class="btn btn-secondary btn-small" data-action="till-forening">Ändra</button></div>';
+    } else if (skriv) {
+      html += '<p class="faint">Tips: fyll i förbund och föreningsnummer under Inställningar, Föreningen, så visas de här.</p>';
+    }
+    var r = kontaktVal.redigera;
+    if (r) {
+      var k = r.id ? (lista.find(function (x) { return x.id === r.id; }) || {}) : {};
+      var falt = function (id, etikett, varde, typ) { return '<div><label for="' + id + '">' + etikett + '</label><input id="' + id + '" type="' + (typ || 'text') + '" value="' + esc(varde || '') + '"></div>'; };
+      html += '<div class="card"><h3 style="margin-top:0">' + (r.id ? 'Ändra kontakt' : 'Ny kontakt') + '</h3><div class="grid2">' +
+        falt('koNamn', 'Namn', k.namn) + falt('koOrg', 'Organisation', k.organisation) + falt('koRoll', 'Roll eller ämne', k.roll) +
+        '<div><label for="koGrupp">Grupp</label><select id="koGrupp">' + K.KONTAKTGRUPPER.map(function (g) { return '<option value="' + g[0] + '"' + (g[0] === (k.grupp || 'ovrigt') ? ' selected' : '') + '>' + g[1] + '</option>'; }).join('') + '</select></div>' +
+        falt('koTel', 'Telefon', k.telefon, 'tel') + falt('koEpost', 'E-post', k.epost, 'email') + falt('koWebb', 'Webbplats', k.webb) + '</div>' +
+        '<label for="koAnteckning">Anteckning</label><textarea id="koAnteckning" rows="2" class="kontakt-anteckning">' + esc(k.anteckning || '') + '</textarea>' +
+        '<div class="row" style="margin-top:8px"><button class="btn btn-small" data-action="kontakt-spara">Spara</button><button class="btn btn-secondary btn-small" data-action="kontakt-avbryt">Avbryt</button></div></div>';
+    }
+    var urval = K.sokStyrKontakter(lista, kontaktVal.sok, kontaktVal.grupp);
+    html += '<div class="verktygsrad"><div class="row">' +
+      '<button type="button" class="chip" data-action="kontakt-grupp" data-grupp-filter="" aria-pressed="' + (!kontaktVal.grupp) + '">Alla <span>' + lista.length + '</span></button>' +
+      K.KONTAKTGRUPPER.filter(function (g) { return lista.some(function (k) { return k.grupp === g[0]; }); }).map(function (g) {
+        return '<button type="button" class="chip" data-action="kontakt-grupp" data-grupp-filter="' + g[0] + '" aria-pressed="' + (kontaktVal.grupp === g[0]) + '">' + g[1] + '</button>';
+      }).join('') + '</div>' +
+      '<label class="sokfalt"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="visually-hidden">Sök kontakt</span>' +
+      '<input type="search" id="kontaktSok" data-kontaktsok value="' + esc(kontaktVal.sok) + '" placeholder="Sök namn, organisation, roll" autocomplete="off"></label></div>' +
+      (skriv && !r ? '<div class="row" style="margin-bottom:8px"><button class="btn btn-small" data-action="kontakt-ny">Ny kontakt</button></div>' : '');
+    if (!lista.length) return html + '<p class="muted">Inga kontakter ännu.</p>';
+    if (!urval.length) return html + '<p class="muted">Inga kontakter matchar.</p>';
+    var grupper = {}; K.KONTAKTGRUPPER.forEach(function (g) { grupper[g[0]] = g[1]; });
+    return html + '<div class="kontaktlista">' + urval.map(function (k) {
+      return '<div class="card kontakt-kort"><div class="kontakt-text"><strong>' + esc(k.namn || k.organisation) + '</strong>' +
+        (k.namn && k.organisation ? '<span>' + esc(k.organisation) + '</span>' : '') + (k.roll ? '<span>' + esc(k.roll) + '</span>' : '') +
+        '<span class="faint">' + esc(grupper[k.grupp] || '') + '</span>' +
+        '<div class="kontakt-lankar">' + (k.telefon ? '<a href="tel:' + esc(k.telefon.replace(/[^\d+]/g, '')) + '">' + esc(k.telefon) + '</a>' : '') +
+        (k.epost ? '<a href="mailto:' + esc(k.epost) + '">' + esc(k.epost) + '</a>' : '') +
+        (k.webb ? '<a href="' + esc(k.webb) + '" target="_blank" rel="noopener">' + esc(k.webb.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')) + '</a>' : '') + '</div>' +
+        (k.anteckning ? '<span class="faint" style="white-space:pre-line">' + esc(k.anteckning) + '</span>' : '') + '</div>' +
+        (skriv ? '<div class="row" style="flex-direction:column;align-items:stretch;gap:6px"><button class="btn btn-secondary btn-small" data-action="kontakt-andra" data-id="' + esc(k.id) + '">Ändra</button>' +
+          '<button class="btn btn-secondary btn-small" data-action="kontakt-bort" data-id="' + esc(k.id) + '">Ta bort</button></div>' : '') + '</div>';
+    }).join('') + '</div>';
   }
 
   // ---------- Stadgar ----------
@@ -7028,7 +7149,7 @@ var VERSIONER = [
   // Förtroendeuppdragen ligger i en egen fil i mappen, så att den kan delas med valberedningen utan resten.
 
   var STYRFILER = {
-    styr: { fil: STYRFIL, tom: K.tomStyrelse, norm: K.normaliseraStyrelse, nycklar: ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter', 'stadgar'] },
+    styr: { fil: STYRFIL, tom: K.tomStyrelse, norm: K.normaliseraStyrelse, nycklar: ['moten', 'uppgifter', 'dokument', 'arenden', 'rapporter', 'stadgar', 'kontakter'] },
     upp: { fil: UPPDRAGFIL, tom: K.tomaUppdrag, norm: K.normaliseraUppdrag, nycklar: ['uppdrag'] }
   };
 
@@ -9069,6 +9190,7 @@ var VERSIONER = [
     ['st-uppdrag', 'Förtroendeuppdrag'],
     ['st-arenden', 'Ärenden'],
     ['st-stadgar', 'Stadgar'],
+    ['st-kontakter', 'Kontakter'],
     ['arsmote', 'Årsmötet'],
     ['staden', 'Stockholms stad'],
     ['arkiv', 'År och arkiv'],
@@ -9080,7 +9202,7 @@ var VERSIONER = [
     ['oversikt', 'Översikt', ['oversikt']],
     ['bokforing', 'Bokföring', ['inlasning', 'verifikationer', 'ny', 'dokument', 'huvudbok', 'rapporter', 'bokslut', 'kontoplan']],
     ['medlemmar', 'Medlemsregister', ['m-statistik', 'm-koppla', 'm-lista', 'm-betalare', 'm-avgifter', 'm-personuppgifter']],
-    ['styrelsen', 'Styrelsen', ['st-moten', 'st-beslut', 'st-uppgifter', 'st-uppdrag', 'st-arenden', 'st-stadgar', 'arsmote', 'staden']],
+    ['styrelsen', 'Styrelsen', ['st-moten', 'st-beslut', 'st-uppgifter', 'st-uppdrag', 'st-arenden', 'st-stadgar', 'st-kontakter', 'arsmote', 'staden']],
     ['installningar', 'Inställningar', ['arkiv', 'om']]
   ];
   var senastIGrupp = {};
@@ -9154,7 +9276,7 @@ var VERSIONER = [
     var html = {
       oversikt: vyOversikt,
       arsmote: function (a) { return vyArsmoteSida(a); },
-      'st-moten': vyStyrelsen, 'st-beslut': vyStyrelsen, 'st-uppgifter': vyStyrelsen, 'st-uppdrag': vyStyrelsen, 'st-arenden': vyStyrelsen, 'st-stadgar': vyStyrelsen,
+      'st-moten': vyStyrelsen, 'st-beslut': vyStyrelsen, 'st-uppgifter': vyStyrelsen, 'st-uppdrag': vyStyrelsen, 'st-arenden': vyStyrelsen, 'st-stadgar': vyStyrelsen, 'st-kontakter': vyStyrelsen,
       staden: function (a) { return vyStaden(a); },
       inlasning: vyInlasning,
       verifikationer: vyVerifikationer,
@@ -10023,6 +10145,10 @@ var VERSIONER = [
     var html = '<h2 id="forening-installning">Föreningen</h2><div class="card"><p class="faint" style="margin-top:0">Uppgifterna används på fakturor och kvitton. De sparas bara i appen.</p><div class="grid2">' +
       [['namn', 'Namn'], ['orgnr', 'Organisationsnummer'], ['bankgiro', 'Bankgiro'], ['swish', 'Swishnummer'], ['webb', 'Webbplats'], ['epost', 'E-post']].map(function (x) {
         return '<div><label>' + x[1] + '</label><input data-forening="' + x[0] + '" value="' + esc(f[x[0]]) + '"></div>';
+      }).join('') + '</div>' +
+      '<h3>Förbund och register</h3><div class="grid2">' +
+      [['forbund', 'Specialförbund', 'T.ex. ert specialidrottsförbund'], ['forbundsnr', 'Föreningsnummer i förbundet', ''], ['forbundslank', 'Förbundets sida för föreningar (webbadress)', 'https://'], ['idrottsarenan', 'Föreningens id i Idrottsarenan', '']].map(function (x) {
+        return '<div><label>' + x[1] + '</label><input data-forening="' + x[0] + '" value="' + esc(f[x[0]]) + '" placeholder="' + esc(x[2]) + '"></div>';
       }).join('') + '</div>' +
       '<div class="row" style="margin-top:12px"><button class="btn btn-secondary btn-small" data-action="las-in-forening">Läs in föreningsuppgifter från fil</button></div>' +
       '<h3>Logotyp</h3><div class="row">' + (logoUrl ? '<img src="' + esc(logoUrl) + '" alt="Logotyp" style="max-height:60px;background:#fff;padding:4px;border-radius:4px">'
@@ -10894,6 +11020,8 @@ var VERSIONER = [
       var a = store.ar[id].arsmote;
       if (!a || !a.motesdatum) return;
       K.arsmotesTidslinje(a.motesdatum).forEach(function (x) { if (x.datum >= nu) ut.push({ datum: x.datum, text: x.text, ar: id }); });
+      // RF:s stadgar 8 kap. 5 §: snarast efter årsmötet registreras styrelse och firmatecknare hos förbundet.
+      if (store.forening && store.forening.forbund && a.motesdatum >= nu) ut.push({ datum: a.motesdatum, text: 'Efter årsmötet: registrera styrelseledamöter och firmatecknare hos ' + store.forening.forbund + '.', ar: id });
     });
     return ut.sort(function (a, b) { return a.datum < b.datum ? -1 : 1; }).slice(0, 4);
   }
@@ -11039,7 +11167,7 @@ var VERSIONER = [
 
   // ---------- Styrelsen ----------
 
-  var STYRFLIKAR = [['moten', 'Möten och protokoll'], ['beslut', 'Beslut'], ['uppgifter', 'Uppgifter'], ['uppdrag', 'Förtroendeuppdrag'], ['arenden', 'Ärenden till årsmötet'], ['stadgar', 'Stadgar']];
+  var STYRFLIKAR = [['moten', 'Möten och protokoll'], ['beslut', 'Beslut'], ['uppgifter', 'Uppgifter'], ['uppdrag', 'Förtroendeuppdrag'], ['arenden', 'Ärenden till årsmötet'], ['stadgar', 'Stadgar'], ['kontakter', 'Kontakter']];
   var UPPDRAGSROLLER = ['Ordförande', 'Vice ordförande', 'Kassör', 'Sekreterare', 'Ledamot', 'Suppleant', 'Revisor', 'Revisorssuppleant', 'Valberedning'];
   var ARENDETYPER = [['stadgar', 'Stadgeändring'], ['forslag', 'Styrelsens förslag'], ['motion', 'Motion']];
   var ARENDESTATUS = [['forslag', 'Förslag'], ['arsmote', 'Till årsmötet'], ['antaget', 'Antaget'], ['avslaget', 'Avslaget']];
@@ -11155,7 +11283,7 @@ var VERSIONER = [
     if (bs === 'read') html += '<p class="faint">Du kan läsa styrelsens material men inte ändra det.</p>';
     else if (!bs) html += '<p class="faint">Du ser förtroendeuppdragen. Resten av styrelsens material är inte delat med dig.</p>';
     if (odNu.styrFel) html += '<p class="fel">' + esc(odNu.styrFel) + '</p>';
-    html += '<div class="arsmote-form">' + { moten: vyMoten, beslut: vyBeslut, uppgifter: vyUppgifter, uppdrag: vyUppdrag, arenden: vyArenden, stadgar: vyStadgar }[styrVy](ar) + '</div>';
+    html += '<div class="arsmote-form">' + { moten: vyMoten, beslut: vyBeslut, uppgifter: vyUppgifter, uppdrag: vyUppdrag, arenden: vyArenden, stadgar: vyStadgar, kontakter: vyKontakter }[styrVy](ar) + '</div>';
     if (odAnslutet() && od.styrMapp) html += '<p class="faint" style="font-size:.85em;margin-top:14px">Sparas i mappen ' + esc(od.styrMapp.namn) + ' i OneDrive. Alla i styrelsen kan ändra samtidigt; ändrar två personer samma sak visas det.</p>';
     return html;
   }
@@ -12985,6 +13113,11 @@ var VERSIONER = [
       try { sparaUtkast(function (k) { if (f === 'titel') k.titel = v; else k.paragrafer[i][f] = v; }, false); } catch (err) { visa(err.message, true); }
       return;
     }
+    if (t.hasAttribute && t.hasAttribute('data-kontaktsok')) {
+      kontaktVal.sok = t.value; var pk = t.selectionStart; render();
+      var nk = document.getElementById('kontaktSok'); if (nk) { nk.focus(); try { nk.setSelectionRange(pk, pk); } catch (e3) { /* search-fält */ } }
+      return;
+    }
     if (t.hasAttribute && t.hasAttribute('data-versok')) {
       verSok = t.value; var pos = t.selectionStart; render();
       var nytt = document.getElementById('verSok'); if (nytt) { nytt.focus(); try { nytt.setSelectionRange(pos, pos); } catch (e2) { /* search-fält i vissa webbläsare */ } }
@@ -14091,6 +14224,23 @@ var VERSIONER = [
       if (!st || !fraga) { visa('Skriv en fråga först.', true); return; }
       stadgeFraga.fraga = fraga; stadgeFraga.svar = null;
       aiKorFor('fraga', function () { return aiSvar(K.stadgeFragaUppdrag(st, fraga)).then(function (svar) { stadgeFraga.svar = svar; }); });
+    },
+    'kontakt-ny': function () { kontaktVal.redigera = { id: null }; render(); },
+    'kontakt-andra': function (t) { kontaktVal.redigera = { id: t.dataset.id }; render(); window.scrollTo(0, 0); },
+    'kontakt-avbryt': function () { kontaktVal.redigera = null; render(); },
+    'kontakt-grupp': function (t) { kontaktVal.grupp = t.dataset.gruppFilter || ''; render(); },
+    'kontakt-spara': function () {
+      var k = { namn: varde('koNamn'), organisation: varde('koOrg'), roll: varde('koRoll'), grupp: varde('koGrupp'), telefon: varde('koTel'), epost: varde('koEpost'), webb: varde('koWebb'), anteckning: varde('koAnteckning') };
+      try {
+        var r = kontaktVal.redigera;
+        andraStyr('styr', r && r.id ? K.andraStyrKontakt(styrData(), r.id, k) : K.laggTillStyrKontakt(styrData(), k), false);
+        kontaktVal.redigera = null;
+        visa('Kontakten är sparad.');
+      } catch (err) { visa(err.message, true); }
+    },
+    'kontakt-bort': function (t) {
+      if (!window.confirm('Ta bort kontakten?')) return;
+      andraStyr('styr', K.taBortStyrKontakt(styrData(), t.dataset.id));
     },
     'stadgar-valj': function () {
       var input = document.createElement('input');
