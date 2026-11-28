@@ -338,6 +338,10 @@
   tr.kommentar-rad td { background: var(--bg); }
   .test-band { position: relative; z-index: 60; padding: 6px 16px; background: repeating-linear-gradient(-45deg, #C2410C, #C2410C 12px, #B23A0A 12px, #B23A0A 24px); color: #fff; font-size: 13px; text-align: center; }
   .test-band a { color: #fff; text-decoration: underline; }
+  .nyhetslista { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .nyhetslista li { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+  .nyhetslista li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .nyhetslista li > div > span { font-size: 14px; color: var(--ink-soft); }
   .om-slogan { font-size: 18px; font-weight: 600; margin-top: 0; }
   .ovning-banner .btn-secondary { background: #fff; color: #2B2F3A; border-color: rgba(43, 47, 58, 0.18); }
   .ai-kort textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; line-height: 1.5; }
@@ -449,6 +453,7 @@
     .fraga-platt { bottom: calc(80px + env(safe-area-inset-bottom)); right: 14px; padding: 10px 14px; }
     .rundtur { bottom: calc(84px + env(safe-area-inset-bottom)); }
     table.kortlista tr.kommentar-rad td { display: block; text-align: left; }
+    .test-band .tb-text { display: none; }
     table.kortlista tr.kommentar-rad td::before { display: none; }
     .km-ny { padding-right: 58px; }
     .fraga-platt span { display: none; }
@@ -571,6 +576,15 @@
 -->
 <script id="versioner">
 var VERSIONER = [
+  {
+    version: '1.88-test.1', datum: '2026-11-28',
+    nyheter: [
+      'Kortet "Nytt sedan du var här sist" i översikten: de största nyheterna sedan du senast tittade, anpassade efter din roll, med Visa och Uppfattat.',
+      'Om Plätt visar det största som är nytt överst, och versionerna en och en under.',
+      'Styrelsens funktioner (protokoll med AI, stadgar, kontakter, Meddela på uppgifter) fungerar för styrelsen även när någon annan har skrivrätten till bokföringen. Bokföringen är fortfarande bara läsbar för dem.',
+      'Styrelsen börjar i översikten när appen öppnas. Den som bara är revisor börjar som förut i rapporterna.'
+    ]
+  },
   {
     version: '1.87', datum: '2026-11-28',
     nyheter: [
@@ -1348,6 +1362,26 @@ var VERSIONER = [
       'Årsskifte med ingående balanser, kontroller och export till SIE 4.'
     ]
   }
+];
+
+// Nyheter: det användaren märker och har nytta av, sammanfattat per släppt version. Visas i kortet
+// "Nytt sedan du var här sist". Bara stora saker hamnar här, inte varje testversion eller rättelse.
+// roller: vilka som ser nyheten (utelämnat = alla). vy: vart Visa leder. handling: en knapp i stället för en vy.
+var STYR = ['admin', 'ordforande', 'viceordforande', 'kassor', 'sekreterare', 'ledamot', 'suppleant'];
+var BOK = ['admin', 'kassor', 'bokforare'];
+var NYHETER = [
+  { version: '1.85', rubrik: 'Utskick från föreningens egen adress', text: 'Logga in med föreningens konto bara för att skicka, så kommer utskick och påminnelser från föreningen och svaren hamnar i föreningens brevlåda.', vy: 'st-utskick', roller: STYR },
+  { version: '1.85', rubrik: 'Logga in med föreningens Microsoft 365', text: 'Föreningar med Microsoft 365 kan använda sina jobb- eller skolkonton.', vy: 'min' },
+  { version: '1.84', rubrik: 'Utskick och påminnelser', text: 'Mallar för välkomstmejl och inför årsmötet, och ett mejl till var och en med det som väntar på just hen.', vy: 'st-utskick', roller: STYR },
+  { version: '1.84', rubrik: 'Kommentarer och WhatsApp-länkar', text: 'Kommentera uppgifter, möten och ärenden med @namn, och kopiera en länk till WhatsApp-gruppen som öppnar Plätt precis där.', vy: 'st-uppgifter', roller: STYR },
+  { version: '1.82', rubrik: 'Fråga Plätt', text: 'Tryck på ✦ Fråga Plätt i hörnet och fråga om appen, bokföringen eller föreningen.', handling: 'hjalp-chatt' },
+  { version: '1.81', rubrik: 'Uppgifter med @namn och Min sida', text: 'Skriv @namn för att ge någon en uppgift. Den syns under Väntar på dig. På Min sida väljer du bild och hur du vill få mejl.', vy: 'st-uppgifter', roller: STYR },
+  { version: '1.80', rubrik: 'Kontakter', text: 'Styrelsens adressbok: förbund, kommun, lokaler och andra kontakter.', vy: 'st-kontakter', roller: STYR },
+  { version: '1.78', rubrik: 'Stadgar', text: 'Läs in stadgarna, granska dem mot kraven från förbund, stad och Skatteverket och ta fram förslag till nya som Word-fil.', vy: 'st-stadgar', roller: STYR },
+  { version: '1.72', rubrik: 'Protokoll från anteckningar', text: 'Skriv stödanteckningar under mötet, så gör AI ett utkast till protokoll som du granskar.', vy: 'st-moten', roller: STYR },
+  { version: '1.69', rubrik: 'Väntar på dig', text: 'Översikten visar det som väntar på just dig: underskrifter, uppgifter och nästa möte.', vy: 'oversikt' },
+  { version: '1.68', rubrik: 'Sök bland verifikationerna', text: 'Filtrera fram det som saknar underlag och sök på text, konto och belopp.', vy: 'verifikationer', roller: BOK },
+  { version: '1.66', rubrik: 'Ny layout', text: 'Meny i sidan på datorn och flikar längst ner på mobilen.', vy: 'oversikt' }
 ];
 </script>
 
@@ -5132,6 +5166,20 @@ var VERSIONER = [
     if (i < rader.length) kropp += '…\n';
     return (amne ? '*' + amne + '*\n' : '') + kropp + (lank ? 'Läs mer i Plätt: ' + lank : '').trim();
   }
+  // ---------- Nytt sedan du var här sist ----------
+  // Versioner jämförs som tal; 1.88 kommer efter 1.88-test.3.
+  function versionsdelar(v) { var m = String(v || '').match(/^(\d+)\.(\d+)(?:-test\.(\d+))?$/); return m ? [Number(m[1]), Number(m[2]), m[3] ? Number(m[3]) : Infinity] : [0, 0, 0]; }
+  function jamforVersion(a, b) { var x = versionsdelar(a), y = versionsdelar(b); for (var i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i] ? 1 : -1; return 0; }
+  // Nyheter efter versionen 'sedan' som rör någon av rollerna (inga roller = visa allt), nyaste först.
+  function nyheterSedan(nyheter, sedan, roller, max) {
+    roller = roller || [];
+    var lista = (nyheter || []).filter(function (n) {
+      return jamforVersion(n.version, sedan) > 0 && (!n.roller || !roller.length || roller.some(function (r) { return n.roller.indexOf(r) >= 0; }));
+    }).sort(function (a, b) { return jamforVersion(b.version, a.version); });
+    max = max || 5;
+    return { visa: lista.slice(0, max), fler: Math.max(0, lista.length - max) };
+  }
+
   // ---------- Ny roll: vad är nytt för mig? ----------
   // Steg per roll: [vy, rubrik, text]. Vid en ny roll visas bara stegen för vyer som de tidigare rollerna inte redan hade.
   var ROLLSTEG = {
@@ -6228,6 +6276,8 @@ var VERSIONER = [
     mailtoMangaLank: mailtoMangaLank,
     odAuktoritet: odAuktoritet,
     ROLLSTEG: ROLLSTEG,
+    jamforVersion: jamforVersion,
+    nyheterSedan: nyheterSedan,
     nyaRollsteg: nyaRollsteg,
     AVSANDARE_OMFANG: AVSANDARE_OMFANG,
     inloggningsfelText: inloggningsfelText,
@@ -6844,7 +6894,7 @@ var VERSIONER = [
   function hjalpKunskapen() {
     if (!hjalpKunskapCache) {
       var grupper = {}; GRUPPER.forEach(function (g) { g[2].forEach(function (v) { grupper[v] = g[1]; }); });
-      hjalpKunskapCache = K.hjalpKunskap(VERSIONER, HJALP, VYER.map(function (v) { return { id: v[0], namn: v[1], grupp: grupper[v[0]] || '' }; }));
+      hjalpKunskapCache = K.hjalpKunskap(SYNLIGA_VERSIONER, HJALP, VYER.map(function (v) { return { id: v[0], namn: v[1], grupp: grupper[v[0]] || '' }; }));
     }
     return hjalpKunskapCache;
   }
@@ -7019,6 +7069,34 @@ var VERSIONER = [
       antal(r.steg.length, 'steg', 'steg') + ', ungefär en minut.</p>' +
       '<div class="row"><button class="btn btn-small" data-action="rollbyte-start">Visa vad som är nytt</button><button class="btn btn-secondary btn-small" data-action="rollbyte-senare">Påminn mig senare</button>' +
       '<button class="btn btn-secondary btn-small" data-action="rollbyte-nej">Jag kan det redan</button></div></div>';
+  }
+  // ---------- Nytt sedan du var här sist ----------
+  var SEDD_VERSION = LS + 'sedd-version';
+  // Den som använde Plätt innan nyhetskortet fanns får nyheterna sedan den nya layouten.
+  var NYHETER_FRAN = '1.65';
+  function seddVersion() { try { return localStorage.getItem(SEDD_VERSION); } catch (e) { return null; } }
+  function senasteNyhetsversion() {
+    var v = SYNLIGA_VERSIONER[0].version;
+    NYHETER.forEach(function (n) { if (K.jamforVersion(n.version, v) > 0 && KANAL === 'test') v = n.version; });
+    return v;
+  }
+  function markeraNyheterSedda() { try { localStorage.setItem(SEDD_VERSION, senasteNyhetsversion()); } catch (e) { /* tomt */ } }
+  function nyheterForMig() {
+    var sedan = seddVersion() || NYHETER_FRAN;
+    // I huvudversionen visas inte nyheter för versioner som inte släppts än.
+    var lista = KANAL === 'test' ? NYHETER : NYHETER.filter(function (n) { return K.jamforVersion(n.version, SYNLIGA_VERSIONER[0].version) <= 0; });
+    return K.nyheterSedan(lista, sedan, minaRoller(), 5);
+  }
+  function nyhetsKort() {
+    if (rundtur || visaValkommen() || rollbyteLage()) return '';
+    var r = nyheterForMig();
+    if (!r.visa.length) return '';
+    return '<div class="card nyheter"><h3 style="margin-top:0">✦ Nytt sedan du var här sist</h3><ul class="nyhetslista">' + r.visa.map(function (n, i) {
+        return '<li><div><strong>' + esc(n.rubrik) + '</strong><span>' + esc(n.text) + '</span></div>' +
+          (n.handling ? '<button class="btn btn-secondary btn-small" data-action="' + esc(n.handling) + '">Visa</button>' : n.vy ? '<button class="btn btn-secondary btn-small" data-vy="' + esc(n.vy) + '">Visa</button>' : '') + '</li>';
+      }).join('') + '</ul><div class="row">' +
+      '<button class="btn btn-small" data-action="nyheter-sedda">Uppfattat</button>' +
+      (r.fler ? '<button class="lank-text" data-vy="om">och ' + r.fler + ' till – se allt nytt</button>' : '') + '</div></div>';
   }
   function ritaRundtur() {
     var el = document.getElementById('rundtur');
@@ -11148,7 +11226,10 @@ var VERSIONER = [
     html += '<h2>Kassörens årshjul</h2><div class="card">' + hjalpInnehall(HJALP.arshjul) + '</div>';
     html += '<h2>För revisorn</h2><div class="card">' + hjalpInnehall(HJALP.revisorn) + '</div>';
     html += '<h2>Förklaringar</h2><div class="card"><label style="font-weight:normal;display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="visaHjalp" style="width:auto"' + (visaHjalp() ? ' checked' : '') + '> Visa frågetecken med förklaringar vid rubrikerna</label></div>';
-    html += '<h2>Vad som är nytt</h2>';
+    var allaNyheter = KANAL === 'test' ? NYHETER : NYHETER.filter(function (n) { return K.jamforVersion(n.version, SYNLIGA_VERSIONER[0].version) <= 0; });
+    html += '<h2>Det största som är nytt</h2><div class="card"><ul class="nyhetslista">' + allaNyheter.map(function (n) {
+      return '<li><div><strong>' + esc(n.rubrik) + '</strong> <span class="faint">' + esc(n.version) + '</span><span>' + esc(n.text) + '</span></div></li>'; }).join('') + '</ul></div>';
+    html += '<h2>Version för version</h2>';
     SYNLIGA_VERSIONER.forEach(function (v) {
       html += '<div class="card"><h3 style="margin-top:0">Version ' + esc(v.version) + ' <span class="faint">· ' + esc(v.datum) + '</span></h3><ul>' +
         v.nyheter.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul></div>';
@@ -11991,7 +12072,7 @@ var VERSIONER = [
   }
 
   function vyOversikt(ar) {
-    var html = '<h2>Översikt</h2>' + valkommenKort() + rollbyteKort() + vantarPaDig() + oversiktNyckeltal(ar);
+    var html = '<h2>Översikt</h2>' + valkommenKort() + rollbyteKort() + nyhetsKort() + vantarPaDig() + oversiktNyckeltal(ar);
     var rad = function (antalTxt, knapp) { return '<li><span class="bock" aria-hidden="true">!</span><div><div>' + antalTxt + '</div>' + (knapp ? '<div class="row" style="margin-top:6px">' + knapp + '</div>' : '') + '</div></li>'; };
     // Revisorn
     if (odAnslutet() && odNu.roller && K.harRoll(odNu.roller, mig(), 'revisor') && !K.kanFaSkrivratt(odNu.roller, mig())) {
@@ -13961,7 +14042,11 @@ var VERSIONER = [
 
   // ---------- Händelser ----------
 
-  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'till-ai-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'wa-lank', 'djuplank', 'kommentarer-lasta', 'kommentar-visa', 'utskick-wa', 'kommentar-ny', 'paminn-en', 'paminn-logga', 'paminn-alla', 'utskick-skicka', 'utskick-aterstall', 'avs-logga-in', 'avs-glom', 'rundtur-start', 'rollbyte-start', 'rollbyte-senare', 'rollbyte-nej', 'rundtur-fram', 'rundtur-bak', 'rundtur-slut', 'valkommen-senare', 'valkommen-nej', 'hjalp-chatt', 'hjalp-chatt-stang', 'hjalp-skicka', 'hjalp-exempel', 'hjalp-bilaga-bort', 'hjalp-medlem', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
+  // Styrelsens funktioner styrs av rollens rätt till styrelsens material, inte av skrivrätten till bokföringen.
+  var STYRHANDLINGAR = /^(uppg-meddela|uppg-fran-protokoll|ai-protokoll|ai-verksamhet|ai-kallelse|su-|stadgar-|kontakt-|kommentar-ny|paminn-|utskick-)/;
+  // Val som bara gäller den egna enheten eller vad som visas.
+  var PERSONLIGA = ['uppg-filter', 'kopiera-ekonomitext', 'medlem-visa', 'ai-kopiera', 'ai-testa', 'ai-konfig-spara', 'ai-konfig-bort', 'spara-nyckel', 'ta-bort-nyckel', 'byt-nyckel', 'avbryt-byt-nyckel', 'testa-nyckel'];
+  var LASBARA = ['dela-pdf', 'ladda-ner-pdf', 'skriv-ut-arsmote', 'stang-arsmote', 'skriv-ut-arsmote-nu', 'oppna-ver', 'till-bankavstamning', 'avbryt-inbjudan', 'visa-fil', 'visa-dok', 'stang-dok', 'skriv-ut', 'skriv-ut-dok', 'exportera', 'sie', 'rensa-logg', 'till-forening', 'till-claude-installning', 'till-ai-installning', 'medl-vy', 'kvitto-skriv-ut', 'exportera-register', 'oppna-paket', 'stang-paket', 'ovning-starta', 'ovning-starta-tom', 'skrivratt-lamna', 'skrivratt-ta', 'roll-lagg-till', 'hjalp', 'stang-hjalp', 'hjalp-av', 'rf-kontroll', 'valj-ar', 'min-bild-valj', 'min-bild-bort', 'utlagg-pdf', 'ver-ordning', 'ver-filter', 'wa-lank', 'djuplank', 'kommentarer-lasta', 'kommentar-visa', 'utskick-wa', 'avs-logga-in', 'avs-glom', 'rundtur-start', 'nyheter-sedda', 'rollbyte-start', 'rollbyte-senare', 'rollbyte-nej', 'rundtur-fram', 'rundtur-bak', 'rundtur-slut', 'valkommen-senare', 'valkommen-nej', 'hjalp-chatt', 'hjalp-chatt-stang', 'hjalp-skicka', 'hjalp-exempel', 'hjalp-bilaga-bort', 'hjalp-medlem', 'arsrapport-visa', 'arsrapport-stang', 'arsrapport-huvudbok', 'arsrapport-skriv-ut', 'arsrapport-papper', 'arsrapport-oppna', 'arsrapport-signera', 'arsrapport-skicka', 'arsrapport-papper-reg', 'arsrapport-esign-bort', 'arsrapport-undertecknad'];
 
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-vy],[data-action],[data-ver],[data-rapport],[data-grupp]');
@@ -13984,7 +14069,8 @@ var VERSIONER = [
     if (t.dataset.rapport) { rapportVy = t.dataset.rapport; render(); return; }
     if (t.dataset.ver && !t.dataset.action) { var nr = Number(t.dataset.ver); oppenVer = oppenVer === nr ? null : nr; render(); return; }
     var handling = HANDLINGAR[t.dataset.action];
-    if (handling && lasLage() && t.dataset.action.indexOf('od-') !== 0 && t.dataset.action.indexOf('styr-') !== 0 && LASBARA.indexOf(t.dataset.action) < 0) {
+    if (handling && lasLage() && t.dataset.action.indexOf('od-') !== 0 && t.dataset.action.indexOf('styr-') !== 0 && LASBARA.indexOf(t.dataset.action) < 0 &&
+        PERSONLIGA.indexOf(t.dataset.action) < 0 && !(STYRHANDLINGAR.test(t.dataset.action) && styrBeh('styr') === 'write')) {
       visa('Endast läsning: bokföringen kan inte ändras från en mapp som delats med dig.', true);
       return;
     }
@@ -15170,14 +15256,15 @@ var VERSIONER = [
     'rundtur-fram': function () { if (rundtur) gaTillRundtur(Math.min(rundtur.i + 1, rundtur.steg.length - 1)); },
     'rundtur-bak': function () { if (rundtur) gaTillRundtur(Math.max(rundtur.i - 1, 0)); },
     'rundtur-slut': function () {
-      if (rundtur && rundtur.rollbyte) sparaSeddaRoller({ roller: minaRoller().slice() }); else sattValkommen({ status: 'klar' });
+      if (rundtur && rundtur.rollbyte) sparaSeddaRoller({ roller: minaRoller().slice() }); else { sattValkommen({ status: 'klar' }); markeraNyheterSedda(); }
       rundtur = null; render();
     },
     'rollbyte-start': function () { var r = rollbyteLage(); if (!r) return; rundtur = { steg: r.steg, i: 0, rollbyte: true }; gaTillRundtur(0); },
     'rollbyte-senare': function () { var l = seddaRoller()[mig()]; if (l) sparaSeddaRoller(Object.assign({}, l, { senare: K.laggTillDagar(idag(), 3) })); visa('Kortet visas igen om tre dagar.'); },
     'rollbyte-nej': function () { sparaSeddaRoller({ roller: minaRoller().slice() }); visa('Okej! Fråga Plätt om du undrar något om din nya roll.'); },
     'valkommen-senare': function () { sattValkommen({ status: 'senare', till: K.laggTillDagar(idag(), 3) }); visa('Välkomstgenomgången visas igen om tre dagar. Du kan också starta den från Min sida.'); },
-    'valkommen-nej': function () { sattValkommen({ status: 'klar' }); visa('Okej! Genomgången finns kvar på Min sida om du vill se den senare.'); },
+    'nyheter-sedda': function () { markeraNyheterSedda(); render(); },
+    'valkommen-nej': function () { sattValkommen({ status: 'klar' }); markeraNyheterSedda(); visa('Okej! Genomgången finns kvar på Min sida om du vill se den senare.'); },
     'hjalp-chatt': function () { chatt.oppen = true; ritaChatt(); var f = document.getElementById('hcFraga'); if (f) f.focus(); },
     'hjalp-chatt-stang': function () { chatt.oppen = false; ritaChatt(); },
     'hjalp-skicka': function () { var f = document.getElementById('hcFraga'); if (f) hjalpSkicka(f.value); },
@@ -15928,14 +16015,19 @@ var VERSIONER = [
     document.title = 'Test – ' + document.title;
     var band = document.createElement('div');
     band.className = 'test-band ej-utskrift';
-    band.innerHTML = '<strong>TESTVERSION ' + esc(VERSIONER[0].version) + '</strong> · Här provas nya saker innan de släpps till alla. Använd en testförening, inte föreningens riktiga mapp. <a href="../">Till huvudversionen</a>';
+    band.innerHTML = '<strong>TESTVERSION ' + esc(VERSIONER[0].version) + '</strong><span class="tb-text"> · Här provas nya saker innan de släpps till alla. Använd en testförening, inte föreningens riktiga mapp.</span> · <a href="../">Till huvudversionen</a>';
     document.body.insertBefore(band, document.body.firstChild);
     var ai = document.querySelector('link[rel=apple-touch-icon]'); if (ai) ai.href = '../ikon-apple-180.png';
   }
   fangaInbjudan();
   laggTillManifest();
   LISTNYCKLAR.forEach(function (k) { if (!store[k]) store[k] = []; });
-  if (lasLage()) vy = 'rapporter';
+  // Revisorn börjar i rapporterna; styrelsen i översikten. Rollerna hämtas senare, så de som sparades förra gången används.
+  if (revision) vy = 'rapporter';
+  else if (lasLage()) {
+    var forra = (seddaRoller()[mig()] || {}).roller || [];
+    if (forra.indexOf('revisor') >= 0 && !forra.some(function (r) { return K.STYRELSEROLLER.indexOf(r) >= 0 || r === 'admin' || r === 'bokforare'; })) vy = 'rapporter';
+  }
   render();
   // En länk som pekar på en uppgift, ett möte eller ett ärende (t.ex. från WhatsApp eller ett påminnelsemejl).
   (function () {

@@ -250,6 +250,13 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Appregistreringen behöver omdirigeringsadressen …/forening-bokforing/test/ för inloggning i testversionen.
 - De automatiska testerna ligger i `tester/` och läser `test/index.html`.
 
+## Nytt sedan du var här sist (testversion 1.88)
+
+- `NYHETER` (i `<script id="versioner">`) är en kort lista över det största som är nytt, per släppt version, med roller och vart Visa leder. `VERSIONER` är kvar som detaljerad logg.
+- Kortet "Nytt sedan du var här sist" i översikten visar högst fem nyheter sedan den version man såg senast (`sedd-version` på enheten, `nyheterSedan`), filtrerade efter roll. Uppfattat sparar versionen. Bara ett kort åt gången: välkomst, ny roll, nyheter.
+- Styrelsens funktioner styrs av rollens rätt till styrelsens material (`STYRHANDLINGAR`), inte av skrivrätten till bokföringen. Bokföringen är oförändrad.
+- Styrelsen börjar i översikten; den som bara är revisor börjar i rapporterna.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
