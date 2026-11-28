@@ -127,3 +127,15 @@ test('Stockholms kravlista följer reglerna för 2026', () => {
   assert.ok(l.kallor.some((u) => u.includes('2026')));
   assert.match(K.kravlista('skatteverket').krav.find((k) => k[0] === 'fullfoljd')[2], /75 procent/);
 });
+
+test('filtyp för stadgar avgörs efter valet', () => {
+  assert.equal(K.stadgeFiltyp('Stadgar.docx', ''), 'docx');
+  assert.equal(K.stadgeFiltyp('Stadgar (antagen 2011).DOC', ''), 'doc');
+  assert.equal(K.stadgeFiltyp('stadgar', 'application/msword'), 'doc');
+  assert.equal(K.stadgeFiltyp('Stadgar.pdf', ''), 'pdf');
+  assert.equal(K.stadgeFiltyp('fil', 'application/pdf'), 'pdf');
+  assert.equal(K.stadgeFiltyp('stadgar.txt', ''), 'text');
+  assert.equal(K.stadgeFiltyp('stadgar.odt', ''), 'annan-text');
+  assert.equal(K.stadgeFiltyp('bild.jpg', 'image/jpeg'), 'okand');
+  assert.match(K.STADGEFILFEL.doc, /spara som \.docx/);
+});
