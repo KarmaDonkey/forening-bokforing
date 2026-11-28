@@ -223,6 +223,14 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - AI-skydd och välkomst (från 1.83): alla AI-uppdrag säger att innehållet är data, inte instruktioner (`AI_SKYDD`); `misstankInstruktion` varnar för underlag och stadgefiler med text som liknar instruktioner till AI. AI har inga verktyg och allt den ger är förslag som en person godkänner. Välkomstkort i översikten med rollanpassad genomgång (Visa mig, Påminn mig senare om tre dagar, Nej tack), som kan startas igen från Min sida och Om Plätt.
 - Närvaron (du själv med namn och roll och de andra som har appen öppen) ligger längst ner i sidomenyn på dator och i toppfältet på telefon.
 
+## Kommentarer och utskick (från version 1.84)
+
+- Kommentarer på uppgifter, möten och ärenden (`styr.kommentarer`, `laggTillKommentar`, `kommentarerFor`). @namn nämner någon, och nya kommentarer till dig (omnämnanden och kommentarer på dina uppgifter) syns under Väntar på dig tills du markerar dem som lästa.
+- Djuplänkar `#uppgift=id`, `#mote=id`, `#arende=id` öppnar appen vid saken. "Kopiera länk till WhatsApp" ger en kort text med länken. Ingen egen chatt: WhatsApp-gruppen används för snabba samtal.
+- Fliken Utskick: mallar (Välkommen till styrelsen, Inför årsmötet, eget meddelande) med mottagare och redigering, skickas med Graph eller mailto med bcc, och en kort version till WhatsApp.
+- Påminnelsen "Det här väntar på dig": ett mejl per person (nya kommentarer sedan förra påminnelsen, underskrifter, uppgifter med försenade först, nästa möte). Bara systemadministratören, och om admin slår på det även ordföranden och kassören. Aldrig automatiskt; utskicket loggas i `styr.utskick`.
+- Fråga Plätt har guldfärgen. En knapp i svaret stänger chatten på mobilen (samtalet sparas), på datorn står den kvar.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.

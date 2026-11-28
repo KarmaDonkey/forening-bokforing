@@ -303,7 +303,9 @@
   .kontakt-text span, .kontakt-lankar a { font-size: 13.5px; overflow-wrap: anywhere; }
   .kontakt-lankar { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
   .kontakt-anteckning { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid rgba(55, 63, 81, 0.25); border-radius: 8px; padding: 8px 10px; width: 100%; }
-  .fraga-platt { position: fixed; right: 20px; bottom: 20px; z-index: 46; display: inline-flex; align-items: center; gap: 6px; padding: 11px 18px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-text); font: inherit; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.18); cursor: pointer; }
+  .fraga-platt { position: fixed; right: 20px; bottom: 20px; z-index: 46; display: inline-flex; align-items: center; gap: 6px; padding: 11px 18px; border: 0; border-radius: 999px; background: var(--guld); color: #2B2F3A; font: inherit; font-weight: 700; box-shadow: 0 4px 16px rgba(0,0,0,.18); cursor: pointer; }
+  .fraga-platt:hover { filter: brightness(1.06); }
+  .hc-stjarna { color: var(--guld); }
   .fraga-platt[hidden], .hjalp-chatt[hidden], .at-lista[hidden] { display: none; }
   .hjalp-chatt { position: fixed; right: 20px; bottom: 20px; z-index: 47; width: min(400px, calc(100vw - 40px)); height: min(560px, calc(100vh - 40px)); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,.25); overflow: hidden; }
   .hc-huvud { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--hairline); }
@@ -327,7 +329,7 @@
   .rundtur h3 { margin: 2px 0 4px; font-size: 16px; text-transform: none; letter-spacing: 0; color: var(--ink); }
   .rundtur p { margin: 0 0 10px; font-size: 14.5px; }
   .rundtur-steg { font-size: 12px; color: var(--ink-soft); }
-  .kommentarer { margin-top: 6px; }
+  .kommentarer { margin-top: 6px; text-align: left; }
   .km-lista { display: flex; flex-direction: column; gap: 8px; }
   .km { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; background: var(--surface-2); border-radius: 10px; font-size: 14px; }
   .km-av { font-size: 12.5px; font-weight: 600; }
@@ -445,6 +447,8 @@
     .fraga-platt { bottom: calc(80px + env(safe-area-inset-bottom)); right: 14px; padding: 10px 14px; }
     .rundtur { bottom: calc(84px + env(safe-area-inset-bottom)); }
     table.kortlista tr.kommentar-rad td { display: block; text-align: left; }
+    table.kortlista tr.kommentar-rad td::before { display: none; }
+    .km-ny { padding-right: 58px; }
     .fraga-platt span { display: none; }
     .hjalp-chatt { left: 0; right: 0; bottom: 0; width: auto; height: 85vh; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); z-index: 48; }
     .sokfalt { flex: 1 1 100%; height: 44px; }
@@ -470,6 +474,7 @@
     table.kortlista td > * { text-align: right; }
     table.kortlista td[data-etikett]::before { content: attr(data-etikett); color: var(--ink-soft); font-size: 13px; text-align: left; flex: 0 0 auto; }
     table.kortlista td:not([data-etikett]) { display: block; text-align: left; }
+    table.kortlista tr.kommentar-rad td, table.kortlista tr.kommentar-rad td * { text-align: left; }
     table.kortlista input { width: 140px !important; }
     table.kortlista tr.total td { border-top: 0; }
     /* Fakturarader: en rad per fält. */
@@ -570,6 +575,7 @@ var VERSIONER = [
       'Kommentarer på uppgifter, möten och ärenden, med @namn för att nämna någon. Nya kommentarer till dig syns under Väntar på dig.',
       'Kopiera länk till WhatsApp: en kort text med en länk som öppnar appen precis vid uppgiften, mötet eller ärendet.',
       'Ny flik Utskick under Styrelsen: mallar för Välkommen till styrelsen, Inför årsmötet och eget meddelande, med mottagare, förhandsgranskning och kort version till WhatsApp.',
+      'Fråga Plätt har fått Plätts guldfärg. När du trycker på en knapp i svaret på mobilen stängs chatten så att du ser sidan; tryck på Fråga Plätt igen så finns samtalet kvar.',
       'Påminnelse "Det här väntar på dig": ett mejl per person med nya kommentarer, underskrifter, uppgifter och nästa möte, bara till dem som har något. Systemadministratören skickar, och kan ge ordföranden och kassören samma möjlighet.'
     ]
   },
@@ -6769,7 +6775,7 @@ var VERSIONER = [
     knapp.hidden = !Object.keys(store.ar || {}).length || !K.aiHjalpPa(store.forening) || chatt.oppen || !!rundtur;
     el.hidden = !chatt.oppen;
     if (!chatt.oppen) return;
-    var html = '<div class="hc-huvud"><strong>✦ Fråga Plätt</strong><button class="btn btn-secondary btn-small" data-action="hjalp-chatt-stang" aria-label="Stäng">×</button></div><div class="hc-meddelanden" id="hcMeddelanden">';
+    var html = '<div class="hc-huvud"><strong><span class="hc-stjarna">✦</span> Fråga Plätt</strong><button class="btn btn-secondary btn-small" data-action="hjalp-chatt-stang" aria-label="Stäng">×</button></div><div class="hc-meddelanden" id="hcMeddelanden">';
     if (!chatt.historik.length) html += '<div class="hc-plats"><p>Fråga om appen, bokföringen eller föreningen. Till exempel:</p><ul>' +
       ['Vi ska ha årsmöte, vad behöver jag tänka på?', 'Hur skriver jag ut ett kvitto till en medlem?', 'Hur bokför jag en faktura för lokalhyra?'].map(function (q) {
         return '<li><button class="lank-text" data-action="hjalp-exempel">' + esc(q) + '</button></li>'; }).join('') + '</ul></div>';
@@ -13756,7 +13762,15 @@ var VERSIONER = [
       if (g[0] === 'bokforing' && !senastIGrupp.bokforing && lasLage()) vy = 'rapporter';
       meddelande = null; render(); window.scrollTo(0, 0); return;
     }
-    if (t.dataset.vy) { vy = t.dataset.vy; meddelande = null; render(); return; }
+    if (t.dataset.vy) {
+      // En knapp i Fråga Plätt: på mobilen täcker chatten skärmen, så den stängs (samtalet sparas) och sidan visas från början.
+      if (t.closest('#hjalpChatt')) {
+        valdMedlem = null; oppenVer = null;
+        if (window.matchMedia('(max-width: 700px)').matches) { chatt.oppen = false; ritaChatt(); }
+        vy = t.dataset.vy; meddelande = null; render(); window.scrollTo(0, 0); return;
+      }
+      vy = t.dataset.vy; meddelande = null; render(); return;
+    }
     if (t.dataset.rapport) { rapportVy = t.dataset.rapport; render(); return; }
     if (t.dataset.ver && !t.dataset.action) { var nr = Number(t.dataset.ver); oppenVer = oppenVer === nr ? null : nr; render(); return; }
     var handling = HANDLINGAR[t.dataset.action];
