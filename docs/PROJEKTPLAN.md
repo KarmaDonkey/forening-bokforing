@@ -231,6 +231,12 @@ Målet är att använda verktyget på riktigt för bokslutet 2026, alltså faser
 - Påminnelsen "Det här väntar på dig": ett mejl per person (nya kommentarer sedan förra påminnelsen, underskrifter, uppgifter med försenade först, nästa möte). Bara systemadministratören, och om admin slår på det även ordföranden och kassören. Aldrig automatiskt; utskicket loggas i `styr.utskick`.
 - Fråga Plätt har guldfärgen. En knapp i svaret stänger chatten på mobilen (samtalet sparas), på datorn står den kvar.
 
+## Föreningskonton och avsändaradress (från version 1.85)
+
+- Inloggning med jobb- eller skolkonton (Microsoft 365) som tillval: `od.kontotyp = 'forening'` ger auktoriteten `organizations` (`odAuktoritet`), annars `consumers` som tidigare. Appregistreringen måste tillåta båda kontotyperna (Supported account types); guiden finns under Inställningar, OneDrive. Microsofts felkoder översätts av `inloggningsfelText`.
+- Föreningens avsändaradress: en separat inloggning (`avsandare` i localStorage, bara på enheten) med enbart `Mail.Send User.Read offline_access`. Utskick och påminnelser skickas därifrån när den finns. Utkastet sparas i sessionStorage medan man loggar in. En webbapp får vara inloggad ett dygn i taget, så man loggar ofta in igen inför ett utskick.
+- Kommentarer, påminnelser och utskick fungerar även för styrelseledamöter som bara har läsrätt till bokföringen.
+
 ## Kommande
 
 - Inga beslutade versioner. Förslag: stadgeändringar enligt listan under Öppna frågor.
